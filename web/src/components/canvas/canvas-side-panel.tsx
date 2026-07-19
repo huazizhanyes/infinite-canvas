@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Empty, Input, Select, Tag } from "antd";
-import { ChevronRight, FileText, Image as ImageIcon, Music2, Search, Settings2, Square, Type, Video } from "lucide-react";
+import { BookOpenText, ChevronRight, FileText, Image as ImageIcon, Music2, Search, Settings2, Square, Type, Video } from "lucide-react";
 
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
@@ -27,6 +27,7 @@ const NODE_TYPE_ICON: Record<string, typeof Square> = {
     [CanvasNodeType.Text]: Type,
     [CanvasNodeType.Config]: Settings2,
     [CanvasNodeType.Group]: Square,
+    [CanvasNodeType.ScriptSet]: BookOpenText,
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -71,6 +72,7 @@ const NODE_FILTER_OPTIONS = [
     { label: "音频", value: CanvasNodeType.Audio },
     { label: "配置", value: CanvasNodeType.Config },
     { label: "分组", value: CanvasNodeType.Group },
+    { label: "剧本集", value: CanvasNodeType.ScriptSet },
 ];
 
 function nodePreviewText(node: CanvasNodeData) {

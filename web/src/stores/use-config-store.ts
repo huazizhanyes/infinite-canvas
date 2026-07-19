@@ -33,6 +33,7 @@ export type AiConfig = {
     textModel: string;
     audioModel: string;
     audioVoice: string;
+    audioVoiceName: string;
     audioFormat: string;
     audioSpeed: string;
     audioInstructions: string;
@@ -55,7 +56,7 @@ export type WebdavSyncConfig = {
     directory: string;
     lastSyncedAt: string;
 };
-export type ConfigTabKey = "channels" | "preferences" | "webdav";
+export type ConfigTabKey = "channels" | "preferences";
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 const CHANNEL_MODEL_SEPARATOR = "::";
@@ -88,6 +89,7 @@ export const defaultConfig: AiConfig = {
     textModel: "default::gpt-5.5",
     audioModel: "default::gpt-4o-mini-tts",
     audioVoice: "alloy",
+    audioVoiceName: "Alloy",
     audioFormat: "mp3",
     audioSpeed: "1",
     audioInstructions: "",
@@ -222,6 +224,7 @@ export const useConfigStore = create<ConfigStore>()(
                         textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
                         audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
                         audioVoice: config.audioVoice || defaultConfig.audioVoice,
+                        audioVoiceName: config.audioVoiceName || "",
                         audioFormat: config.audioFormat || defaultConfig.audioFormat,
                         audioSpeed: config.audioSpeed || defaultConfig.audioSpeed,
                         audioInstructions: config.audioInstructions || "",

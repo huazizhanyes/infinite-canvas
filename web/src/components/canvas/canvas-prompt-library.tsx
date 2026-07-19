@@ -3,12 +3,15 @@ import { Button, Tooltip } from "antd";
 import { BookOpen } from "lucide-react";
 
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
+import { SHOW_PROMPT_LIBRARY_UI } from "@/constant/env";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 
 export function CanvasPromptLibrary({ onSelect }: { onSelect: (prompt: string) => void }) {
     const [open, setOpen] = useState(false);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+
+    if (!SHOW_PROMPT_LIBRARY_UI) return null;
 
     return (
         <>

@@ -4,11 +4,13 @@ import { Button, Switch, Tooltip } from "antd";
 import { motion } from "motion/react";
 
 import { CanvasLocalAgentPanel } from "@/components/canvas/canvas-local-agent-panel";
+import { CanvasBackendAgentPanel } from "@/components/canvas/canvas-backend-agent-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { CANVAS_AGENT_PANEL_MOTION_MS, useAgentStore } from "@/stores/use-agent-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
+const BACKEND_AGENT = import.meta.env.VITE_CANVAS_AGENT_MODE === "backend";
 
 export function AgentPanel() {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -67,20 +69,22 @@ export function AgentPanel() {
                         </span>
                         <div className="min-w-0">
                             <div className="text-base font-semibold leading-5">Agent</div>
-                            <div className="truncate text-xs" style={{ color: theme.node.muted }}>全站助手</div>
+                            <div className="truncate text-xs" style={{ color: theme.node.muted }}>{BACKEND_AGENT ? "画布助手" : "全站助手"}</div>
                         </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                        <label className="flex items-center gap-1.5 text-xs" style={{ color: theme.node.muted }}>
-                            <Switch size="small" checked={confirmTools} onChange={(confirmTools) => setAgentState({ confirmTools })} />
-                            工具确认
-                        </label>
+                        {!BACKEND_AGENT ? (
+                            <label className="flex items-center gap-1.5 text-xs" style={{ color: theme.node.muted }}>
+                                <Switch size="small" checked={confirmTools} onChange={(confirmTools) => setAgentState({ confirmTools })} />
+                                工具确认
+                            </label>
+                        ) : null}
                         <Tooltip title="收起对话">
                             <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={{ color: theme.node.muted }} icon={<PanelRightClose className="size-4" />} onClick={closePanel} />
                         </Tooltip>
                     </div>
                 </header>
-                <CanvasLocalAgentPanel embedded />
+                {BACKEND_AGENT ? <CanvasBackendAgentPanel /> : <CanvasLocalAgentPanel embedded />}
             </motion.aside>
         </motion.div>
     );

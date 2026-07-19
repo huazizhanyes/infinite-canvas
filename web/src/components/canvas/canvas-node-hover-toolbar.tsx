@@ -21,7 +21,7 @@ type CanvasNodeHoverToolbarProps = {
     onDecreaseFont: (node: CanvasNodeData) => void;
     onIncreaseFont: (node: CanvasNodeData) => void;
     onToggleDialog: (node: CanvasNodeData) => void;
-    onGenerateImage: (node: CanvasNodeData) => void;
+    onGenerateMedia?: (node: CanvasNodeData, mode: "image" | "audio" | "video") => void;
     onUpload: (node: CanvasNodeData) => void;
     onDownload: (node: CanvasNodeData) => void;
     onSaveAsset: (node: CanvasNodeData) => void;
@@ -59,7 +59,7 @@ export function CanvasNodeHoverToolbar({
     onDecreaseFont,
     onIncreaseFont,
     onToggleDialog,
-    onGenerateImage,
+    onGenerateMedia,
     onUpload,
     onDownload,
     onSaveAsset,
@@ -81,6 +81,7 @@ export function CanvasNodeHoverToolbar({
     const [draftImageToolIds, setDraftImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
     const [draftShowImageToolLabels, setDraftShowImageToolLabels] = useState(true);
     const [imageToolSettingsOpen, setImageToolSettingsOpen] = useState(false);
+    const [mediaMenuOpen, setMediaMenuOpen] = useState(false);
     const { message } = App.useApp();
     const copyText = useCopyText();
 
@@ -99,6 +100,7 @@ export function CanvasNodeHoverToolbar({
 
     useEffect(() => {
         setImageToolSettingsOpen(false);
+        setMediaMenuOpen(false);
     }, [node?.id]);
 
     if (!node) return null;
@@ -142,9 +144,9 @@ export function CanvasNodeHoverToolbar({
         ...(canRetry ? [{ id: "retry", title: "重新生成", label: "重试", icon: <RefreshCw className="size-4" />, onClick: () => onRetry(node) }] : []),
         ...(hasImage || hasVideo || isText ? [{ id: "saveAsset", title: "加入我的资产", label: "存资产", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
         ...(hasImage || hasVideo || hasAudio ? [{ id: "download", title: hasAudio ? "下载音频" : hasVideo ? "下载视频" : "下载图片", label: "下载", icon: <Download className="size-4" />, onClick: () => onDownload(node) }] : []),
-        ...(canOpenDialog ? [{ id: "edit", title: "编辑", label: "编辑", icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
-        ...(isText ? [{ id: "editText", title: "编辑文本", label: "编辑文字", icon: <Pencil className="size-4" />, onClick: () => onEditText(node) }] : []),
-        ...(isText ? [{ id: "generateImage", title: "用文本生图", label: "生图", icon: <ImageIcon className="size-4" />, onClick: () => onGenerateImage(node) }] : []),
+        ...(canOpenDialog ? [{ id: "edit", title: isText ? "打开 AI 文本处理" : "编辑", label: isText ? "AI处理" : "编辑", icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
+        ...(isText ? [{ id: "editText", title: "编辑文本内容", label: "编辑内容", icon: <Pencil className="size-4" />, onClick: () => onEditText(node) }] : []),
+        ...(isText ? [{ id: "generateMedia", title: "从文本生成媒体", label: "生成媒体", icon: <ImageIcon className="size-4" />, active: mediaMenuOpen, onClick: () => setMediaMenuOpen((current) => !current) }] : []),
         ...(isConfig ? [{ id: "config", title: "生成配置", label: "生成配置", icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "decreaseFont", title: "减小字号", label: "缩小", icon: <Minus className="size-4" />, onClick: () => onDecreaseFont(node) }] : []),
         ...(isText ? [{ id: "increaseFont", title: "增大字号", label: "放大", icon: <Plus className="size-4" />, onClick: () => onIncreaseFont(node) }] : []),
@@ -193,6 +195,11 @@ export function CanvasNodeHoverToolbar({
                 {toolbarTools.map((tool) => (
                     <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} />
                 ))}
+                {isText && mediaMenuOpen ? <div className="absolute bottom-[52px] right-0 z-40 min-w-[150px] rounded-xl border border-black/10 bg-white p-1.5 text-sm shadow-xl">
+                    <button type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-[#f0f0f1]" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "image"); }}><ImageIcon className="size-4" />图片</button>
+                    <button type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-[#f0f0f1]" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "audio"); }}><Music2 className="size-4" />配音</button>
+                    <button type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-[#f0f0f1]" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "video"); }}><Video className="size-4" />视频</button>
+                </div> : null}
                 {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} /> : null}
             </div>
             {hasImage ? (

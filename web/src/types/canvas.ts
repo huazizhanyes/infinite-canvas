@@ -16,6 +16,9 @@ export enum CanvasNodeType {
     Video = "video",
     Audio = "audio",
     Group = "group",
+    ScriptSet = "script-set",
+    Storyboard = "storyboard",
+    StoryboardGrid = "storyboard-grid",
 }
 
 // 节点类型放开为字符串,内置类型用 CanvasNodeType,插件类型为 "<pluginId>:<name>"
@@ -24,6 +27,24 @@ export type CanvasNodeTypeId = CanvasNodeType | (string & {});
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
+export type CanvasTextOperation = "continue" | "polish" | "expand" | "shorten" | "summarize" | "translate" | "custom";
+export type StoryboardGridStatus = "idle" | "planning" | "draft" | "generating" | "partial" | "complete" | "error";
+export type StoryboardGridShot = {
+    id: string;
+    slot: number;
+    title: string;
+    shotSize: string;
+    cameraAngle: string;
+    cameraMovement: string;
+    durationSec: number;
+    visualDescription: string;
+    characterAction: string;
+    dialogue: string;
+    continuity: string;
+    imagePrompt: string;
+    imageNodeId?: string;
+};
+export type StoryboardGridPlan = { title: string; scene: string; visualBible: string; shots: StoryboardGridShot[] };
 
 export type CanvasNodeMetadata = {
     content?: string;
@@ -43,6 +64,7 @@ export type CanvasNodeMetadata = {
     generateAudio?: string;
     watermark?: string;
     audioVoice?: string;
+    audioVoiceName?: string;
     audioFormat?: string;
     audioSpeed?: string;
     audioInstructions?: string;
@@ -60,7 +82,36 @@ export type CanvasNodeMetadata = {
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
+    sourceType?: "upload" | "tts";
+    audioTaskId?: string;
+    audioEngine?: "speech" | "voxcpm2";
+    voiceId?: number;
+    characterCount?: number;
     groupId?: string;
+    scriptSetId?: string;
+    scriptSetNodeId?: string;
+    scriptAssetId?: string;
+    scriptVariantId?: string;
+    storyboardId?: string;
+    storyboardNodeId?: string;
+    scriptAssetImageId?: string;
+    scriptAssetImageTaskId?: string;
+    scriptAssetGroupType?: "character" | "scene" | "prop";
+    sourceNodeId?: string;
+    sourceOperation?: CanvasTextOperation;
+    sourceScope?: "full" | "selection";
+    generationRequestId?: string;
+    storyboardGridPlan?: StoryboardGridPlan;
+    storyboardGridStatus?: StoryboardGridStatus;
+    storyboardGridAspectRatio?: "16:9" | "9:16" | "1:1";
+    storyboardGridVisualStyle?: string;
+    storyboardGridSourceSnapshot?: string;
+    storyboardGridBatchRootId?: string;
+    storyboardGridImageGroupId?: string;
+    storyboardGridNodeId?: string;
+    storyboardGridShotId?: string;
+    storyboardGridSlot?: number;
+    storyboardGridUpdatedAt?: number;
 };
 
 export type CanvasNodeData = {

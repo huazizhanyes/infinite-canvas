@@ -207,7 +207,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                                         <Input
                                             type="number"
                                             min={1}
-                                            max={15}
+                                            max={5}
                                             value={config.canvasImageCount}
                                             onChange={(event) => updateConfig("canvasImageCount", event.target.value)}
                                             onBlur={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value))}
@@ -284,7 +284,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                             </Form>
                         ),
                     },
-                ]}
+                ].filter((item) => item.key !== "webdav")}
             />
             {showDoneButton ? (
                 <div className="mt-4 flex justify-end">
@@ -307,7 +307,7 @@ export function AppConfigModal() {
             title={
                 <div>
                     <div className="text-lg font-semibold">配置与用户偏好</div>
-                    <div className="mt-1 text-xs font-normal text-stone-500">渠道聚合、默认模型和同步偏好</div>
+                    <div className="mt-1 text-xs font-normal text-stone-500">渠道聚合和默认模型偏好</div>
                 </div>
             }
             open={isConfigOpen}
@@ -347,7 +347,7 @@ function pickDefaultModel(config: AiConfig, capability: ModelCapability, current
 }
 
 function normalizeImageCount(value: string) {
-    return String(Math.max(1, Math.min(15, Math.floor(Math.abs(Number(value)) || 3))));
+    return String(Math.max(1, Math.min(5, Math.floor(Math.abs(Number(value)) || 3))));
 }
 
 function apiFormatLabel(apiFormat: ApiCallFormat) {

@@ -7,6 +7,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
+import { useUserStore } from '@/stores/use-user-store'
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -72,6 +73,8 @@ type ImageApiResponse = {
     error?: { message?: string };
     code?: number;
     msg?: string;
+    task_id?: string;
+    status?: string;
 };
 type GeminiPart = {
     text?: string;
@@ -250,6 +253,42 @@ function parseImagePayload(payload: ImageApiResponse) {
     }
 
     return images;
+}
+
+const IMAGE_TASK_POLL_INTERVAL = 3000;
+const IMAGE_TASK_TIMEOUT = 10 * 60 * 1000;
+const IMAGE_TASK_TERMINAL_STATUSES = new Set(["success", "partial_success", "failed"]);
+
+async function resolveAsyncImagePayload(config: AiConfig, payload: ImageApiResponse, signal?: AbortSignal) {
+    if (!payload.task_id) return payload;
+    const deadline = Date.now() + IMAGE_TASK_TIMEOUT;
+    while (Date.now() < deadline) {
+        await waitForImageTaskPoll(IMAGE_TASK_POLL_INTERVAL, signal);
+        const response = await axios.get<ImageApiResponse>(aiApiUrl(config, `/tasks/${encodeURIComponent(payload.task_id)}`), {
+            headers: aiHeaders(config),
+            signal,
+        });
+        const task = response.data;
+        if (!IMAGE_TASK_TERMINAL_STATUSES.has(task.status || "")) continue;
+        if (task.status === "failed") throw new Error(task.error?.message || "图片生成失败");
+        return task;
+    }
+    throw new Error("图片生成等待超时，任务仍在后台处理中");
+}
+
+function waitForImageTaskPoll(delay: number, signal?: AbortSignal) {
+    if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+    return new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+        }, delay);
+        const onAbort = () => {
+            window.clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+    });
 }
 
 function readAxiosError(error: unknown, fallback: string) {
@@ -440,6 +479,13 @@ async function requestStreamingResponse(config: AiConfig, body: Record<string, u
         signal: options?.signal,
     });
     if (!response.ok) throw new Error(await readFetchError(response, "请求失败"));
+    if (!response.headers.get("content-type")?.includes("text/event-stream")) {
+        const payload = (await response.json()) as ResponseApiPayload;
+        validateResponsePayload(payload);
+        const result = parseToolResponse(payload);
+        if (result.content) onDelta?.(result.content);
+        return result;
+    }
     if (!response.body) {
         const payload = (await response.json()) as ResponseApiPayload;
         validateResponsePayload(payload);
@@ -655,9 +701,9 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 }
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const requestConfig = resolveModelRequestConfig(config, config.imageModel || config.model);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    const script = resolveModelScript(config, config.model || config.imageModel);
+    const script = resolveModelScript(config, config.imageModel || config.model);
     if (script) {
         const quality = normalizeQuality(config.quality);
         const requestSize = resolveRequestSize(quality, config.size);
@@ -702,7 +748,8 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 signal: options?.signal,
             },
         );
-        const images = parseImagePayload(response.data);
+        const payload = await resolveAsyncImagePayload(requestConfig, response.data, options?.signal);
+        const images = parseImagePayload(payload);
         return images;
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
@@ -710,10 +757,10 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const requestConfig = resolveModelRequestConfig(config, config.imageModel || config.model);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
-    const script = resolveModelScript(config, config.model || config.imageModel);
+    const script = resolveModelScript(config, config.imageModel || config.model);
     if (script) {
         const quality = normalizeQuality(config.quality);
         const requestSize = resolveRequestSize(quality, config.size);
@@ -761,7 +808,8 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 
     try {
         const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
-        const images = parseImagePayload(response.data);
+        const payload = await resolveAsyncImagePayload(requestConfig, response.data, options?.signal);
+        const images = parseImagePayload(payload);
         return images;
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
@@ -769,8 +817,8 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
-    const script = resolveModelScript(config, config.model || config.textModel);
+    const requestConfig = resolveModelRequestConfig(config, config.textModel || config.model);
+    const script = resolveModelScript(config, config.textModel || config.model);
     if (script) {
         try {
             const answer = await runModelPlugin<string>({
@@ -794,10 +842,15 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
             if (answer === "没有返回内容") onDelta(answer);
             return answer;
         }
+        const assetConnection = useUserStore.getState().connection;
+        const usesCanvasBilling = !!assetConnection
+            && requestConfig.baseUrl.replace(/\/+$/, "") === assetConnection.canvasBaseUrl.replace(/\/+$/, "");
         const answer = (await requestStreamingResponse(requestConfig, {
             model: requestConfig.model,
             input: toResponseInput(withSystemMessage(requestConfig, messages)),
+            ...(usesCanvasBilling ? { request_id: nanoid() } : {}),
         }, onDelta, options)).content || "没有返回内容";
+        if (usesCanvasBilling) void useUserStore.getState().loadAssets()
         if (answer === "没有返回内容") onDelta(answer);
         return answer;
     } catch (error) {

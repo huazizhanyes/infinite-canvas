@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Group, Image as ImageIcon, Music2, Puzzle, RefreshCw, Star, Video } from "lucide-react";
+import { ChevronRight, Group, Image as ImageIcon, Music2, Puzzle, RefreshCw, Search, Star, Video, X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -47,11 +47,12 @@ type CanvasNodeProps = {
     onConnectStart: (event: React.MouseEvent, nodeId: string, handleType: "source" | "target") => void;
     onResize: (nodeId: string, width: number, height: number, position?: Position) => void;
     onContentChange: (nodeId: string, content: string) => void;
+    onTextSelectionChange?: (nodeId: string, selectedText: string) => void;
+    onOpenPanel?: (nodeId: string) => void;
     onTitleChange: (nodeId: string, title: string) => void;
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
-    onGenerateImage?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
@@ -69,10 +70,11 @@ type NodeContentRendererProps = {
     renderNodeContent?: (node: CanvasNodeData) => ReactNode;
     pluginContext?: CanvasNodeContext | null;
     onContentChange: (nodeId: string, content: string) => void;
+    onTextSelectionChange?: (nodeId: string, selectedText: string) => void;
+    onOpenPanel?: (nodeId: string) => void;
     onStopEditing: () => void;
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
-    onGenerateImage?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
     groupChildCount: number;
@@ -109,11 +111,12 @@ export const CanvasNode = React.memo(function CanvasNode({
     onConnectStart,
     onResize,
     onContentChange,
+    onTextSelectionChange,
+    onOpenPanel,
     onTitleChange,
     onToggleBatch,
     onSetBatchPrimary,
     onRetry,
-    onGenerateImage,
     onViewImage,
     onContextMenu,
 }: CanvasNodeProps) {
@@ -128,7 +131,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
     const isGroup = data.type === CanvasNodeType.Group;
-    const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
+    const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1 && !data.metadata?.storyboardGridNodeId;
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const imageBorderColor = isActive ? selectionBlue : isRelated && !isBatchChild ? theme.node.muted : "transparent";
@@ -396,9 +399,10 @@ export const CanvasNode = React.memo(function CanvasNode({
                         pluginContext={pluginContext}
                         mentionReferences={mentionReferences}
                         onContentChange={onContentChange}
+                        onTextSelectionChange={onTextSelectionChange}
+                        onOpenPanel={onOpenPanel}
                         onStopEditing={() => setIsEditingContent(false)}
                         onRetry={onRetry}
-                        onGenerateImage={onGenerateImage}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
                         onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
                         groupChildCount={groupChildCount}
@@ -430,7 +434,7 @@ function NodeContent(props: NodeContentRendererProps) {
     if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
-    const Renderer = nodeContentRenderers[props.node.type as CanvasNodeType];
+    const Renderer = nodeContentRenderers[props.node.type as keyof typeof nodeContentRenderers];
     if (Renderer) return <Renderer {...props} />;
 
     // 插件节点:有注册渲染器则渲染,否则展示缺少插件占位
@@ -449,7 +453,7 @@ const nodeContentRenderers = {
     [CanvasNodeType.Video]: VideoNodeContent,
     [CanvasNodeType.Audio]: AudioNodeContent,
     [CanvasNodeType.Group]: GroupNodeContent,
-} satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
+} satisfies Partial<Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>>;
 
 function GroupNodeContent({ node, theme, groupChildCount }: NodeContentRendererProps) {
     return (
@@ -508,40 +512,49 @@ function MissingPluginContent({ theme, type }: Pick<NodeContentRendererProps, "t
     );
 }
 
-function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onGenerateImage }: NodeContentRendererProps) {
+function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onTextSelectionChange, onOpenPanel, onStopEditing }: NodeContentRendererProps) {
     const fontSize = node.metadata?.fontSize || 14;
     const textStyle = { fontSize: `${fontSize}px`, lineHeight: `${Math.round(fontSize * 1.65)}px`, color: theme.node.text, boxSizing: "border-box" } as React.CSSProperties;
+    const [findReplaceOpen, setFindReplaceOpen] = useState(false);
+    const [findText, setFindText] = useState("");
+    const [replaceText, setReplaceText] = useState("");
+    const content = node.metadata?.content || "";
+    const replaceAll = () => {
+        if (!findText) return;
+        onContentChange(node.id, content.split(findText).join(replaceText));
+    };
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden pt-8">
-            <button
-                type="button"
-                className="absolute right-3 top-3 z-20 inline-flex h-8 items-center gap-1 rounded-full border px-2.5 text-xs font-medium opacity-85 backdrop-blur-md transition hover:scale-[1.02] hover:opacity-100"
-                style={{ background: `${theme.toolbar.panel}dd`, borderColor: theme.node.stroke, color: theme.node.text }}
-                onClick={(event) => {
-                    event.stopPropagation();
-                    onGenerateImage?.(node);
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-                title="用文本生图"
-                aria-label="用文本生图"
-            >
-                <ImageIcon className="size-3.5" />
-                生图
-            </button>
             {isEditingContent ? (
                 <CanvasResourceMentionTextarea
                     ref={textareaRef}
-                    className="thin-scrollbar block h-full w-full resize-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent pl-4 pr-14 pt-0 pb-4 m-0 font-mono outline-none select-text appearance-none"
+                    className="thin-scrollbar block h-full w-full resize-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent pl-4 pr-14 pt-0 pb-8 m-0 font-mono outline-none select-text appearance-none"
                     style={textStyle}
                     value={node.metadata?.content || ""}
                     references={mentionReferences}
                     highlightLabels={false}
                     onChange={(value) => onContentChange(node.id, value)}
+                    onSelect={(event) => {
+                        const target = event.currentTarget;
+                        onTextSelectionChange?.(node.id, target.value.slice(target.selectionStart, target.selectionEnd));
+                    }}
+                    onKeyUp={(event) => {
+                        const target = event.currentTarget;
+                        onTextSelectionChange?.(node.id, target.value.slice(target.selectionStart, target.selectionEnd));
+                    }}
                     onBlur={onStopEditing}
                     onKeyDown={(event) => {
                         if (event.key === "Escape") onStopEditing();
+                        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                            event.preventDefault();
+                            onOpenPanel?.(node.id);
+                            onStopEditing();
+                        }
+                        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+                            event.preventDefault();
+                            setFindReplaceOpen(true);
+                        }
                     }}
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
@@ -549,13 +562,23 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                 />
             ) : (
                 <div
-                    className="thin-scrollbar block h-full w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-14 pt-0 pb-4 font-mono"
+                    className="thin-scrollbar block h-full w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-14 pt-0 pb-8 font-mono"
                     style={textStyle}
                     onWheel={(event) => event.stopPropagation()}
                 >
-                    {node.metadata?.content || <span style={{ color: theme.node.placeholder }}>双击编辑文字</span>}
+                    {content || <span style={{ color: theme.node.placeholder }}>双击编辑文字</span>}
                 </div>
             )}
+            <div className="pointer-events-auto absolute bottom-1 left-3 right-3 flex items-center gap-2 text-[10px] opacity-60" style={{ color: theme.node.muted }}>
+                <span>{content.length} 字 · {content ? content.split(/\r?\n/).length : 0} 行</span>
+                {isEditingContent ? <button type="button" className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-white/10" onClick={() => setFindReplaceOpen((value) => !value)}><Search className="size-3" />查找替换</button> : null}
+            </div>
+            {findReplaceOpen ? <div className="absolute bottom-7 left-3 right-3 z-30 flex items-center gap-1 rounded-lg border p-1.5 text-xs shadow-lg" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                <input value={findText} onChange={(event) => setFindText(event.target.value)} placeholder="查找" className="min-w-0 flex-1 rounded border bg-transparent px-2 py-1 outline-none" />
+                <input value={replaceText} onChange={(event) => setReplaceText(event.target.value)} placeholder="替换为" className="min-w-0 flex-1 rounded border bg-transparent px-2 py-1 outline-none" />
+                <button type="button" className="rounded px-2 py-1 hover:bg-white/10" onClick={replaceAll}>全部替换</button>
+                <button type="button" className="grid size-6 place-items-center rounded hover:bg-white/10" onClick={() => setFindReplaceOpen(false)} aria-label="关闭查找替换"><X className="size-3.5" /></button>
+            </div> : null}
         </div>
     );
 }
@@ -634,14 +657,14 @@ function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-2" style={{ color: theme.node.placeholder }}>
                 <Music2 className="size-7 opacity-35" />
-                <span className="text-sm">空音频节点</span>
+                <span className="text-sm">{node.metadata?.sourceType === "tts" ? "输入文本开始配音" : "空音频节点"}</span>
             </div>
         );
     return (
         <div className="flex h-full w-full flex-col justify-center gap-3 px-4" style={{ background: theme.node.fill, color: theme.node.text }}>
             <div className="flex min-w-0 items-center gap-2 text-sm opacity-70">
                 <Music2 className="size-4 shrink-0" />
-                <span className="truncate">音频</span>
+                <span className="truncate">{node.metadata?.sourceType === "tts" ? (node.metadata.audioEngine ? `${node.metadata.audioEngine === "voxcpm2" ? "VoxCPM2" : "Speech"} 配音` : "生成音频") : "上传音频"}</span>
             </div>
             <audio src={node.metadata.content} controls className="w-full" data-canvas-no-zoom />
         </div>

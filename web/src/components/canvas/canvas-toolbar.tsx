@@ -1,12 +1,14 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Button, Segmented, Switch } from "antd";
-import { CircleDot, Eraser, Grid2x2, Group, Hand, Image as ImageIcon, Info, Moon, Music2, Palette, Puzzle, Redo2, Settings2, Square, Sun, Trash2, Type, Undo2, Upload, Video } from "lucide-react";
+import { BookOpenText, CircleDot, Clapperboard, Eraser, Grid2x2, Group, Hand, Image as ImageIcon, Info, LayoutGrid, Mic2, Moon, Palette, Puzzle, Redo2, Settings2, Square, Sun, Trash2, Type, Undo2, Upload, Video } from "lucide-react";
 
 import { canvasThemes, type CanvasBackgroundMode, type CanvasColorTheme, type CanvasTheme } from "@/lib/canvas-theme";
 import { getNodePluginId, listNodeDefinitions, useNodeRegistryVersion } from "@/lib/canvas/node-registry";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
+
+const SHOW_PLUGIN_UI = import.meta.env.VITE_SHOW_CANVAS_PLUGIN_UI !== "false";
 
 export function CanvasToolbar({
     selectedCount,
@@ -20,6 +22,9 @@ export function CanvasToolbar({
     onAddText,
     onAddConfig,
     onAddGroup,
+    onAddScriptSet,
+    onAddStoryboard,
+    onAddStoryboardGrid,
     onAddExtensionNode,
     onUndo,
     onRedo,
@@ -41,6 +46,9 @@ export function CanvasToolbar({
     onAddText: () => void;
     onAddConfig: () => void;
     onAddGroup: () => void;
+    onAddScriptSet: () => void;
+    onAddStoryboard: () => void;
+    onAddStoryboardGrid: () => void;
     onAddExtensionNode: (type: string) => void;
     onUndo: () => void;
     onRedo: () => void;
@@ -64,7 +72,7 @@ export function CanvasToolbar({
     const [extPanelX, setExtPanelX] = useState(0);
     // 扩展(插件)节点,随注册表变化实时更新
     useNodeRegistryVersion();
-    const extensionDefs = listNodeDefinitions().filter((def) => def.showInCreateMenu !== false && getNodePluginId(def.type) !== "builtin");
+    const extensionDefs = SHOW_PLUGIN_UI ? listNodeDefinitions().filter((def) => def.showInCreateMenu !== false && getNodePluginId(def.type) !== "builtin") : [];
     const dockStyle = { background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item, boxShadow: colorTheme === "dark" ? "0 18px 45px rgba(0,0,0,.32)" : "0 16px 40px rgba(28,25,23,.12)" };
     const hoverStyle = { background: theme.toolbar.itemHover, color: theme.toolbar.activeText };
     const activeStyle = { background: theme.toolbar.activeBg, color: theme.toolbar.activeText };
@@ -106,14 +114,23 @@ export function CanvasToolbar({
                 <ToolbarButton id="tool-video" label="视频" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddVideo}>
                     <Video className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-audio" label="音频" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddAudio}>
-                    <Music2 className="size-4.5" />
+                <ToolbarButton id="tool-audio" label="配音" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddAudio}>
+                    <Mic2 className="size-4.5" />
                 </ToolbarButton>
                 <ToolbarButton id="tool-config" label="生成配置" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddConfig}>
                     <Settings2 className="size-4.5" />
                 </ToolbarButton>
                 <ToolbarButton id="tool-group" label="组" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddGroup}>
                     <Group className="size-4.5" />
+                </ToolbarButton>
+                <ToolbarButton id="tool-script-set" label="剧本集" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddScriptSet}>
+                    <BookOpenText className="size-4.5" />
+                </ToolbarButton>
+                <ToolbarButton id="tool-storyboard" label="分镜脚本" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddStoryboard}>
+                    <Clapperboard className="size-4.5" />
+                </ToolbarButton>
+                <ToolbarButton id="tool-storyboard-grid" label="九宫格分镜" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddStoryboardGrid}>
+                    <LayoutGrid className="size-4.5" />
                 </ToolbarButton>
                 {extensionDefs.length ? (
                     <ToolbarButton
@@ -352,9 +369,10 @@ function toolLabel(id: string) {
     if (id === "tool-text") return "文本";
     if (id === "tool-image") return "图片";
     if (id === "tool-video") return "视频";
-    if (id === "tool-audio") return "音频";
+    if (id === "tool-audio") return "配音";
     if (id === "tool-config") return "生成配置";
     if (id === "tool-group") return "组";
+    if (id === "tool-script-set") return "剧本集";
     if (id === "tool-extensions") return "扩展节点";
     if (id === "tool-upload") return "上传资产";
     if (id === "tool-style") return "画布外观";

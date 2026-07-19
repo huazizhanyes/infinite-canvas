@@ -2,10 +2,46 @@ import axios from "axios";
 
 import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
-import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, decodeChannelModel, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
 
-type RequestOptions = { signal?: AbortSignal };
+type RequestOptions = {
+    signal?: AbortSignal;
+    onTaskCreated?: (task: { taskId: string; engine: "speech" | "voxcpm2"; voiceId: number; characterCount: number }) => void;
+};
+
+export type CanvasAudioVoice = {
+    id: number;
+    name: string;
+    displayName: string;
+    gender?: string;
+    age_group?: string;
+    language_type?: string;
+    style?: string;
+    description?: string;
+    avatar?: string;
+    preview_url: string;
+    source: string;
+    is_private: boolean;
+    isFavorite: boolean;
+    favoriteCategoryIds: number[];
+};
+
+export type CanvasVoiceFavoriteCategory = { id: number; name: string; isDefault: boolean; count: number };
+export type CanvasAudioVoiceList = { voices: CanvasAudioVoice[]; favoriteCategories: CanvasVoiceFavoriteCategory[]; favoriteCount: number };
+
+export type GeneratedAudioResult = {
+    blob?: Blob;
+    stableUrl?: string;
+    taskId?: string;
+    engine?: "speech" | "voxcpm2";
+    voiceId?: number;
+    format?: string;
+    characterCount?: number;
+    mimeType?: string;
+};
+
+export type StoredGeneratedAudio = UploadedFile & Omit<GeneratedAudioResult, "blob" | "stableUrl">;
 
 function aiApiUrl(config: AiConfig, path: string) {
     return buildApiUrl(config.baseUrl, path);
@@ -18,11 +54,15 @@ function aiHeaders(config: AiConfig) {
     };
 }
 
-export async function requestAudioGeneration(config: AiConfig, prompt: string, options?: RequestOptions): Promise<Blob> {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.audioModel);
+export async function requestAudioGeneration(config: AiConfig, prompt: string, options?: RequestOptions): Promise<GeneratedAudioResult> {
+    const selectedModel = config.model || config.audioModel;
+    const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const model = requestConfig.model.trim();
     const format = normalizeAudioFormatValue(config.audioFormat);
-    const script = resolveModelScript(config, config.model || config.audioModel);
+    if (decodeChannelModel(selectedModel)?.channelId === "sucai-canvas") {
+        return requestCanvasAudioGeneration(requestConfig, prompt, format, options);
+    }
+    const script = resolveModelScript(config, selectedModel);
     if (script) {
         if (!model) throw new Error("请先配置音频模型");
         if (!requestConfig.baseUrl.trim()) throw new Error("请先配置 Base URL");
@@ -36,7 +76,7 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string, o
                 params: { voice: normalizeAudioVoiceValue(config.audioVoice), format, speed: normalizeAudioSpeedValue(config.audioSpeed), instructions: config.audioInstructions.trim() },
                 signal: options?.signal,
             });
-            return await audioPluginBlob(result, format);
+            return { blob: await audioPluginBlob(result, format), format };
         } catch (error) {
             throw new Error(readAxiosError(error, "音频生成失败"));
         }
@@ -58,7 +98,7 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string, o
             { headers: aiHeaders(requestConfig), responseType: "blob", signal: options?.signal },
         );
         await assertAudioBlob(response.data);
-        return response.data.type.startsWith("audio/") ? response.data : new Blob([response.data], { type: audioMimeType(format) });
+        return { blob: response.data.type.startsWith("audio/") ? response.data : new Blob([response.data], { type: audioMimeType(format) }), format };
     } catch (error) {
         throw new Error(readAxiosError(error, "音频生成失败"));
     }
@@ -78,9 +118,114 @@ async function audioPluginBlob(result: unknown, format: string): Promise<Blob> {
     return blob.type.startsWith("audio/") ? blob : new Blob([blob], { type: audioMimeType(format) });
 }
 
-export async function storeGeneratedAudio(blob: Blob, format = "mp3"): Promise<UploadedFile> {
-    const audio = blob.type.startsWith("audio/") ? blob : new Blob([blob], { type: audioMimeType(format) });
-    return uploadMediaFile(audio, "audio");
+export async function storeGeneratedAudio(result: GeneratedAudioResult, format = "mp3"): Promise<StoredGeneratedAudio> {
+    if (result.stableUrl) {
+        return {
+            url: result.stableUrl,
+            storageKey: "",
+            bytes: 0,
+            mimeType: result.mimeType || audioMimeType(result.format || format),
+            taskId: result.taskId,
+            engine: result.engine,
+            voiceId: result.voiceId,
+            format: result.format || format,
+            characterCount: result.characterCount,
+        };
+    }
+    if (!result.blob) throw new Error("音频生成接口没有返回可播放文件");
+    const audio = result.blob.type.startsWith("audio/") ? result.blob : new Blob([result.blob], { type: audioMimeType(format) });
+    return { ...(await uploadMediaFile(audio, "audio")), format: result.format || format };
+}
+
+export async function listCanvasAudioVoices(config: AiConfig, query: { search?: string; scope?: string; categoryId?: number } = {}, signal?: AbortSignal): Promise<CanvasAudioVoiceList> {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.audioModel);
+    const response = await axios.get<{ data?: CanvasAudioVoice[]; favoriteCategories?: CanvasVoiceFavoriteCategory[]; favoriteCount?: number }>(aiApiUrl(requestConfig, "/audio/voices"), {
+        headers: aiHeaders(requestConfig),
+        params: { ...query, limit: 100 },
+        signal,
+    });
+    return {
+        voices: Array.isArray(response.data?.data) ? response.data.data : [],
+        favoriteCategories: Array.isArray(response.data?.favoriteCategories) ? response.data.favoriteCategories : [],
+        favoriteCount: Number(response.data?.favoriteCount || 0),
+    };
+}
+
+async function requestCanvasAudioGeneration(config: AiConfig, prompt: string, format: string, options?: RequestOptions): Promise<GeneratedAudioResult> {
+    const voiceId = Number(config.audioVoice);
+    if (!Number.isInteger(voiceId) || voiceId <= 0) throw new Error("请先从音色库选择音色");
+    const engine = config.model === "voxcpm2" ? "voxcpm2" : "speech";
+    const response = await axios.post<{ task_id?: string; status?: string }>(
+        aiApiUrl(config, "/audio/speech"),
+        {
+            model: config.model,
+            engine,
+            input: prompt,
+            voiceId,
+            format,
+            speed: Number(normalizeAudioSpeedValue(config.audioSpeed)),
+            emotion: config.audioInstructions.trim(),
+            controlInstruction: config.audioInstructions.trim(),
+        },
+        { headers: aiHeaders(config), signal: options?.signal },
+    );
+    const taskId = response.data?.task_id;
+    if (!taskId) throw new Error("画布配音接口未返回任务 ID");
+    options?.onTaskCreated?.({ taskId, engine, voiceId, characterCount: prompt.length });
+    return pollCanvasAudioTask(config, taskId, options?.signal);
+}
+
+export async function pollCanvasAudioTask(config: AiConfig, taskId: string, signal?: AbortSignal): Promise<GeneratedAudioResult> {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.audioModel);
+    const deadline = Date.now() + 10 * 60 * 1000;
+    while (Date.now() < deadline) {
+        await waitForAudioTaskPoll(3000, signal);
+        const taskResponse = await axios.get<{
+            status?: string;
+            audio_url?: string;
+            mime_type?: string;
+            engine?: "speech" | "voxcpm2";
+            voice_id?: number;
+            format?: string;
+            character_count?: number;
+            error?: { message?: string };
+        }>(aiApiUrl(requestConfig, `/audio/tasks/${encodeURIComponent(taskId)}`), { headers: aiHeaders(requestConfig), signal });
+        const task = taskResponse.data;
+        if (task.status === "canceled") throw new Error("配音任务已取消");
+        if (task.status === "failed") throw new Error(task.error?.message || "配音生成失败");
+        if (task.status !== "success") continue;
+        if (!task.audio_url) throw new Error("配音任务成功但未返回音频地址");
+        return {
+            stableUrl: task.audio_url,
+            taskId,
+            engine: task.engine,
+            voiceId: task.voice_id,
+            format: task.format || config.audioFormat,
+            characterCount: task.character_count,
+            mimeType: task.mime_type || audioMimeType(task.format || config.audioFormat),
+        };
+    }
+    throw new Error("配音生成等待超时，任务仍在后端处理中");
+}
+
+export async function cancelCanvasAudioTask(config: AiConfig, taskId: string) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.audioModel);
+    await axios.post(aiApiUrl(requestConfig, `/audio/tasks/${encodeURIComponent(taskId)}/cancel`), {}, { headers: aiHeaders(requestConfig) });
+}
+
+function waitForAudioTaskPoll(delay: number, signal?: AbortSignal) {
+    if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+    return new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+        }, delay);
+        const onAbort = () => {
+            window.clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+    });
 }
 
 function assertAudioConfig(config: AiConfig, model: string) {
