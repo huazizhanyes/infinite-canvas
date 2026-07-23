@@ -1,9 +1,9 @@
 import { Bot, Home, Menu } from "lucide-react";
 import { Button, Tooltip } from "antd";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-tools";
-import { SHOW_AGENT_UI, SUCAI_HOME_URL } from "@/constant/env";
+import { SHOW_AGENT_UI, SUCAI_HOME_URL, SUCAI_INTEGRATION } from "@/constant/env";
 import { AppConfigModal } from "@/components/layout/app-config-modal";
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
@@ -13,6 +13,7 @@ import { useAgentStore } from "@/stores/use-agent-store";
 
 export function AppTopNav() {
     const { pathname } = useLocation();
+    const navigate = useNavigate();
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
     const autoConnectRef = useRef(false);
     const agentToken = useAgentStore((state) => state.token);
@@ -31,21 +32,40 @@ export function AppTopNav() {
         connectAgent({ silent: true });
     }, [agentConnected, agentEnabled, agentToken, connectAgent]);
 
+    useEffect(() => {
+        if (!SUCAI_INTEGRATION || window.parent === window) return;
+        window.parent.postMessage({ source: "infinite-canvas", type: "route-change", pathname }, "*");
+    }, [pathname]);
+
+    useEffect(() => {
+        if (!SUCAI_INTEGRATION || window.parent === window) return;
+        const handleHostMessage = (event: MessageEvent) => {
+            if (event.source !== window.parent) return;
+            const data = event.data as { source?: string; type?: string; pathname?: string } | null;
+            if (data?.source !== "flash-creator-host" || data.type !== "navigate" || data.pathname !== "/canvas") return;
+            navigate("/canvas");
+        };
+        window.addEventListener("message", handleHostMessage);
+        return () => window.removeEventListener("message", handleHostMessage);
+    }, [navigate]);
+
     return (
         <>
             {!hideHeader ? (
                 <header className="sticky top-0 z-20 h-14 shrink-0 border-b border-stone-200 bg-background/90 backdrop-blur-xl dark:border-stone-800">
                     <div className="mx-auto flex h-full max-w-7xl items-stretch justify-between gap-5 px-6">
                         <div className="flex min-w-0 items-center">
-                            <a
-                                href={SUCAI_HOME_URL}
-                                className="mr-4 flex h-14 shrink-0 items-center gap-2 text-sm text-stone-500 transition hover:text-stone-950 md:mr-7 dark:text-stone-400 dark:hover:text-stone-100"
-                                aria-label="返回主页"
-                                title="返回主页"
-                            >
-                                <Home className="size-4" />
-                                <span className="hidden sm:inline">返回主页</span>
-                            </a>
+                            {!SUCAI_INTEGRATION ? (
+                                <a
+                                    href={SUCAI_HOME_URL}
+                                    className="mr-4 flex h-14 shrink-0 items-center gap-2 text-sm text-stone-500 transition hover:text-stone-950 md:mr-7 dark:text-stone-400 dark:hover:text-stone-100"
+                                    aria-label="返回主页"
+                                    title="返回主页"
+                                >
+                                    <Home className="size-4" />
+                                    <span className="hidden sm:inline">返回主页</span>
+                                </a>
+                            ) : null}
                             <button
                                 type="button"
                                 className="inline-flex size-8 shrink-0 items-center justify-center text-stone-600 transition hover:text-stone-950 md:hidden dark:text-stone-300 dark:hover:text-white"
@@ -79,7 +99,12 @@ export function AppTopNav() {
                             </nav>
                         </div>
 
-                        <div className="my-auto flex h-9 min-w-0 items-center justify-end gap-2 justify-self-end whitespace-nowrap">
+                        <div
+                            className={cn(
+                                "flex h-9 min-w-0 items-center justify-end gap-2 whitespace-nowrap",
+                                SUCAI_INTEGRATION ? "absolute right-4 top-1/2 -translate-y-1/2" : "my-auto justify-self-end",
+                            )}
+                        >
                             {SHOW_AGENT_UI ? (
                                 <Tooltip title={panelOpen ? "收起 Agent" : "打开 Agent"}>
                                     <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" icon={<Bot className="size-4" />} onClick={togglePanel} aria-label="打开 Agent" />

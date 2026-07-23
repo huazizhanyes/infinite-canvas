@@ -2,6 +2,7 @@ export const APP_VERSION = __APP_VERSION__ || "dev";
 
 export const DOCS_URL = import.meta.env.VITE_DOC_URL || "https://docs.canvas.best";
 export const SUCAI_HOME_URL = import.meta.env.VITE_SUCAI_HOME_URL || "/";
+export const SUCAI_INTEGRATION = import.meta.env.VITE_SUCAI_INTEGRATION === "true";
 export const SHOW_AGENT_UI = import.meta.env.VITE_SHOW_AGENT_UI === "true";
 export const SHOW_PROMPT_LIBRARY_UI = import.meta.env.VITE_SHOW_PROMPT_LIBRARY_UI === "true";
 

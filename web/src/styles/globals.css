@@ -3,6 +3,227 @@
 @import "shadcn/tailwind.css";
 @source "../../../node_modules/streamdown/dist/*.js";
 
+.canvas-library-shell {
+    position: relative;
+    isolation: isolate;
+    background-color: var(--background);
+    background-image:
+        linear-gradient(rgba(56, 189, 248, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(56, 189, 248, 0.035) 1px, transparent 1px),
+        linear-gradient(128deg, transparent 0 63%, rgba(56, 189, 248, 0.075) 63.08%, rgba(56, 189, 248, 0.075) 63.16%, transparent 63.24%),
+        linear-gradient(42deg, transparent 0 76%, rgba(245, 158, 11, 0.055) 76.08%, rgba(245, 158, 11, 0.055) 76.16%, transparent 76.24%);
+    background-size: 52px 52px, 52px 52px, 100% 100%, 100% 100%;
+}
+
+.canvas-library-shell::before {
+    content: "";
+    position: fixed;
+    z-index: -1;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+        linear-gradient(90deg, transparent 0 7%, rgba(34, 211, 238, 0.1) 7.05%, transparent 7.1% 93%, rgba(245, 158, 11, 0.08) 93.05%, transparent 93.1%),
+        linear-gradient(180deg, transparent 0 14%, rgba(34, 211, 238, 0.08) 14.05%, transparent 14.1% 87%, rgba(245, 158, 11, 0.07) 87.05%, transparent 87.1%),
+        linear-gradient(135deg, transparent 0 23%, rgba(56, 189, 248, 0.04) 23.05%, transparent 23.1% 69%, rgba(56, 189, 248, 0.035) 69.05%, transparent 69.1%);
+}
+
+.canvas-library-shell::after {
+    content: "";
+    position: fixed;
+    z-index: -1;
+    inset: 0;
+    pointer-events: none;
+    border: 1px solid rgba(56, 189, 248, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.018);
+}
+
+.canvas-library-content {
+    position: relative;
+    z-index: 1;
+}
+
+.canvas-library-tech-frame {
+    position: fixed;
+    z-index: 0;
+    inset: 0;
+    pointer-events: none;
+    border: 0;
+    box-shadow: inset 0 0 70px rgba(56, 189, 248, 0.025);
+    overflow: hidden;
+}
+
+.canvas-library-tech-frame::before {
+    content: "";
+    position: absolute;
+    inset: 8% 5%;
+    background:
+        linear-gradient(90deg, rgba(34, 211, 238, 0.16), transparent 24% 76%, rgba(245, 158, 11, 0.12)) top / 100% 1px no-repeat,
+        linear-gradient(90deg, rgba(245, 158, 11, 0.09), transparent 28% 72%, rgba(34, 211, 238, 0.14)) bottom / 100% 1px no-repeat,
+        linear-gradient(180deg, rgba(34, 211, 238, 0.12), transparent 35% 65%, rgba(245, 158, 11, 0.08)) left / 1px 100% no-repeat,
+        linear-gradient(180deg, rgba(245, 158, 11, 0.08), transparent 35% 65%, rgba(34, 211, 238, 0.12)) right / 1px 100% no-repeat;
+}
+
+.canvas-library-tech-frame::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(90deg, transparent 0 18%, rgba(56, 189, 248, 0.065) 18.05%, transparent 18.1% 82%, rgba(245, 158, 11, 0.05) 82.05%, transparent 82.1%),
+        linear-gradient(180deg, transparent 0 30%, rgba(56, 189, 248, 0.055) 30.05%, transparent 30.1% 72%, rgba(245, 158, 11, 0.045) 72.05%, transparent 72.1%);
+}
+
+.canvas-library-tech-frame > span {
+    position: absolute;
+    background: rgba(34, 211, 238, 0.18);
+}
+
+.canvas-library-tech-frame > span:nth-child(1) { top: 0; left: 0; width: 34%; height: 1px; }
+.canvas-library-tech-frame > span:nth-child(2) { top: 0; right: 0; width: 1px; height: 42%; background: rgba(245, 158, 11, 0.14); }
+.canvas-library-tech-frame > span:nth-child(3) { right: 0; bottom: 0; width: 38%; height: 1px; background: rgba(245, 158, 11, 0.13); }
+.canvas-library-tech-frame > span:nth-child(4) { bottom: 0; left: 0; width: 1px; height: 46%; }
+
+.canvas-library-geometry {
+    position: fixed;
+    z-index: 0;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.canvas-library-geometry > span {
+    position: absolute;
+    display: block;
+}
+
+.canvas-library-geometry__circle {
+    top: 24%;
+    right: 8%;
+    width: 184px;
+    height: 184px;
+    border: 1px solid rgba(34, 211, 238, 0.12);
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 28px rgba(34, 211, 238, 0.012);
+}
+
+.canvas-library-geometry__circle::before {
+    content: "";
+    position: absolute;
+    inset: 34px;
+    border: 1px dashed rgba(245, 158, 11, 0.13);
+    border-radius: 50%;
+}
+
+.canvas-library-geometry__circle::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: -20px;
+    width: calc(100% + 40px);
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.15) 18% 82%, transparent);
+    transform: rotate(-24deg);
+}
+
+.canvas-library-geometry__axes {
+    bottom: 14%;
+    left: 11%;
+    width: 250px;
+    height: 160px;
+    background:
+        repeating-linear-gradient(90deg, transparent 0 24px, rgba(34, 211, 238, 0.09) 24px 25px, transparent 25px 48px) 0 50% / 100% 7px no-repeat,
+        repeating-linear-gradient(180deg, transparent 0 24px, rgba(34, 211, 238, 0.09) 24px 25px, transparent 25px 48px) 50% 0 / 7px 100% no-repeat,
+        linear-gradient(90deg, rgba(34, 211, 238, 0.16), rgba(34, 211, 238, 0.04)) 0 50% / 100% 1px no-repeat,
+        linear-gradient(180deg, rgba(245, 158, 11, 0.12), rgba(34, 211, 238, 0.11)) 50% 0 / 1px 100% no-repeat;
+}
+
+.canvas-library-geometry__axes::before {
+    content: "";
+    position: absolute;
+    top: 21px;
+    left: 72px;
+    width: 108px;
+    height: 108px;
+    border: 1px solid rgba(34, 211, 238, 0.08);
+    border-radius: 50%;
+}
+
+.canvas-library-geometry__triangle {
+    top: 43%;
+    left: 49%;
+    width: 174px;
+    height: 150px;
+    background: rgba(34, 211, 238, 0.12);
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.canvas-library-geometry__triangle::after {
+    content: "";
+    position: absolute;
+    inset: 2px;
+    background: var(--background);
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.canvas-library-geometry__hexagon {
+    right: 27%;
+    bottom: 12%;
+    width: 150px;
+    height: 130px;
+    background: rgba(245, 158, 11, 0.1);
+    clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+
+.canvas-library-geometry__hexagon::after {
+    content: "";
+    position: absolute;
+    inset: 2px;
+    background: var(--background);
+    clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+
+.canvas-library-geometry__arc {
+    top: 19%;
+    left: 37%;
+    width: 240px;
+    height: 120px;
+    border-top: 1px dashed rgba(245, 158, 11, 0.11);
+    border-radius: 50% 50% 0 0;
+    transform: rotate(9deg);
+}
+
+.canvas-library-geometry__arc::before,
+.canvas-library-geometry__arc::after {
+    content: "";
+    position: absolute;
+    width: 5px;
+    height: 5px;
+    border: 1px solid rgba(34, 211, 238, 0.2);
+    border-radius: 50%;
+}
+
+.canvas-library-geometry__arc::before { top: -3px; left: -2px; }
+.canvas-library-geometry__arc::after { top: -3px; right: -2px; }
+
+.canvas-library-geometry__formula {
+    color: rgba(148, 163, 184, 0.24);
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1;
+    letter-spacing: 0;
+    white-space: nowrap;
+}
+
+.canvas-library-geometry__formula--circle { top: 46%; right: 9.5%; }
+.canvas-library-geometry__formula--golden { bottom: 9%; left: 46%; color: rgba(245, 158, 11, 0.22); }
+
+@media (max-width: 900px) {
+    .canvas-library-geometry__triangle,
+    .canvas-library-geometry__hexagon,
+    .canvas-library-geometry__formula--golden {
+        display: none;
+    }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Empty, Input, Select, Tag } from "antd";
-import { BookOpenText, ChevronRight, FileText, Image as ImageIcon, Music2, Search, Settings2, Square, Type, Video } from "lucide-react";
+import { BookOpenText, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Images, ListTree, Music2, Search, Settings2, Square, Type, Video } from "lucide-react";
 
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
+import { SUCAI_INTEGRATION } from "@/constant/env";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { cn } from "@/lib/utils";
 import { useAssetStore, type Asset, type AssetKind } from "@/stores/use-asset-store";
@@ -40,12 +41,47 @@ const STATUS_COLOR: Record<string, string> = {
 export function CanvasSidePanel({ nodes, selectedNodeIds, onFocusNode, onInsertAsset }: Props) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [tab, setTab] = useState<PanelTab>("canvas");
+    const [open, setOpen] = useState(false);
+
+    const openTab = (nextTab: PanelTab) => {
+        setTab(nextTab);
+        setOpen(true);
+    };
+
+    useEffect(() => {
+        if (!SUCAI_INTEGRATION || window.parent === window) return;
+        const handleHostMessage = (event: MessageEvent) => {
+            if (event.source !== window.parent) return;
+            const data = event.data as { source?: string; type?: string; tab?: PanelTab } | null;
+            if (data?.source !== "flash-creator-host" || data.type !== "open-side-panel" || (data.tab !== "canvas" && data.tab !== "assets")) return;
+            openTab(data.tab);
+        };
+        window.addEventListener("message", handleHostMessage);
+        return () => window.removeEventListener("message", handleHostMessage);
+    }, []);
+
+    if (!open) {
+        if (SUCAI_INTEGRATION) return null;
+        return (
+            <aside className="flex h-full w-11 shrink-0 flex-col items-center gap-1 border-r py-2" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} data-canvas-no-zoom>
+                <button type="button" onClick={() => openTab("canvas")} className="grid size-9 place-items-center rounded-md opacity-65 transition hover:opacity-100" style={{ background: theme.toolbar.activeBg }} aria-label="展开画布元素" title="展开画布元素">
+                    <ListTree className="size-4" />
+                </button>
+                <button type="button" onClick={() => openTab("assets")} className="grid size-9 place-items-center rounded-md opacity-65 transition hover:opacity-100" aria-label="展开资产" title="展开资产">
+                    <Images className="size-4" />
+                </button>
+            </aside>
+        );
+    }
 
     return (
         <aside className="flex h-full w-[280px] shrink-0 flex-col overflow-hidden border-r" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} data-canvas-no-zoom>
             <div className="flex items-center gap-1 px-3 pt-3">
                 <TabButton label="画布" active={tab === "canvas"} theme={theme} onClick={() => setTab("canvas")} />
                 <TabButton label="资产" active={tab === "assets"} theme={theme} onClick={() => setTab("assets")} />
+                <button type="button" onClick={() => setOpen(false)} className="ml-auto grid size-8 place-items-center rounded-md opacity-55 transition hover:opacity-100" aria-label="收起侧栏" title="收起侧栏">
+                    <ChevronLeft className="size-4" />
+                </button>
             </div>
             <div className="mt-2 min-h-0 flex-1 overflow-hidden">{tab === "canvas" ? <CanvasNodesTab nodes={nodes} selectedNodeIds={selectedNodeIds} onFocusNode={onFocusNode} theme={theme} /> : <CanvasAssetsTab onInsert={onInsertAsset} theme={theme} />}</div>
         </aside>

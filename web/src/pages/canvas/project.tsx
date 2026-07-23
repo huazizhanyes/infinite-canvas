@@ -110,6 +110,21 @@ type CanvasGenerationRequest = {
     controller: AbortController;
 };
 
+type NodeDragState = {
+    isDraggingNode: boolean;
+    hasMoved: boolean;
+    startX: number;
+    startY: number;
+    previewDx: number;
+    previewDy: number;
+    initialSelectedNodes: { id: string; x: number; y: number }[];
+    initialById: Map<string, { id: string; x: number; y: number }>;
+    movedIds: Set<string>;
+    nodeById: Map<string, CanvasNodeData>;
+    nodeElements: Map<string, HTMLElement>;
+    connectionElements: Array<{ connection: CanvasConnection; paths: SVGPathElement[] }>;
+};
+
 const VIDEO_NODE_MAX_WIDTH = 420;
 const VIDEO_NODE_MAX_HEIGHT = 420;
 const CONNECTION_HANDLE_HIT_RADIUS = 40;
@@ -326,18 +341,19 @@ function InfiniteCanvasPage() {
     const didInitialCenterRef = useRef(false);
     const rafRef = useRef<number | null>(null);
     const nodeDraggingRef = useRef(false);
-    const dragRef = useRef<{
-        isDraggingNode: boolean;
-        hasMoved: boolean;
-        startX: number;
-        startY: number;
-        initialSelectedNodes: { id: string; x: number; y: number }[];
-    }>({
+    const dragRef = useRef<NodeDragState>({
         isDraggingNode: false,
         hasMoved: false,
         startX: 0,
         startY: 0,
+        previewDx: 0,
+        previewDy: 0,
         initialSelectedNodes: [],
+        initialById: new Map(),
+        movedIds: new Set(),
+        nodeById: new Map(),
+        nodeElements: new Map(),
+        connectionElements: [],
     });
 
     const config = useConfigStore((state) => state.config);
@@ -1756,12 +1772,30 @@ function InfiniteCanvasPage() {
                 });
             }
         });
+        const initialSelectedNodes = currentNodes.filter((node) => dragIds.has(node.id)).map((node) => ({ id: node.id, x: node.position.x, y: node.position.y }));
+        const nodeElements = new Map(
+            Array.from(containerRef.current?.querySelectorAll<HTMLElement>("[data-node-id]") || [])
+                .filter((element) => element.dataset.nodeId && dragIds.has(element.dataset.nodeId))
+                .map((element) => [element.dataset.nodeId!, element]),
+        );
+        const connectionPathById = new Map(
+            Array.from(containerRef.current?.querySelectorAll<SVGPathElement>("[data-connection-id]") || []).map((path) => [path.dataset.connectionId!, Array.from(path.parentElement?.querySelectorAll<SVGPathElement>("path") || [])]),
+        );
         dragRef.current = {
             isDraggingNode: true,
             hasMoved: false,
             startX: event.clientX,
             startY: event.clientY,
-            initialSelectedNodes: currentNodes.filter((node) => dragIds.has(node.id)).map((node) => ({ id: node.id, x: node.position.x, y: node.position.y })),
+            previewDx: 0,
+            previewDy: 0,
+            initialSelectedNodes,
+            initialById: new Map(initialSelectedNodes.map((item) => [item.id, item])),
+            movedIds: dragIds,
+            nodeById: new Map(currentNodes.map((node) => [node.id, node])),
+            nodeElements,
+            connectionElements: connectionsRef.current
+                .filter((connection) => dragIds.has(connection.fromNodeId) || dragIds.has(connection.toNodeId))
+                .map((connection) => ({ connection, paths: connectionPathById.get(connection.id) || [] })),
         };
         historyPausedRef.current = true;
         nodeDraggingRef.current = true;
@@ -1802,11 +1836,18 @@ function InfiniteCanvasPage() {
                     return { ...node, metadata: { ...node.metadata, groupId } };
                 });
             });
+        } else if (dragRef.current.hasMoved) {
+            applyNodeDragPreview(dragRef.current, 0, 0);
         }
 
         dragRef.current.isDraggingNode = false;
         dragRef.current.hasMoved = false;
         dragRef.current.initialSelectedNodes = [];
+        dragRef.current.initialById.clear();
+        dragRef.current.movedIds.clear();
+        dragRef.current.nodeById.clear();
+        dragRef.current.nodeElements.clear();
+        dragRef.current.connectionElements = [];
         if (wasClick && clickedNodeId) {
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
             const clickedDefinition = clickedNode ? getNodeDefinition(clickedNode.type) : undefined;
@@ -1828,26 +1869,19 @@ function InfiniteCanvasPage() {
             if (dragRef.current.isDraggingNode) {
                 const dx = (event.clientX - dragRef.current.startX) / currentViewport.k;
                 const dy = (event.clientY - dragRef.current.startY) / currentViewport.k;
-                const initialPositions = dragRef.current.initialSelectedNodes;
                 if (Math.abs(event.clientX - dragRef.current.startX) > 3 || Math.abs(event.clientY - dragRef.current.startY) > 3) {
                     dragRef.current.hasMoved = true;
                 }
-
-                const movedIds = new Set(initialPositions.map((item) => item.id));
-                const previewNodes = nodesRef.current.map((node) => {
-                    const initial = initialPositions.find((item) => item.id === node.id);
-                    return initial ? { ...node, position: { x: initial.x + dx, y: initial.y + dy } } : node;
-                });
-                setDropTargetGroupId(findGroupDropTarget(movedIds, previewNodes)?.id || null);
+                if (!dragRef.current.hasMoved) return;
+                dragRef.current.previewDx = dx;
+                dragRef.current.previewDy = dy;
 
                 if (rafRef.current) cancelAnimationFrame(rafRef.current);
                 rafRef.current = requestAnimationFrame(() => {
-                    setNodes((prev) =>
-                        prev.map((node) => {
-                            const initial = initialPositions.find((item) => item.id === node.id);
-                            return initial ? { ...node, position: { x: initial.x + dx, y: initial.y + dy } } : node;
-                        }),
-                    );
+                    const currentDrag = dragRef.current;
+                    applyNodeDragPreview(currentDrag, currentDrag.previewDx, currentDrag.previewDy);
+                    const nextDropTargetId = findGroupDropTargetDuringDrag(currentDrag, nodesRef.current)?.id || null;
+                    setDropTargetGroupId((current) => (current === nextDropTargetId ? current : nextDropTargetId));
                     rafRef.current = null;
                 });
                 return;
@@ -3465,6 +3499,18 @@ function InfiniteCanvasPage() {
         [insertAssistantImage, insertAssistantText, screenToCanvas, size.height, size.width],
     );
 
+    const handleViewportChange = useCallback((next: ViewportTransform) => {
+        viewportRef.current = next;
+        setViewport(next);
+        setContextMenu(null);
+    }, []);
+
+    const handleViewportInteractionStart = useCallback(() => {
+        setContextMenu(null);
+        setHoveredNodeId(null);
+        setToolbarNodeId(null);
+    }, []);
+
     if (!projectLoaded) return <CanvasRefreshShell />;
 
     return (
@@ -3498,10 +3544,8 @@ function InfiniteCanvasPage() {
                     containerRef={containerRef}
                     viewport={viewport}
                     backgroundMode={backgroundMode}
-                    onViewportChange={(next) => {
-                        setViewport(next);
-                        setContextMenu(null);
-                    }}
+                    onViewportChange={handleViewportChange}
+                    onViewportInteractionStart={handleViewportInteractionStart}
                     onCanvasMouseDown={handleCanvasMouseDown}
                     onCanvasDeselect={deselectCanvas}
                     onCanvasDoubleClick={(event) => {
@@ -4147,6 +4191,60 @@ function findGroupDropTarget(movedIds: Set<string>, nodes: CanvasNodeData[]) {
                 });
             }) || null
     );
+}
+
+function findGroupDropTargetDuringDrag(drag: NodeDragState, nodes: CanvasNodeData[]) {
+    if (nodes.some((node) => drag.movedIds.has(node.id) && node.type === CanvasNodeType.Group)) return null;
+    const movingNodes = drag.initialSelectedNodes
+        .map((initial) => {
+            const node = drag.nodeById.get(initial.id);
+            return node && node.type !== CanvasNodeType.Group ? { ...node, position: { x: initial.x + drag.previewDx, y: initial.y + drag.previewDy } } : null;
+        })
+        .filter((node): node is CanvasNodeData => Boolean(node));
+    if (!movingNodes.length) return null;
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+        const group = nodes[index];
+        if (group.type !== CanvasNodeType.Group || drag.movedIds.has(group.id)) continue;
+        if (
+            movingNodes.some((node) => {
+                const centerX = node.position.x + node.width / 2;
+                const centerY = node.position.y + node.height / 2;
+                return centerX >= group.position.x && centerX <= group.position.x + group.width && centerY >= group.position.y && centerY <= group.position.y + group.height;
+            })
+        )
+            return group;
+    }
+    return null;
+}
+
+function applyNodeDragPreview(drag: NodeDragState, dx: number, dy: number) {
+    const initialById = drag.initialById;
+    drag.nodeElements.forEach((element, id) => {
+        const initial = initialById.get(id);
+        if (initial) element.style.transform = `translate(${initial.x + dx}px, ${initial.y + dy}px)`;
+    });
+
+    if (!drag.connectionElements.length) return;
+    drag.connectionElements.forEach(({ connection, paths }) => {
+        const from = drag.nodeById.get(connection.fromNodeId);
+        const to = drag.nodeById.get(connection.toNodeId);
+        if (!from || !to) return;
+        const fromInitial = initialById.get(from.id);
+        const toInitial = initialById.get(to.id);
+        const previewFrom = fromInitial ? { ...from, position: { x: fromInitial.x + dx, y: fromInitial.y + dy } } : from;
+        const previewTo = toInitial ? { ...to, position: { x: toInitial.x + dx, y: toInitial.y + dy } } : to;
+        const path = connectionPath(previewFrom, previewTo);
+        paths.forEach((element) => element.setAttribute("d", path));
+    });
+}
+
+function connectionPath(from: CanvasNodeData, to: CanvasNodeData) {
+    const startX = from.position.x + from.width;
+    const startY = from.position.y + from.height / 2;
+    const endX = to.position.x;
+    const endY = to.position.y + to.height / 2;
+    const curvature = Math.max(Math.abs(endX - startX) * 0.5, 50);
+    return `M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`;
 }
 
 function snapNodesIntoGroup(movedIds: Set<string>, nodes: CanvasNodeData[], group: CanvasNodeData) {

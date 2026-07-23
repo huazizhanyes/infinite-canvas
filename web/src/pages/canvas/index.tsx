@@ -68,8 +68,23 @@ export default function CanvasPage() {
     if (hydrated && (mode === "new" || mode === "recent")) return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500">正在打开画布...</main>;
 
     return (
-        <main className="h-full overflow-auto bg-background text-stone-950 dark:text-stone-100">
-            <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
+        <main className="canvas-library-shell h-full overflow-auto text-stone-950 dark:text-stone-100">
+            <div className="canvas-library-tech-frame" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+                <span />
+            </div>
+            <div className="canvas-library-geometry" aria-hidden="true">
+                <span className="canvas-library-geometry__circle" />
+                <span className="canvas-library-geometry__axes" />
+                <span className="canvas-library-geometry__triangle" />
+                <span className="canvas-library-geometry__hexagon" />
+                <span className="canvas-library-geometry__arc" />
+                <span className="canvas-library-geometry__formula canvas-library-geometry__formula--circle">x² + y² = r²</span>
+                <span className="canvas-library-geometry__formula canvas-library-geometry__formula--golden">φ = (1 + √5) / 2</span>
+            </div>
+            <div className="canvas-library-content mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
                 <header className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 pb-6 dark:border-stone-800">
                     <div>
                         <p className="text-xs text-stone-500">画布库</p>
