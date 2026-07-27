@@ -1,14 +1,74 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Button, Segmented, Switch } from "antd";
-import { BookOpenText, CircleDot, Clapperboard, Eraser, Grid2x2, Group, Hand, Image as ImageIcon, Info, LayoutGrid, Mic2, Moon, Palette, Puzzle, Redo2, Settings2, Square, Sun, Trash2, Type, Undo2, Upload, Video } from "lucide-react";
+import {
+    BookOpenText,
+    Check,
+    CircleDot,
+    Clapperboard,
+    Eraser,
+    Grid2x2,
+    Group,
+    Hand,
+    Image as ImageIcon,
+    Info,
+    LayoutGrid,
+    LoaderCircle,
+    Mic2,
+    Moon,
+    Palette,
+    Puzzle,
+    Redo2,
+    Settings2,
+    Square,
+    Sun,
+    Trash2,
+    TriangleAlert,
+    Type,
+    Undo2,
+    Upload,
+    Video,
+} from "lucide-react";
 
 import { canvasThemes, type CanvasBackgroundMode, type CanvasColorTheme, type CanvasTheme } from "@/lib/canvas-theme";
 import { getNodePluginId, listNodeDefinitions, useNodeRegistryVersion } from "@/lib/canvas/node-registry";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
+import { useCanvasPersistenceStatus } from "@/stores/canvas/use-canvas-store";
 
 const SHOW_PLUGIN_UI = import.meta.env.VITE_SHOW_CANVAS_PLUGIN_UI !== "false";
+
+const TOOL_ACCENTS = {
+    stone: { light: "#57534e", dark: "#d6d3d1", rgb: "120,113,108" },
+    sky: { light: "#0284c7", dark: "#38bdf8", rgb: "14,165,233" },
+    violet: { light: "#7c3aed", dark: "#a78bfa", rgb: "139,92,246" },
+    emerald: { light: "#059669", dark: "#34d399", rgb: "16,185,129" },
+    cyan: { light: "#0891b2", dark: "#22d3ee", rgb: "6,182,212" },
+    rose: { light: "#e11d48", dark: "#fb7185", rgb: "244,63,94" },
+    amber: { light: "#d97706", dark: "#fbbf24", rgb: "245,158,11" },
+    indigo: { light: "#4f46e5", dark: "#818cf8", rgb: "99,102,241" },
+    fuchsia: { light: "#c026d3", dark: "#e879f9", rgb: "217,70,239" },
+} as const;
+
+type ToolbarAccent = keyof typeof TOOL_ACCENTS;
+
+const TOOL_ACCENT_BY_ID: Record<string, ToolbarAccent> = {
+    "tool-hand": "sky",
+    "tool-undo": "violet",
+    "tool-redo": "violet",
+    "tool-text": "indigo",
+    "tool-image": "emerald",
+    "tool-video": "cyan",
+    "tool-audio": "rose",
+    "tool-config": "amber",
+    "tool-group": "violet",
+    "tool-script-set": "amber",
+    "tool-storyboard": "rose",
+    "tool-storyboard-grid": "cyan",
+    "tool-extensions": "violet",
+    "tool-upload": "sky",
+    "tool-style": "fuchsia",
+};
 
 export function CanvasToolbar({
     selectedCount,
@@ -70,12 +130,19 @@ export function CanvasToolbar({
     const [panelX, setPanelX] = useState(0);
     const [extensionsOpen, setExtensionsOpen] = useState(false);
     const [extPanelX, setExtPanelX] = useState(0);
+    const saveStatus = useCanvasPersistenceStatus((state) => state.status);
+    const saveError = useCanvasPersistenceStatus((state) => state.error);
     // 扩展(插件)节点,随注册表变化实时更新
     useNodeRegistryVersion();
     const extensionDefs = SHOW_PLUGIN_UI ? listNodeDefinitions().filter((def) => def.showInCreateMenu !== false && getNodePluginId(def.type) !== "builtin") : [];
-    const dockStyle = { background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item, boxShadow: colorTheme === "dark" ? "0 18px 45px rgba(0,0,0,.32)" : "0 16px 40px rgba(28,25,23,.12)" };
-    const hoverStyle = { background: theme.toolbar.itemHover, color: theme.toolbar.activeText };
-    const activeStyle = { background: theme.toolbar.activeBg, color: theme.toolbar.activeText };
+    const dockStyle = {
+        background: theme.toolbar.panel,
+        borderColor: theme.toolbar.border,
+        color: theme.toolbar.item,
+        boxShadow: colorTheme === "dark" ? "0 20px 52px rgba(0,0,0,.42), 0 0 28px rgba(14,165,233,.06), 0 0 44px rgba(139,92,246,.05)" : "0 18px 46px rgba(28,25,23,.14), 0 0 24px rgba(14,165,233,.05), 0 0 36px rgba(139,92,246,.04)",
+    };
+    const saveAccent = saveStatus === "error" ? TOOL_ACCENTS.rose : saveStatus === "saving" ? TOOL_ACCENTS.amber : TOOL_ACCENTS.emerald;
+    const saveColor = colorTheme === "dark" ? saveAccent.dark : saveAccent.light;
     const tip = hovered ? toolLabel(hovered) : "";
 
     // 点击工具栏(含弹出面板)以外的地方,关闭弹出的扩展节点/画布外观面板
@@ -95,41 +162,50 @@ export function CanvasToolbar({
         <div ref={rootRef} className="pointer-events-none absolute bottom-5 z-50 flex justify-center" style={{ left: 300, right: 16 }}>
             {tip ? <DockTip label={tip} x={tipX} theme={theme} /> : null}
             <div ref={wrapRef} className="thin-scrollbar pointer-events-auto flex h-14 max-w-full items-center gap-1 overflow-x-auto rounded-xl border px-2 shadow-lg backdrop-blur [&>*]:shrink-0" style={dockStyle}>
-                <ToolbarButton id="tool-hand" label="移动/选择" active={!selectedCount} hovered={hovered} activeStyle={activeStyle} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onDeselect}>
+                <span
+                    className="inline-flex h-8 w-[76px] items-center justify-center gap-1 rounded-lg border text-[11px] font-medium transition-colors"
+                    style={{ color: saveColor, background: `rgba(${saveAccent.rgb},.08)`, borderColor: `rgba(${saveAccent.rgb},.16)` }}
+                    title={saveStatus === "error" ? saveError || "画布保存失败" : saveStatus === "saving" ? "正在保存画布" : "画布已保存到本地"}
+                >
+                    {saveStatus === "saving" ? <LoaderCircle className="size-3 animate-spin" /> : saveStatus === "error" ? <TriangleAlert className="size-3 text-red-400" /> : <Check className="size-3" />}
+                    {saveStatus === "saving" ? "保存中" : saveStatus === "error" ? "保存失败" : "已保存"}
+                </span>
+                <Divider theme={theme} />
+                <ToolbarButton id="tool-hand" label="移动/选择" active={!selectedCount} hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onDeselect}>
                     <Hand className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-undo" label="撤销" disabled={!canUndo} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onUndo}>
+                <ToolbarButton id="tool-undo" label="撤销" disabled={!canUndo} hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onUndo}>
                     <Undo2 className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-redo" label="重做" disabled={!canRedo} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onRedo}>
+                <ToolbarButton id="tool-redo" label="重做" disabled={!canRedo} hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onRedo}>
                     <Redo2 className="size-4.5" />
                 </ToolbarButton>
                 <Divider theme={theme} />
-                <ToolbarButton id="tool-text" label="文本" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddText}>
+                <ToolbarButton id="tool-text" label="文本" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddText}>
                     <Type className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-image" label="图片" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddImage}>
+                <ToolbarButton id="tool-image" label="图片" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddImage}>
                     <ImageIcon className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-video" label="视频" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddVideo}>
+                <ToolbarButton id="tool-video" label="视频" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddVideo}>
                     <Video className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-audio" label="配音" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddAudio}>
+                <ToolbarButton id="tool-audio" label="配音" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddAudio}>
                     <Mic2 className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-config" label="生成配置" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddConfig}>
+                <ToolbarButton id="tool-config" label="生成配置" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddConfig}>
                     <Settings2 className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-group" label="组" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddGroup}>
+                <ToolbarButton id="tool-group" label="组" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddGroup}>
                     <Group className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-script-set" label="剧本集" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddScriptSet}>
+                <ToolbarButton id="tool-script-set" label="剧本集" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddScriptSet}>
                     <BookOpenText className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-storyboard" label="分镜脚本" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddStoryboard}>
+                <ToolbarButton id="tool-storyboard" label="分镜脚本" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddStoryboard}>
                     <Clapperboard className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-storyboard-grid" label="九宫格分镜" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddStoryboardGrid}>
+                <ToolbarButton id="tool-storyboard-grid" label="九宫格分镜" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddStoryboardGrid}>
                     <LayoutGrid className="size-4.5" />
                 </ToolbarButton>
                 {extensionDefs.length ? (
@@ -138,8 +214,6 @@ export function CanvasToolbar({
                         label="扩展节点"
                         active={extensionsOpen}
                         hovered={hovered}
-                        activeStyle={activeStyle}
-                        hoverStyle={hoverStyle}
                         wrapRef={wrapRef}
                         onTipX={setTipX}
                         onHover={setHovered}
@@ -152,7 +226,7 @@ export function CanvasToolbar({
                         <Puzzle className="size-4.5" />
                     </ToolbarButton>
                 ) : null}
-                <ToolbarButton id="tool-upload" label="上传资产" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onUpload}>
+                <ToolbarButton id="tool-upload" label="上传资产" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onUpload}>
                     <Upload className="size-4.5" />
                 </ToolbarButton>
                 <Divider theme={theme} />
@@ -161,8 +235,6 @@ export function CanvasToolbar({
                     label="画布外观"
                     active={appearanceOpen}
                     hovered={hovered}
-                    activeStyle={activeStyle}
-                    hoverStyle={hoverStyle}
                     wrapRef={wrapRef}
                     onTipX={setTipX}
                     onHover={setHovered}
@@ -177,13 +249,13 @@ export function CanvasToolbar({
                 {selectedCount ? (
                     <>
                         <Divider theme={theme} />
-                        <ToolbarButton id="tool-delete" label="删除选中" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onDelete} danger>
+                        <ToolbarButton id="tool-delete" label="删除选中" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onDelete} danger>
                             <Trash2 className="size-4.5" />
                         </ToolbarButton>
                     </>
                 ) : null}
                 <Divider theme={theme} />
-                <ToolbarButton id="tool-clear" label="清空画布" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onClear} danger>
+                <ToolbarButton id="tool-clear" label="清空画布" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onClear} danger>
                     <Eraser className="size-4.5" />
                 </ToolbarButton>
             </div>
@@ -286,8 +358,6 @@ function ToolbarButton({
     label,
     active,
     hovered,
-    activeStyle,
-    hoverStyle,
     wrapRef,
     onTipX,
     onHover,
@@ -300,8 +370,6 @@ function ToolbarButton({
     label: string;
     active?: boolean;
     hovered: string | null;
-    activeStyle?: CSSProperties;
-    hoverStyle: CSSProperties;
     wrapRef: RefObject<HTMLDivElement | null>;
     onTipX: (x: number) => void;
     onHover: (id: string | null) => void;
@@ -310,15 +378,26 @@ function ToolbarButton({
     danger?: boolean;
     children: ReactNode;
 }) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const colorTheme = useThemeStore((state) => state.theme);
+    const accent = TOOL_ACCENTS[danger ? "rose" : TOOL_ACCENT_BY_ID[id] || "stone"];
+    const accentColor = colorTheme === "dark" ? accent.dark : accent.light;
+    const isHovered = hovered === id && !disabled;
+    const buttonStyle: CSSProperties = {
+        color: accentColor,
+        opacity: disabled ? 0.28 : 1,
+        background: disabled ? "transparent" : `rgba(${accent.rgb},${active ? 0.22 : isHovered ? 0.17 : 0.07})`,
+        borderColor: disabled ? "transparent" : `rgba(${accent.rgb},${active ? 0.34 : isHovered ? 0.26 : 0.08})`,
+        boxShadow: disabled ? "none" : active ? `0 0 0 1px rgba(${accent.rgb},.12), 0 8px 22px rgba(${accent.rgb},.16)` : isHovered ? `0 7px 18px rgba(${accent.rgb},.14)` : "none",
+        transform: isHovered ? "translateY(-1px)" : "translateY(0)",
+    };
 
     return (
         <Button
             type="text"
             aria-label={label}
-            className="!h-8 !w-8 !min-w-8 !p-0"
+            className="!h-9 !w-9 !min-w-9 !rounded-lg !border !border-solid !p-0 !transition-all !duration-200"
             disabled={disabled}
-            style={active ? activeStyle : hovered === id && !disabled ? hoverStyle : { color: danger ? "#f87171" : theme.toolbar.item, opacity: disabled ? 0.35 : 1 }}
+            style={buttonStyle}
             icon={children}
             onMouseEnter={(event) => {
                 onHover(id);

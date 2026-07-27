@@ -2,6 +2,7 @@ import localforage from "localforage";
 
 import { nanoid } from "nanoid";
 import { readImageMeta } from "@/lib/image-utils";
+import { cacheObjectUrl, revokeCachedObjectUrl } from "@/services/object-url-cache";
 
 export type UploadedImage = {
     url: string;
@@ -19,8 +20,7 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
     const storageKey = `image:${nanoid()}`;
     await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
+    const url = cacheObjectUrl(objectUrls, storageKey, blob);
     const meta = await readImageMeta(url);
     return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType };
 }
@@ -31,8 +31,7 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
     if (cached) return cached;
     const blob = await store.getItem<Blob>(storageKey);
     if (!blob) return fallback;
-    const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
+    const url = cacheObjectUrl(objectUrls, storageKey, blob);
     return url;
 }
 
@@ -42,9 +41,7 @@ export async function getImageBlob(storageKey: string) {
 
 export async function setImageBlob(storageKey: string, blob: Blob) {
     await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
-    return url;
+    return cacheObjectUrl(objectUrls, storageKey, blob);
 }
 
 export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
@@ -56,9 +53,7 @@ export async function imageToDataUrl(image: { url?: string; dataUrl?: string; st
 export async function deleteStoredImages(keys: Iterable<string>) {
     await Promise.all(
         Array.from(new Set(keys)).map(async (key) => {
-            const url = objectUrls.get(key);
-            if (url) URL.revokeObjectURL(url);
-            objectUrls.delete(key);
+            revokeCachedObjectUrl(objectUrls, key);
             await store.removeItem(key);
         }),
     );

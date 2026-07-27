@@ -4,22 +4,27 @@ import { App, Button, Result, Spin } from "antd";
 
 import { createModelChannel, encodeChannelModel, modelOptionsFromChannels, useConfigStore } from "@/stores/use-config-store";
 import { initializeSucaiCanvasSync } from "@/services/sucai-canvas-sync";
-import { useUserStore } from '@/stores/use-user-store'
+import { useUserStore } from "@/stores/use-user-store";
 
 const SUCAI_MODE_KEY = "infinite-canvas:sucai-mode";
 const SUCAI_TOKEN_KEY = "sucai_token";
 const SUCAI_CHANNEL_ID = "sucai-canvas";
 const SUCAI_API_BASE = import.meta.env.VITE_SUCAI_CANVAS_API_BASE || "";
-const SUCAI_BACKEND_BASE = import.meta.env.VITE_SUCAI_API_BASE || SUCAI_API_BASE.replace(/\/canvas\/?$/, '')
+const SUCAI_BACKEND_BASE = import.meta.env.VITE_SUCAI_API_BASE || SUCAI_API_BASE.replace(/\/canvas\/?$/, "");
 const SUCAI_HOME_URL = import.meta.env.VITE_SUCAI_HOME_URL || "/";
 
 type SucaiInitState = "idle" | "loading" | "ready" | "error";
+
+function isSucaiModeRequested() {
+    const searchParams = new URLSearchParams(window.location.search);
+    return import.meta.env.VITE_SUCAI_INTEGRATION === "true" || searchParams.get("sucai") === "1" || sessionStorage.getItem(SUCAI_MODE_KEY) === "1";
+}
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
     const handledConfigParams = useRef(false);
     const handledSucaiInit = useRef(false);
-    const [sucaiState, setSucaiState] = useState<SucaiInitState>("idle");
+    const [sucaiState, setSucaiState] = useState<SucaiInitState>(() => (isSucaiModeRequested() ? "loading" : "idle"));
     const [sucaiError, setSucaiError] = useState("");
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const config = useConfigStore((state) => state.config);
@@ -37,7 +42,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${fragment.size ? `#${fragment}` : ""}`);
         }
         if (searchParams.get("sucai") === "1") sessionStorage.setItem(SUCAI_MODE_KEY, "1");
-        const sucaiMode = import.meta.env.VITE_SUCAI_INTEGRATION === "true" || sessionStorage.getItem(SUCAI_MODE_KEY) === "1";
+        const sucaiMode = isSucaiModeRequested();
         if (!sucaiMode) return;
         handledSucaiInit.current = true;
         setSucaiState("loading");
@@ -92,12 +97,12 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     updateConfig("audioVoiceName", "");
                 }
                 setConfigDialogOpen(false);
-                setSucaiState("ready");
-                useUserStore.getState().configure({ canvasBaseUrl: SUCAI_API_BASE, apiBaseUrl: SUCAI_BACKEND_BASE, token })
-                void useUserStore.getState().loadAssets()
-                void initializeSucaiCanvasSync({ baseUrl: SUCAI_API_BASE, token }).catch((error) => {
+                useUserStore.getState().configure({ canvasBaseUrl: SUCAI_API_BASE, apiBaseUrl: SUCAI_BACKEND_BASE, token });
+                void useUserStore.getState().loadAssets();
+                await initializeSucaiCanvasSync({ baseUrl: SUCAI_API_BASE, token }).catch((error) => {
                     console.warn("[SucaiCanvasSync] initialization failed", error);
                 });
+                setSucaiState("ready");
             })
             .catch((error) => {
                 setSucaiError(error instanceof Error ? error.message : "画布初始化失败");
@@ -139,7 +144,11 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     }, [config.channels, message, openConfigDialog, updateConfig]);
 
     if (sucaiState === "loading") {
-        return <div className="flex min-h-screen items-center justify-center"><Spin size="large" /></div>;
+        return (
+            <div className="flex min-h-screen items-center justify-center">
+                <Spin size="large" />
+            </div>
+        );
     }
     if (sucaiState === "error") {
         return (
@@ -148,7 +157,11 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     status="403"
                     title="暂时无法进入 AI 画布"
                     subTitle={sucaiError}
-                    extra={<Button type="primary" onClick={() => window.location.assign(SUCAI_HOME_URL)}>返回素材网</Button>}
+                    extra={
+                        <Button type="primary" onClick={() => window.location.assign(SUCAI_HOME_URL)}>
+                            返回素材网
+                        </Button>
+                    }
                 />
             </div>
         );

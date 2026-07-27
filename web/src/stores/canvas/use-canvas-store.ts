@@ -35,8 +35,52 @@ type CanvasStore = {
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
 const CANVAS_STORE_KEY = "infinite-canvas:canvas_store";
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
+type PendingCanvasWrite = { name: string; value: string };
+export type CanvasPersistenceStatus = "idle" | "saving" | "saved" | "error";
+
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedPersistState: PersistedCanvasState | null = null;
+let pendingCanvasWrite: PendingCanvasWrite | null = null;
+let canvasWriteChain: Promise<void> = Promise.resolve();
+
+export const useCanvasPersistenceStatus = create<{ status: CanvasPersistenceStatus; error: string | null }>(() => ({
+    status: "idle",
+    error: null,
+}));
+
+function queueCanvasWrite(name: string, value: StorageValue<CanvasStore>) {
+    pendingCanvasWrite = { name, value: JSON.stringify(value) };
+    useCanvasPersistenceStatus.setState({ status: "saving", error: null });
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+        saveTimer = null;
+        void flushCanvasPersistence();
+    }, 400);
+}
+
+export async function flushCanvasPersistence() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = null;
+
+    while (pendingCanvasWrite) {
+        const write = pendingCanvasWrite;
+        pendingCanvasWrite = null;
+        canvasWriteChain = canvasWriteChain
+            .catch(() => undefined)
+            .then(async () => {
+                await localForageStorage.setItem(write.name, write.value);
+            });
+        try {
+            await canvasWriteChain;
+            useCanvasPersistenceStatus.setState({ status: "saved", error: null });
+        } catch (error) {
+            pendingCanvasWrite ||= write;
+            const message = error instanceof Error ? error.message : "画布保存失败";
+            useCanvasPersistenceStatus.setState({ status: "error", error: message });
+            throw error;
+        }
+    }
+}
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
@@ -50,11 +94,7 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         const nextState = value.state as PersistedCanvasState;
         if (queuedPersistState && queuedPersistState.projects === nextState.projects) return;
         queuedPersistState = nextState;
-        if (saveTimer) clearTimeout(saveTimer);
-        saveTimer = setTimeout(() => {
-            saveTimer = null;
-            void localForageStorage.setItem(name, JSON.stringify(value));
-        }, 400);
+        queueCanvasWrite(name, value);
     },
     removeItem: (name) => localForageStorage.removeItem(name),
 };

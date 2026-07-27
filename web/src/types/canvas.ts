@@ -90,6 +90,7 @@ export type CanvasNodeMetadata = {
     groupId?: string;
     scriptSetId?: string;
     scriptSetNodeId?: string;
+    scriptSetExpanded?: boolean;
     scriptAssetId?: string;
     scriptVariantId?: string;
     storyboardId?: string;

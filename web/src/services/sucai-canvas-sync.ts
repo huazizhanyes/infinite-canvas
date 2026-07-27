@@ -28,7 +28,7 @@ let pendingProjects = new Map<string, CanvasProject>();
 let pendingDeletes = new Set<string>();
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let reloadTimer: ReturnType<typeof setTimeout> | null = null;
-let flushInProgress = false;
+let flushPromise: Promise<boolean> | null = null;
 let applyingRemoteState = false;
 
 export async function initializeSucaiCanvasSync(nextConfig: SyncConfig) {
@@ -79,7 +79,8 @@ export async function initializeSucaiCanvasSync(nextConfig: SyncConfig) {
     if (!remoteData) scheduleRemoteReload();
 }
 
-export function stopSucaiCanvasSync() {
+export async function stopSucaiCanvasSync() {
+    const saved = await flushSucaiCanvasSync();
     unsubscribe?.();
     unsubscribe = null;
     initialized = false;
@@ -88,6 +89,7 @@ export function stopSucaiCanvasSync() {
     flushTimer = null;
     if (reloadTimer) clearTimeout(reloadTimer);
     reloadTimer = null;
+    return saved;
 }
 
 export async function syncSucaiCanvasProject(projectId: string) {
@@ -128,18 +130,36 @@ function scheduleFlush(delay: number) {
     if (flushTimer) clearTimeout(flushTimer);
     flushTimer = setTimeout(() => {
         flushTimer = null;
-        void flushPendingChanges();
+        void flushSucaiCanvasSync();
     }, delay);
 }
 
-async function flushPendingChanges() {
-    if (flushInProgress || !config) {
-        scheduleFlush(SAVE_DEBOUNCE);
-        return;
+export async function flushSucaiCanvasSync(): Promise<boolean> {
+    if (flushTimer) clearTimeout(flushTimer);
+    flushTimer = null;
+    if (!config || (!pendingDeletes.size && !pendingProjects.size)) return true;
+    if (flushPromise) {
+        const saved = await flushPromise;
+        if (!saved) return false;
+        return flushSucaiCanvasSync();
     }
-    flushInProgress = true;
+
+    const currentFlush = flushPendingChanges();
+    flushPromise = currentFlush;
+    try {
+        const saved = await currentFlush;
+        if (!saved) return false;
+    } finally {
+        if (flushPromise === currentFlush) flushPromise = null;
+    }
+    return pendingDeletes.size || pendingProjects.size ? flushSucaiCanvasSync() : true;
+}
+
+async function flushPendingChanges(): Promise<boolean> {
+    if (!config) return false;
     const deletes = [...pendingDeletes];
     const projects = [...pendingProjects.values()];
+    let saved = true;
     deletes.forEach((id) => pendingDeletes.delete(id));
     projects.forEach((project) => pendingProjects.delete(project.id));
 
@@ -148,6 +168,7 @@ async function flushPendingChanges() {
             try {
                 await apiRequest(`/v1/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
             } catch (error) {
+                saved = false;
                 if (!useCanvasStore.getState().projects.some((project) => project.id === id)) pendingDeletes.add(id);
                 console.warn("[SucaiCanvasSync] delete failed", { id, error });
             }
@@ -162,6 +183,7 @@ async function flushPendingChanges() {
                 if (response.data?.conflict && response.data.deleted) applyRemoteDeletion(project.id);
                 else if (response.data?.conflict && response.data.project) applyRemoteProject(response.data.project);
             } catch (error) {
+                saved = false;
                 const current = useCanvasStore.getState().projects.find((item) => item.id === project.id);
                 if (current) queueProject(current);
                 console.warn("[SucaiCanvasSync] save failed", { id: project.id, error });
@@ -169,8 +191,8 @@ async function flushPendingChanges() {
         }),
     ]);
 
-    flushInProgress = false;
     if (pendingDeletes.size || pendingProjects.size) scheduleFlush(RETRY_DELAY);
+    return saved;
 }
 
 function queueProject(project: CanvasProject) {

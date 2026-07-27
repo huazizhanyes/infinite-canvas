@@ -2,30 +2,10 @@ import { type ReactNode, useState } from "react";
 import { ConfigProvider, Switch } from "antd";
 
 import { type CanvasTheme } from "@/lib/canvas-theme";
+import { imageAspectOptionDetails, imageQualityOptionDetails, normalizeImageCount } from "@/lib/image-settings";
 import type { AiConfig } from "@/stores/use-config-store";
 
-const qualityOptions = [
-    { value: "auto", label: "自动" },
-    { value: "high", label: "高" },
-    { value: "medium", label: "中" },
-    { value: "low", label: "低" },
-];
 const DIMENSION_STEP = 16;
-const MAX_IMAGE_COUNT = 5;
-
-const aspectOptions = [
-    { value: "1:1", label: "1:1", width: 1024, height: 1024, icon: "square" },
-    { value: "3:2", label: "3:2", width: 1536, height: 1024, icon: "landscape" },
-    { value: "2:3", label: "2:3", width: 1024, height: 1536, icon: "portrait" },
-    { value: "4:3", label: "4:3", width: 1360, height: 1024, icon: "landscape" },
-    { value: "3:4", label: "3:4", width: 1024, height: 1360, icon: "portrait" },
-    { value: "16:9", label: "16:9", width: 1824, height: 1024, icon: "landscape" },
-    { value: "9:16", label: "9:16", width: 1024, height: 1824, icon: "portrait" },
-    { value: "auto", label: "auto", width: 0, height: 0, icon: "auto" },
-];
-
-export const imageQualityOptions = qualityOptions.map((item) => ({ value: item.value, label: item.label }));
-export const imageAspectOptions = aspectOptions.map((item) => ({ value: item.size || item.value, label: item.label }));
 
 type ImageSettingsPanelProps = {
     config: AiConfig;
@@ -33,18 +13,20 @@ type ImageSettingsPanelProps = {
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
+    maxCount?: number;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 5 }: ImageSettingsPanelProps) {
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const quality = config.quality || "auto";
-    const count = Math.max(1, Math.min(MAX_IMAGE_COUNT, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const normalizedMaxCount = Math.max(1, Math.floor(maxCount));
+    const count = normalizeImageCount(config.count, normalizedMaxCount);
     const activeSize = config.size || "auto";
-    const selectedAspect = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize);
-    const dimensions = readSizeDimensions(activeSize, selectedAspect || aspectOptions[0]);
+    const selectedAspect = imageAspectOptionDetails.find((item) => item.size === activeSize || item.value === activeSize);
+    const dimensions = readSizeDimensions(activeSize, selectedAspect || imageAspectOptionDetails[0]);
     const selectAspect = (value: string) => {
-        const option = aspectOptions.find((item) => item.value === value);
-        onConfigChange("size", option?.size || option?.value || "auto");
+        const option = imageAspectOptionDetails.find((item) => item.value === value);
+        onConfigChange("size", option?.size || "auto");
     };
     const updateDimension = (key: "width" | "height", value: number | null) => {
         const next = Math.max(1, Math.floor(value || dimensions[key] || 1024));
@@ -68,7 +50,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>质量</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
-                        {qualityOptions.map((item) => (
+                        {imageQualityOptionDetails.map((item) => (
                             <OptionPill key={item.value} selected={quality === item.value} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
                                 {item.label}
                             </OptionPill>
@@ -96,7 +78,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>宽高比</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
-                        {aspectOptions.map((item) => (
+                        {imageAspectOptionDetails.map((item) => (
                             <button
                                 key={item.value}
                                 type="button"
@@ -114,7 +96,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>生成张数</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
-                        {Array.from({ length: MAX_IMAGE_COUNT }, (_, index) => index + 1).map((value) => (
+                        {Array.from({ length: normalizedMaxCount }, (_, index) => index + 1).map((value) => (
                             <OptionPill key={value} selected={count === value} theme={theme} onClick={() => onConfigChange("count", String(value))}>
                                 {value} 张
                             </OptionPill>
@@ -137,14 +119,6 @@ export function ImageSettingsTheme({ theme, children }: { theme: CanvasTheme; ch
             {children}
         </ConfigProvider>
     );
-}
-
-export function imageQualityLabel(value: string) {
-    return ({ auto: "自动", high: "高", medium: "中", low: "低" } as Record<string, string>)[value] || value;
-}
-
-export function imageSizeLabel(size: string) {
-    return aspectOptions.find((item) => (item.size || item.value) === size || item.value === size)?.label || size;
 }
 
 function OptionPill({ selected, theme, onClick, children }: { selected: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {

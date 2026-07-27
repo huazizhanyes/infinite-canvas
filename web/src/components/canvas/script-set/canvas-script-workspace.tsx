@@ -1,26 +1,27 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
-import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Popconfirm, Progress, Select, Spin, Tabs, Tag, theme as antdTheme } from "antd";
-import { Boxes, ImagePlus, LoaderCircle, Plus, RefreshCw, Save, Sparkles, Trash2, UsersRound, Warehouse, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { App, Button, Checkbox, Empty, Input, Modal, Popconfirm, Progress, Select, Spin, Tabs, Tag } from "antd";
+import { Boxes, ImagePlus, LoaderCircle, Plus, Save, Sparkles, Trash2, UsersRound, Warehouse } from "lucide-react";
 import { nanoid } from "nanoid";
 
-import {
-    canvasScriptApi,
-    notifyScriptSetUpdated,
-    type ScriptAnalysisRun,
-    type ScriptAsset,
-    type ScriptAssetType,
-    type ScriptGenerationImage,
-    type ScriptGenerationBatch,
-    type ScriptPendingMention,
-    type ScriptSet,
-} from "@/services/api/canvas-script";
+import { canvasScriptApi, notifyScriptSetUpdated, type ScriptAnalysisRun, type ScriptAsset, type ScriptAssetType, type ScriptGenerationImage, type ScriptGenerationBatch, type ScriptPendingMention, type ScriptSet } from "@/services/api/canvas-script";
 import { useUserStore } from "@/stores/use-user-store";
 
 const TYPE_LABEL: Record<ScriptAssetType, string> = { character: "人物", scene: "场景", prop: "道具" };
 
-export function CanvasScriptWorkspace({ scriptSetId, open, onClose, onImagesReady }: { scriptSetId?: string; open: boolean; onClose: () => void; onImagesReady: (images: ScriptGenerationImage[]) => void }) {
+export function CanvasScriptWorkspace({
+    scriptSetId,
+    active,
+    refreshNonce,
+    onError,
+    onImagesReady,
+}: {
+    scriptSetId?: string;
+    active: boolean;
+    refreshNonce: number;
+    onError: (error: string | null) => void;
+    onImagesReady: (images: ScriptGenerationImage[]) => void;
+}) {
     const { message, modal } = App.useApp();
-    const { token } = antdTheme.useToken();
     const connection = useUserStore((state) => state.connection);
     const imageBalance = useUserStore((state) => state.assets?.assets.image.totalAvailable || 0);
     const refreshUserAssets = useUserStore((state) => state.loadAssets);
@@ -38,6 +39,11 @@ export function CanvasScriptWorkspace({ scriptSetId, open, onClose, onImagesRead
     const [editingAsset, setEditingAsset] = useState<ScriptAsset | null>(null);
     const [generating, setGenerating] = useState(false);
     const [generationBatch, setGenerationBatch] = useState<ScriptGenerationBatch | null>(null);
+    const onErrorRef = useRef(onError);
+    const onImagesReadyRef = useRef(onImagesReady);
+
+    onErrorRef.current = onError;
+    onImagesReadyRef.current = onImagesReady;
 
     const activeEpisode = scriptSet?.episodes.find((item) => item.id === activeEpisodeId);
 
@@ -46,27 +52,32 @@ export function CanvasScriptWorkspace({ scriptSetId, open, onClose, onImagesRead
         setLoading(true);
         try {
             const [nextSet, assetData] = await Promise.all([canvasScriptApi.getSet(connection, scriptSetId), canvasScriptApi.listAssets(connection, scriptSetId)]);
+            onErrorRef.current(null);
             setScriptSet(nextSet);
             setAssets(assetData.assets);
             setPending(assetData.pending);
-            setActiveEpisodeId((current) => current && nextSet.episodes.some((item) => item.id === current) ? current : nextSet.episodes[0]?.id);
+            setActiveEpisodeId((current) => (current && nextSet.episodes.some((item) => item.id === current) ? current : nextSet.episodes[0]?.id));
             const validTargetKeys = new Set(assetData.assets.flatMap((asset) => [`${asset.id}:`, ...asset.variants.map((variant) => `${asset.id}:${variant.id}`)]));
             setSelectedTargets((current) => new Set([...current].filter((key) => validTargetKeys.has(key))));
             const available = assetData.assets.flatMap((asset) => [
                 ...(asset.image?.imageUrl ? [{ id: asset.image.id, assetId: asset.id, assetType: asset.type, assetName: asset.name, status: "success", imageUrl: asset.image.imageUrl, selected: true }] : []),
-                ...asset.variants.flatMap((variant) => variant.image?.imageUrl ? [{ id: variant.image.id, assetId: asset.id, variantId: variant.id, assetType: asset.type, assetName: variant.name, status: "success", imageUrl: variant.image.imageUrl, selected: true }] : []),
+                ...asset.variants.flatMap((variant) =>
+                    variant.image?.imageUrl ? [{ id: variant.image.id, assetId: asset.id, variantId: variant.id, assetType: asset.type, assetName: variant.name, status: "success", imageUrl: variant.image.imageUrl, selected: true }] : [],
+                ),
             ]);
-            if (available.length) onImagesReady(available);
+            if (available.length) onImagesReadyRef.current(available);
         } catch (error) {
-            message.error(readError(error));
+            const reason = readError(error);
+            onErrorRef.current(reason);
+            message.error(reason);
         } finally {
             setLoading(false);
         }
-    }, [connection, message, onImagesReady, scriptSetId]);
+    }, [connection, message, scriptSetId]);
 
     useEffect(() => {
-        if (open) void load();
-    }, [load, open]);
+        if (active) void load();
+    }, [active, load, refreshNonce]);
 
     useEffect(() => {
         if (!activeEpisode) return;
@@ -79,7 +90,7 @@ export function CanvasScriptWorkspace({ scriptSetId, open, onClose, onImagesRead
         setSaving(true);
         try {
             const updated = await canvasScriptApi.updateEpisode(connection, activeEpisode.id, { title: episodeTitle, content: episodeContent });
-            setScriptSet((current) => current ? { ...current, episodes: current.episodes.map((item) => item.id === updated.id ? updated : item) } : current);
+            setScriptSet((current) => (current ? { ...current, episodes: current.episodes.map((item) => (item.id === updated.id ? updated : item)) } : current));
             message.success("本集已保存");
             return updated;
         } catch (error) {
@@ -227,50 +238,113 @@ export function CanvasScriptWorkspace({ scriptSetId, open, onClose, onImagesRead
     const filteredAssets = useMemo(() => assets.filter((asset) => assetType === "all" || asset.type === assetType), [assetType, assets]);
 
     return (
-        <Drawer open={open} onClose={onClose} width="min(720px, 100vw)" closeIcon={false} styles={{ body: { padding: 0 } }} title={null} destroyOnHidden>
-            <div className="flex h-full min-h-0 flex-col bg-[var(--ant-color-bg-container)]" style={{ "--ant-color-bg-container": token.colorBgContainer, "--ant-color-fill-secondary": token.colorFillSecondary, "--ant-color-fill-tertiary": token.colorFillTertiary, "--ant-color-text-secondary": token.colorTextSecondary, "--ant-color-text-tertiary": token.colorTextTertiary } as CSSProperties}>
-                <header className="flex shrink-0 items-center gap-3 border-b px-5 py-3">
-                    <span className="grid size-9 place-items-center rounded-md bg-[var(--ant-color-fill-secondary)]"><Warehouse className="size-4" /></span>
-                    <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold">{scriptSet?.title || "剧本集"}</div>
-                        <div className="text-xs text-[var(--ant-color-text-secondary)]">{scriptSet?.stats.episodeCount || 0} 集 · {assets.length} 个资产 · {pending.length} 项待确认</div>
-                    </div>
-                    <Button type="text" shape="circle" icon={<RefreshCw className="size-4" />} onClick={() => void load()} aria-label="刷新" />
-                    <Button type="text" shape="circle" icon={<X className="size-4" />} onClick={onClose} aria-label="关闭" />
-                </header>
-                {loading && !scriptSet ? <div className="grid flex-1 place-items-center"><Spin /></div> : (
-                    <Tabs
-                        className="script-workspace-tabs min-h-0 flex-1 [&_.ant-tabs-content]:h-full [&_.ant-tabs-content-holder]:min-h-0 [&_.ant-tabs-tabpane]:h-full [&_.ant-tabs-nav]:mb-0 [&_.ant-tabs-nav]:px-5"
-                        items={[
-                            { key: "episodes", label: "剧集", children: <EpisodesTab scriptSet={scriptSet} activeEpisodeId={activeEpisodeId} onActiveEpisode={setActiveEpisodeId} episodeTitle={episodeTitle} onEpisodeTitle={setEpisodeTitle} episodeContent={episodeContent} onEpisodeContent={setEpisodeContent} onAdd={() => void addEpisode()} onDelete={(id) => void deleteEpisode(id)} onSave={() => void saveEpisode()} onAnalyze={() => void analyzeEpisode()} saving={saving} analysis={analysis} onSettings={setScriptSet} onSaveSettings={() => void saveSetSettings()} /> },
-                            { key: "assets", label: `资产 ${assets.length}`, children: <AssetsTab assets={filteredAssets} allAssets={assets} assetType={assetType} onAssetType={setAssetType} selected={selectedTargets} onSelected={setSelectedTargets} onEdit={setEditingAsset} onGenerate={() => void generate()} generating={generating} generationBatch={generationBatch} imageBalance={imageBalance} /> },
-                            { key: "pending", label: pending.length ? `待确认 ${pending.length}` : "待确认", children: <PendingTab items={pending} onResolve={(item, decision) => void resolvePending(item, decision)} /> },
-                        ]}
-                    />
-                )}
-            </div>
-            <AssetEditModal asset={editingAsset} connectionReady={Boolean(connection)} onClose={() => setEditingAsset(null)} onSave={async (data) => {
-                if (!connection || !editingAsset) return;
-                try {
-                    await canvasScriptApi.updateAsset(connection, editingAsset.id, data);
-                    setEditingAsset(null);
-                    await load();
-                    message.success("资产已保存");
-                } catch (error) { message.error(readError(error)); }
-            }} />
-        </Drawer>
+        <div className="flex min-h-0 flex-1 flex-col" style={{ display: active ? undefined : "none" }}>
+            {loading && !scriptSet ? (
+                <div className="grid flex-1 place-items-center">
+                    <Spin />
+                </div>
+            ) : (
+                <Tabs
+                    className="script-workspace-tabs min-h-0 flex-1 [&_.ant-tabs-content]:h-full [&_.ant-tabs-content-holder]:min-h-0 [&_.ant-tabs-tabpane]:h-full [&_.ant-tabs-nav]:mb-0 [&_.ant-tabs-nav]:px-5"
+                    items={[
+                        {
+                            key: "episodes",
+                            label: "剧集",
+                            children: (
+                                <EpisodesTab
+                                    scriptSet={scriptSet}
+                                    activeEpisodeId={activeEpisodeId}
+                                    onActiveEpisode={setActiveEpisodeId}
+                                    episodeTitle={episodeTitle}
+                                    onEpisodeTitle={setEpisodeTitle}
+                                    episodeContent={episodeContent}
+                                    onEpisodeContent={setEpisodeContent}
+                                    onAdd={() => void addEpisode()}
+                                    onDelete={(id) => void deleteEpisode(id)}
+                                    onSave={() => void saveEpisode()}
+                                    onAnalyze={() => void analyzeEpisode()}
+                                    saving={saving}
+                                    analysis={analysis}
+                                    onSettings={setScriptSet}
+                                    onSaveSettings={() => void saveSetSettings()}
+                                />
+                            ),
+                        },
+                        {
+                            key: "assets",
+                            label: `资产 ${assets.length}`,
+                            children: (
+                                <AssetsTab
+                                    assets={filteredAssets}
+                                    allAssets={assets}
+                                    assetType={assetType}
+                                    onAssetType={setAssetType}
+                                    selected={selectedTargets}
+                                    onSelected={setSelectedTargets}
+                                    onEdit={setEditingAsset}
+                                    onGenerate={() => void generate()}
+                                    generating={generating}
+                                    generationBatch={generationBatch}
+                                    imageBalance={imageBalance}
+                                />
+                            ),
+                        },
+                        { key: "pending", label: pending.length ? `待确认 ${pending.length}` : "待确认", children: <PendingTab items={pending} onResolve={(item, decision) => void resolvePending(item, decision)} /> },
+                    ]}
+                />
+            )}
+            <AssetEditModal
+                asset={editingAsset}
+                connectionReady={Boolean(connection)}
+                onClose={() => setEditingAsset(null)}
+                onSave={async (data) => {
+                    if (!connection || !editingAsset) return;
+                    try {
+                        await canvasScriptApi.updateAsset(connection, editingAsset.id, data);
+                        setEditingAsset(null);
+                        await load();
+                        message.success("资产已保存");
+                    } catch (error) {
+                        message.error(readError(error));
+                    }
+                }}
+            />
+        </div>
     );
 }
 
-function EpisodesTab(props: { scriptSet: ScriptSet | null; activeEpisodeId?: string; onActiveEpisode: (id: string) => void; episodeTitle: string; onEpisodeTitle: (value: string) => void; episodeContent: string; onEpisodeContent: (value: string) => void; onAdd: () => void; onDelete: (id: string) => void; onSave: () => void; onAnalyze: () => void; saving: boolean; analysis: ScriptAnalysisRun | null; onSettings: Dispatch<SetStateAction<ScriptSet | null>>; onSaveSettings: () => void }) {
+function EpisodesTab(props: {
+    scriptSet: ScriptSet | null;
+    activeEpisodeId?: string;
+    onActiveEpisode: (id: string) => void;
+    episodeTitle: string;
+    onEpisodeTitle: (value: string) => void;
+    episodeContent: string;
+    onEpisodeContent: (value: string) => void;
+    onAdd: () => void;
+    onDelete: (id: string) => void;
+    onSave: () => void;
+    onAnalyze: () => void;
+    saving: boolean;
+    analysis: ScriptAnalysisRun | null;
+    onSettings: Dispatch<SetStateAction<ScriptSet | null>>;
+    onSaveSettings: () => void;
+}) {
     const running = props.analysis?.status === "queued" || props.analysis?.status === "running";
     return (
         <div className="grid h-full min-h-0 grid-cols-[180px_minmax(0,1fr)] max-sm:grid-cols-1">
             <aside className="min-h-0 overflow-y-auto border-r p-3 max-sm:max-h-36 max-sm:border-b max-sm:border-r-0">
-                <Button block icon={<Plus className="size-4" />} onClick={props.onAdd}>新建一集</Button>
+                <Button block icon={<Plus className="size-4" />} onClick={props.onAdd}>
+                    新建一集
+                </Button>
                 <div className="mt-2 space-y-1">
                     {props.scriptSet?.episodes.map((episode) => (
-                        <button key={episode.id} type="button" onClick={() => props.onActiveEpisode(episode.id)} className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${props.activeEpisodeId === episode.id ? "bg-[var(--ant-color-fill-secondary)]" : "hover:bg-[var(--ant-color-fill-tertiary)]"}`}>
+                        <button
+                            key={episode.id}
+                            type="button"
+                            onClick={() => props.onActiveEpisode(episode.id)}
+                            className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${props.activeEpisodeId === episode.id ? "bg-[var(--ant-color-fill-secondary)]" : "hover:bg-[var(--ant-color-fill-tertiary)]"}`}
+                        >
                             <span className="min-w-0 flex-1 truncate">{episode.title}</span>
                             <Popconfirm title="删除本集？" description="本集引用会被移除，未再使用的 AI 资产将归档。" onConfirm={() => props.onDelete(episode.id)}>
                                 <Trash2 className="size-3.5 text-[var(--ant-color-text-tertiary)] hover:text-red-500" onClick={(event) => event.stopPropagation()} />
@@ -280,37 +354,86 @@ function EpisodesTab(props: { scriptSet: ScriptSet | null; activeEpisodeId?: str
                 </div>
             </aside>
             <main className="flex min-h-0 flex-col gap-3 overflow-y-auto p-5">
-                {props.activeEpisodeId ? <>
-                    <Input value={props.episodeTitle} maxLength={120} onChange={(event) => props.onEpisodeTitle(event.target.value)} placeholder="本集标题" />
-                    <Input.TextArea value={props.episodeContent} maxLength={30000} showCount onChange={(event) => props.onEpisodeContent(event.target.value)} placeholder="粘贴当前一集的小说或剧本文案" className="min-h-[300px] flex-1 resize-none" />
-                    <div className="flex flex-wrap items-center gap-2">
-                        <Button icon={<Save className="size-4" />} loading={props.saving} onClick={props.onSave}>保存</Button>
-                        <Button type="primary" icon={running ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />} disabled={running || !props.episodeContent.trim()} onClick={props.onAnalyze}>{props.scriptSet?.episodes.find((item) => item.id === props.activeEpisodeId)?.currentAnalysisRunId ? "重新分析" : "分析资产"}</Button>
-                        {running ? <span className="text-xs text-[var(--ant-color-text-secondary)]">正在提取并匹配跨集资产...</span> : null}
-                        {props.analysis?.status === "failed" ? <span className="text-xs text-red-500">{props.analysis.error}</span> : null}
-                    </div>
-                </> : <Empty description="新建第一集后粘贴文案" />}
-                {props.scriptSet ? <section className="mt-2 border-t pt-4">
-                    <div className="mb-3 text-xs font-semibold">统一生图设置</div>
-                    <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
-                        <Input value={props.scriptSet.title} onChange={(event) => props.onSettings((current) => current ? { ...current, title: event.target.value } : current)} placeholder="剧本集名称" />
-                        <Select value={props.scriptSet.aspectRatio} onChange={(value) => props.onSettings((current) => current ? { ...current, aspectRatio: value } : current)} options={["1:1", "3:4", "4:3", "9:16", "16:9"].map((value) => ({ value, label: value }))} />
-                        <Select value={props.scriptSet.imageQuality} onChange={(value) => props.onSettings((current) => current ? { ...current, imageQuality: value } : current)} options={[{ value: "standard", label: "标准质量" }, { value: "medium", label: "中等质量" }, { value: "high", label: "高质量" }]} />
-                        <Input value={props.scriptSet.visualStyle} onChange={(event) => props.onSettings((current) => current ? { ...current, visualStyle: event.target.value } : current)} placeholder="统一画风，例如：电影感写实、东方奇幻、柔和自然光" />
-                    </div>
-                    <Button className="mt-3" size="small" onClick={props.onSaveSettings}>保存设置</Button>
-                </section> : null}
+                {props.activeEpisodeId ? (
+                    <>
+                        <Input value={props.episodeTitle} maxLength={120} onChange={(event) => props.onEpisodeTitle(event.target.value)} placeholder="本集标题" />
+                        <Input.TextArea value={props.episodeContent} maxLength={30000} showCount onChange={(event) => props.onEpisodeContent(event.target.value)} placeholder="粘贴当前一集的小说或剧本文案" className="min-h-[300px] flex-1 resize-none" />
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Button icon={<Save className="size-4" />} loading={props.saving} onClick={props.onSave}>
+                                保存
+                            </Button>
+                            <Button type="primary" icon={running ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />} disabled={running || !props.episodeContent.trim()} onClick={props.onAnalyze}>
+                                {props.scriptSet?.episodes.find((item) => item.id === props.activeEpisodeId)?.currentAnalysisRunId ? "重新分析" : "分析资产"}
+                            </Button>
+                            {running ? <span className="text-xs text-[var(--ant-color-text-secondary)]">正在提取并匹配跨集资产...</span> : null}
+                            {props.analysis?.status === "failed" ? <span className="text-xs text-red-500">{props.analysis.error}</span> : null}
+                        </div>
+                    </>
+                ) : (
+                    <Empty description="新建第一集后粘贴文案" />
+                )}
+                {props.scriptSet ? (
+                    <section className="mt-2 border-t pt-4">
+                        <div className="mb-3 text-xs font-semibold">统一生图设置</div>
+                        <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+                            <Input value={props.scriptSet.title} onChange={(event) => props.onSettings((current) => (current ? { ...current, title: event.target.value } : current))} placeholder="剧本集名称" />
+                            <Select
+                                value={props.scriptSet.aspectRatio}
+                                onChange={(value) => props.onSettings((current) => (current ? { ...current, aspectRatio: value } : current))}
+                                options={["1:1", "3:4", "4:3", "9:16", "16:9"].map((value) => ({ value, label: value }))}
+                            />
+                            <Select
+                                value={props.scriptSet.imageQuality}
+                                onChange={(value) => props.onSettings((current) => (current ? { ...current, imageQuality: value } : current))}
+                                options={[
+                                    { value: "standard", label: "标准质量" },
+                                    { value: "medium", label: "中等质量" },
+                                    { value: "high", label: "高质量" },
+                                ]}
+                            />
+                            <Input
+                                value={props.scriptSet.visualStyle}
+                                onChange={(event) => props.onSettings((current) => (current ? { ...current, visualStyle: event.target.value } : current))}
+                                placeholder="统一画风，例如：电影感写实、东方奇幻、柔和自然光"
+                            />
+                        </div>
+                        <Button className="mt-3" size="small" onClick={props.onSaveSettings}>
+                            保存设置
+                        </Button>
+                    </section>
+                ) : null}
             </main>
         </div>
     );
 }
 
-function AssetsTab({ assets, allAssets, assetType, onAssetType, selected, onSelected, onEdit, onGenerate, generating, generationBatch, imageBalance }: { assets: ScriptAsset[]; allAssets: ScriptAsset[]; assetType: ScriptAssetType | "all"; onAssetType: (value: ScriptAssetType | "all") => void; selected: Set<string>; onSelected: (value: Set<string>) => void; onEdit: (asset: ScriptAsset) => void; onGenerate: () => void; generating: boolean; generationBatch: ScriptGenerationBatch | null; imageBalance: number }) {
+function AssetsTab({
+    assets,
+    allAssets,
+    assetType,
+    onAssetType,
+    selected,
+    onSelected,
+    onEdit,
+    onGenerate,
+    generating,
+    generationBatch,
+    imageBalance,
+}: {
+    assets: ScriptAsset[];
+    allAssets: ScriptAsset[];
+    assetType: ScriptAssetType | "all";
+    onAssetType: (value: ScriptAssetType | "all") => void;
+    selected: Set<string>;
+    onSelected: (value: Set<string>) => void;
+    onEdit: (asset: ScriptAsset) => void;
+    onGenerate: () => void;
+    generating: boolean;
+    generationBatch: ScriptGenerationBatch | null;
+    imageBalance: number;
+}) {
     const totalTargets = allAssets.reduce((sum, asset) => sum + 1 + asset.variants.length, 0);
-    const missingTargets = allAssets.flatMap((asset) => [
-        ...(!asset.image?.imageUrl ? [`${asset.id}:`] : []),
-        ...asset.variants.filter((variant) => !variant.image?.imageUrl).map((variant) => `${asset.id}:${variant.id}`),
-    ]);
+    const missingTargets = allAssets.flatMap((asset) => [...(!asset.image?.imageUrl ? [`${asset.id}:`] : []), ...asset.variants.filter((variant) => !variant.image?.imageUrl).map((variant) => `${asset.id}:${variant.id}`)]);
     const visibleTargets = assets.flatMap((asset) => [`${asset.id}:`, ...asset.variants.map((variant) => `${asset.id}:${variant.id}`)]);
     const toggle = (key: string, checked: boolean) => {
         const next = new Set(selected);
@@ -326,77 +449,163 @@ function AssetsTab({ assets, allAssets, assetType, onAssetType, selected, onSele
     };
     const completed = generationBatch ? generationBatch.successCount + generationBatch.failedCount : 0;
     const progressPercent = generationBatch?.requestedCount ? Math.round((completed / generationBatch.requestedCount) * 100) : 0;
-    return <div className="flex h-full min-h-0 flex-col">
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-5 py-3">
-            <Select value={assetType} onChange={onAssetType} className="w-28" options={[{ value: "all", label: "全部资产" }, ...Object.entries(TYPE_LABEL).map(([value, label]) => ({ value, label }))]} />
-            <span className="text-xs text-[var(--ant-color-text-secondary)]">已选 {selected.size} / {totalTargets}</span>
-            <span className="text-xs text-[var(--ant-color-text-tertiary)]">图片额度 {imageBalance} 张</span>
-            <div className="flex items-center gap-1 max-sm:w-full">
-                <Button size="small" onClick={() => onSelected(new Set(missingTargets))} disabled={!missingTargets.length}>只选无图</Button>
-                <Button size="small" onClick={() => onSelected(new Set(visibleTargets))} disabled={!visibleTargets.length}>全选当前分类</Button>
-                <Button size="small" onClick={() => onSelected(new Set())} disabled={!selected.size}>清空选择</Button>
-            </div>
-            <Button className="ml-auto max-sm:ml-0" type="primary" icon={generating ? <LoaderCircle className="size-4 animate-spin" /> : <ImagePlus className="size-4" />} disabled={!selected.size || generating} onClick={onGenerate}>生成图片</Button>
-        </div>
-        {generationBatch ? <div className="mx-5 mt-3 shrink-0 rounded-md border px-3 py-3">
-            <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="font-medium">本批次生成进度</span>
-                <span className="text-[var(--ant-color-text-secondary)]">{completed}/{generationBatch.requestedCount} 已完成 · 成功 {generationBatch.successCount} · 失败 {generationBatch.failedCount}</span>
-            </div>
-            <Progress className="mt-2" percent={progressPercent} size="small" status={generationBatch.failedCount && completed === generationBatch.requestedCount ? "exception" : generationBatch.status === "success" ? "success" : "active"} />
-            <div className="mt-1 text-[11px] text-[var(--ant-color-text-tertiary)]">每个资产/变体对应一个图片任务和一张图片额度；关闭工作区后任务仍会在后台继续。</div>
-        </div> : null}
-        <div className="min-h-0 flex-1 overflow-y-auto px-5">
-            {assets.length ? assets.map((asset) => <div key={asset.id} className="flex gap-3 border-b py-4">
-                <Checkbox checked={selected.has(`${asset.id}:`)} onChange={(event) => toggle(`${asset.id}:`, event.target.checked)} />
-                <AssetThumb imageUrl={asset.image?.imageUrl} type={asset.type} />
-                <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2"><span className="truncate text-sm font-semibold">{asset.name}</span><Tag bordered={false}>{TYPE_LABEL[asset.type]}</Tag>{statusTag(generationFor(asset.id))}<span className="text-xs text-[var(--ant-color-text-tertiary)]">出现 {asset.mentionCount} 集</span></div>
-                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--ant-color-text-secondary)]">{asset.visualDescription || "暂无视觉描述"}</p>
-                    {asset.aliases.length ? <div className="mt-1 text-xs text-[var(--ant-color-text-tertiary)]">别名：{asset.aliases.join("、")}</div> : null}
-                    {asset.variants.map((variant) => <label key={variant.id} className="mt-2 flex items-center gap-2 rounded-md bg-[var(--ant-color-fill-tertiary)] px-2 py-2 text-xs">
-                        <Checkbox checked={selected.has(`${asset.id}:${variant.id}`)} onChange={(event) => toggle(`${asset.id}:${variant.id}`, event.target.checked)} />
-                        <span className="min-w-0 flex-1 truncate">变体：{variant.name}</span>
-                        {statusTag(generationFor(asset.id, variant.id))}
-                        {variant.image?.imageUrl ? <img src={variant.image.imageUrl} className="size-8 rounded object-cover" alt="" /> : null}
-                    </label>)}
+    return (
+        <div className="flex h-full min-h-0 flex-col">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-5 py-3">
+                <Select value={assetType} onChange={onAssetType} className="w-28" options={[{ value: "all", label: "全部资产" }, ...Object.entries(TYPE_LABEL).map(([value, label]) => ({ value, label }))]} />
+                <span className="text-xs text-[var(--ant-color-text-secondary)]">
+                    已选 {selected.size} / {totalTargets}
+                </span>
+                <span className="text-xs text-[var(--ant-color-text-tertiary)]">图片额度 {imageBalance} 张</span>
+                <div className="flex items-center gap-1 max-sm:w-full">
+                    <Button size="small" onClick={() => onSelected(new Set(missingTargets))} disabled={!missingTargets.length}>
+                        只选无图
+                    </Button>
+                    <Button size="small" onClick={() => onSelected(new Set(visibleTargets))} disabled={!visibleTargets.length}>
+                        全选当前分类
+                    </Button>
+                    <Button size="small" onClick={() => onSelected(new Set())} disabled={!selected.size}>
+                        清空选择
+                    </Button>
                 </div>
-                <Button size="small" onClick={() => onEdit(asset)}>编辑</Button>
-            </div>) : <Empty className="mt-16" description="分析剧集后将在这里形成跨集资产库" />}
+                <Button className="ml-auto max-sm:ml-0" type="primary" icon={generating ? <LoaderCircle className="size-4 animate-spin" /> : <ImagePlus className="size-4" />} disabled={!selected.size || generating} onClick={onGenerate}>
+                    生成图片
+                </Button>
+            </div>
+            {generationBatch ? (
+                <div className="mx-5 mt-3 shrink-0 rounded-md border px-3 py-3">
+                    <div className="flex items-center justify-between gap-3 text-xs">
+                        <span className="font-medium">本批次生成进度</span>
+                        <span className="text-[var(--ant-color-text-secondary)]">
+                            {completed}/{generationBatch.requestedCount} 已完成 · 成功 {generationBatch.successCount} · 失败 {generationBatch.failedCount}
+                        </span>
+                    </div>
+                    <Progress className="mt-2" percent={progressPercent} size="small" status={generationBatch.failedCount && completed === generationBatch.requestedCount ? "exception" : generationBatch.status === "success" ? "success" : "active"} />
+                    <div className="mt-1 text-[11px] text-[var(--ant-color-text-tertiary)]">每个资产/变体对应一个图片任务和一张图片额度；关闭工作区后任务仍会在后台继续。</div>
+                </div>
+            ) : null}
+            <div className="min-h-0 flex-1 overflow-y-auto px-5">
+                {assets.length ? (
+                    assets.map((asset) => (
+                        <div key={asset.id} className="flex gap-3 border-b py-4">
+                            <Checkbox checked={selected.has(`${asset.id}:`)} onChange={(event) => toggle(`${asset.id}:`, event.target.checked)} />
+                            <AssetThumb imageUrl={asset.image?.imageUrl} type={asset.type} />
+                            <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                    <span className="truncate text-sm font-semibold">{asset.name}</span>
+                                    <Tag bordered={false}>{TYPE_LABEL[asset.type]}</Tag>
+                                    {statusTag(generationFor(asset.id))}
+                                    <span className="text-xs text-[var(--ant-color-text-tertiary)]">出现 {asset.mentionCount} 集</span>
+                                </div>
+                                <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--ant-color-text-secondary)]">{asset.visualDescription || "暂无视觉描述"}</p>
+                                {asset.aliases.length ? <div className="mt-1 text-xs text-[var(--ant-color-text-tertiary)]">别名：{asset.aliases.join("、")}</div> : null}
+                                {asset.variants.map((variant) => (
+                                    <label key={variant.id} className="mt-2 flex items-center gap-2 rounded-md bg-[var(--ant-color-fill-tertiary)] px-2 py-2 text-xs">
+                                        <Checkbox checked={selected.has(`${asset.id}:${variant.id}`)} onChange={(event) => toggle(`${asset.id}:${variant.id}`, event.target.checked)} />
+                                        <span className="min-w-0 flex-1 truncate">变体：{variant.name}</span>
+                                        {statusTag(generationFor(asset.id, variant.id))}
+                                        {variant.image?.imageUrl ? <img src={variant.image.imageUrl} className="size-8 rounded object-cover" alt="" /> : null}
+                                    </label>
+                                ))}
+                            </div>
+                            <Button size="small" onClick={() => onEdit(asset)}>
+                                编辑
+                            </Button>
+                        </div>
+                    ))
+                ) : (
+                    <Empty className="mt-16" description="分析剧集后将在这里形成跨集资产库" />
+                )}
+            </div>
         </div>
-    </div>;
+    );
 }
 
 function PendingTab({ items, onResolve }: { items: ScriptPendingMention[]; onResolve: (item: ScriptPendingMention, decision: "reuse" | "variant" | "new") => void }) {
-    return <div className="h-full overflow-y-auto px-5 py-2">
-        {items.length ? items.map((item) => <div key={item.id} className="border-b py-4">
-            <div className="mb-3 flex items-center gap-2"><Tag color="gold">疑似重复</Tag><span className="text-sm font-semibold">{item.extractedName}</span><span className="text-xs text-[var(--ant-color-text-secondary)]">{item.episodeTitle} · 置信度 {Math.round(item.confidence * 100)}%</span></div>
-            <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
-                <div className="rounded-md border p-3"><div className="mb-2 text-xs font-semibold">本集提取</div><p className="text-xs leading-5 text-[var(--ant-color-text-secondary)]">{String(item.extracted.visualDescription || item.sourceExcerpt || "暂无描述")}</p></div>
-                <div className="rounded-md border p-3"><div className="mb-2 text-xs font-semibold">已有资产：{item.suggestedAsset?.name || "未找到候选"}</div><p className="text-xs leading-5 text-[var(--ant-color-text-secondary)]">{item.suggestedAsset?.visualDescription || "暂无描述"}</p></div>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2"><Button type="primary" disabled={!item.suggestedAsset} onClick={() => onResolve(item, "reuse")}>复用已有</Button><Button disabled={!item.suggestedAsset} onClick={() => onResolve(item, "variant")}>作为变体</Button><Button onClick={() => onResolve(item, "new")}>新建资产</Button></div>
-        </div>) : <Empty className="mt-16" description="没有需要人工确认的重复资产" />}
-    </div>;
+    return (
+        <div className="h-full overflow-y-auto px-5 py-2">
+            {items.length ? (
+                items.map((item) => (
+                    <div key={item.id} className="border-b py-4">
+                        <div className="mb-3 flex items-center gap-2">
+                            <Tag color="gold">疑似重复</Tag>
+                            <span className="text-sm font-semibold">{item.extractedName}</span>
+                            <span className="text-xs text-[var(--ant-color-text-secondary)]">
+                                {item.episodeTitle} · 置信度 {Math.round(item.confidence * 100)}%
+                            </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+                            <div className="rounded-md border p-3">
+                                <div className="mb-2 text-xs font-semibold">本集提取</div>
+                                <p className="text-xs leading-5 text-[var(--ant-color-text-secondary)]">{String(item.extracted.visualDescription || item.sourceExcerpt || "暂无描述")}</p>
+                            </div>
+                            <div className="rounded-md border p-3">
+                                <div className="mb-2 text-xs font-semibold">已有资产：{item.suggestedAsset?.name || "未找到候选"}</div>
+                                <p className="text-xs leading-5 text-[var(--ant-color-text-secondary)]">{item.suggestedAsset?.visualDescription || "暂无描述"}</p>
+                            </div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            <Button type="primary" disabled={!item.suggestedAsset} onClick={() => onResolve(item, "reuse")}>
+                                复用已有
+                            </Button>
+                            <Button disabled={!item.suggestedAsset} onClick={() => onResolve(item, "variant")}>
+                                作为变体
+                            </Button>
+                            <Button onClick={() => onResolve(item, "new")}>新建资产</Button>
+                        </div>
+                    </div>
+                ))
+            ) : (
+                <Empty className="mt-16" description="没有需要人工确认的重复资产" />
+            )}
+        </div>
+    );
 }
 
 function AssetEditModal({ asset, connectionReady, onClose, onSave }: { asset: ScriptAsset | null; connectionReady: boolean; onClose: () => void; onSave: (data: Partial<ScriptAsset>) => Promise<void> }) {
     const [draft, setDraft] = useState<ScriptAsset | null>(asset);
     useEffect(() => setDraft(asset), [asset]);
-    return <Modal open={Boolean(asset)} title="编辑规范资产" onCancel={onClose} onOk={() => draft && void onSave({ name: draft.name, aliases: draft.aliases, visualDescription: draft.visualDescription, imagePrompt: draft.imagePrompt })} okButtonProps={{ disabled: !connectionReady || !draft?.name.trim() }} destroyOnHidden>
-        {draft ? <div className="space-y-3">
-            <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="资产名称" />
-            <Input value={draft.aliases.join("、")} onChange={(event) => setDraft({ ...draft, aliases: event.target.value.split(/[、,，]/).map((item) => item.trim()).filter(Boolean) })} placeholder="别名，用顿号分隔" />
-            <Input.TextArea rows={4} value={draft.visualDescription} onChange={(event) => setDraft({ ...draft, visualDescription: event.target.value })} placeholder="稳定视觉描述" />
-            <Input.TextArea rows={4} value={draft.imagePrompt} onChange={(event) => setDraft({ ...draft, imagePrompt: event.target.value })} placeholder="生图提示词" />
-        </div> : null}
-    </Modal>;
+    return (
+        <Modal
+            open={Boolean(asset)}
+            title="编辑规范资产"
+            onCancel={onClose}
+            onOk={() => draft && void onSave({ name: draft.name, aliases: draft.aliases, visualDescription: draft.visualDescription, imagePrompt: draft.imagePrompt })}
+            okButtonProps={{ disabled: !connectionReady || !draft?.name.trim() }}
+            destroyOnHidden
+        >
+            {draft ? (
+                <div className="space-y-3">
+                    <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="资产名称" />
+                    <Input
+                        value={draft.aliases.join("、")}
+                        onChange={(event) =>
+                            setDraft({
+                                ...draft,
+                                aliases: event.target.value
+                                    .split(/[、,，]/)
+                                    .map((item) => item.trim())
+                                    .filter(Boolean),
+                            })
+                        }
+                        placeholder="别名，用顿号分隔"
+                    />
+                    <Input.TextArea rows={4} value={draft.visualDescription} onChange={(event) => setDraft({ ...draft, visualDescription: event.target.value })} placeholder="稳定视觉描述" />
+                    <Input.TextArea rows={4} value={draft.imagePrompt} onChange={(event) => setDraft({ ...draft, imagePrompt: event.target.value })} placeholder="生图提示词" />
+                </div>
+            ) : null}
+        </Modal>
+    );
 }
 
 function AssetThumb({ imageUrl, type }: { imageUrl?: string; type: ScriptAssetType }) {
     if (imageUrl) return <img src={imageUrl} className="size-16 shrink-0 rounded-md object-cover" alt="" />;
     const Icon = type === "character" ? UsersRound : type === "scene" ? Warehouse : Boxes;
-    return <span className="grid size-16 shrink-0 place-items-center rounded-md bg-[var(--ant-color-fill-secondary)] text-[var(--ant-color-text-tertiary)]"><Icon className="size-5" /></span>;
+    return (
+        <span className="grid size-16 shrink-0 place-items-center rounded-md bg-[var(--ant-color-fill-secondary)] text-[var(--ant-color-text-tertiary)]">
+            <Icon className="size-5" />
+        </span>
+    );
 }
 
 function readError(error: unknown) {
