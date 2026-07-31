@@ -6,10 +6,27 @@ import { nanoid } from "nanoid";
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 
+export type VideoModelCapabilities = {
+    provider: "canvas-video";
+    displayName: string;
+    channel: string;
+    routeLabel?: string;
+    upstreamModel: string;
+    pricingVersion?: number;
+    qualities: Array<{ quality: string; pricingVersion?: number; pricing: { type: string; credits: number; inputVideoMultiplier?: number } }>;
+    aspectRatios: string[];
+    duration: { min?: number | null; max?: number | null; options?: number[] | null };
+    modes: string[];
+    inputImagesMax: number;
+    inputVideosMax: number;
+    inputAudiosMax: number;
+};
+
 export type ChannelModel = {
     name: string;
     capability: ModelCapability;
     script?: string;
+    videoCapabilities?: VideoModelCapabilities;
 };
 
 export type ModelChannel = {
@@ -41,6 +58,7 @@ export type AiConfig = {
     vquality: string;
     videoGenerateAudio: string;
     videoWatermark: string;
+    videoMode: string;
     systemPrompt: string;
     models: string[];
     quality: string;
@@ -97,6 +115,7 @@ export const defaultConfig: AiConfig = {
     vquality: "720",
     videoGenerateAudio: "true",
     videoWatermark: "false",
+    videoMode: "text2video",
     systemPrompt: "",
     models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
     quality: "auto",
@@ -150,6 +169,10 @@ function findChannelModel(config: AiConfig, value: string): { channel: ModelChan
 
 export function modelCapabilityOf(config: AiConfig, value: string): ModelCapability | undefined {
     return findChannelModel(config, value)?.model.capability;
+}
+
+export function videoCapabilitiesOf(config: AiConfig, value: string) {
+    return findChannelModel(config, value)?.model.videoCapabilities;
 }
 
 export function modelMatchesCapability(config: AiConfig, value: string, capability?: ModelCapability) {
@@ -232,6 +255,7 @@ export const useConfigStore = create<ConfigStore>()(
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
+                        videoMode: config.videoMode || "text2video",
                         canvasImageCount: config.canvasImageCount || "3",
                     },
                 };
@@ -255,7 +279,8 @@ export function normalizeChannelModels(models: Array<string | ChannelModel> | un
         seen.add(name);
         const capability = typeof item === "string" ? guessCapability(name) : item.capability || guessCapability(name);
         const script = typeof item === "string" ? undefined : item.script?.trim() || undefined;
-        result.push({ name, capability, script });
+        const videoCapabilities = typeof item === "string" ? undefined : item.videoCapabilities;
+        result.push({ name, capability, script, videoCapabilities });
     }
     return result;
 }
@@ -294,7 +319,9 @@ export function modelOptionLabel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
-    return channel ? `${decoded.model}（${channel.name}）` : decoded.model;
+    const model = channel?.models.find((item) => item.name === decoded.model);
+    const name = model?.videoCapabilities?.displayName || decoded.model;
+    return channel ? `${name}（${channel.name}）` : name;
 }
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {

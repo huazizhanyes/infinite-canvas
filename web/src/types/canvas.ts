@@ -63,6 +63,18 @@ export type CanvasNodeMetadata = {
     vquality?: string;
     generateAudio?: string;
     watermark?: string;
+    videoMode?: string;
+    videoTaskId?: string;
+    videoProvider?: "canvas-video";
+    serverStorageKey?: string;
+    videoProgress?: number;
+    videoPhase?: "queued" | "generating" | "archiving";
+    estimatedCostCredits?: number;
+    chargedCredits?: number;
+    videoBalanceAfter?: number;
+    videoBillingStatus?: string;
+    videoRouteLabel?: string;
+    pricingVersion?: number;
     audioVoice?: string;
     audioVoiceName?: string;
     audioFormat?: string;

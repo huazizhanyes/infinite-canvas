@@ -22,6 +22,7 @@ export type CanvasHostTask = {
 type CanvasHostTaskStore = {
     tasks: CanvasHostTask[];
     startTask: (task: Omit<CanvasHostTask, "status" | "createdAt" | "updatedAt">) => void;
+    updateTask: (id: string, patch: Partial<Pick<CanvasHostTask, "stage" | "progress" | "status" | "error">>) => void;
     finishTask: (id: string, status: Exclude<CanvasHostTaskStatus, "queued" | "running">, error?: string) => void;
 };
 
@@ -38,6 +39,9 @@ export const useCanvasHostTaskStore = create<CanvasHostTaskStore>()(
                     ].slice(0, 30),
                 }));
             },
+            updateTask: (id, patch) => set((state) => ({
+                tasks: state.tasks.map((task) => task.id === id ? { ...task, ...patch, updatedAt: new Date().toISOString() } : task),
+            })),
             finishTask: (id, status, error) => set((state) => ({
                 tasks: state.tasks.map((task) => task.id === id
                     ? { ...task, status, error, progress: status === "succeeded" ? 100 : task.progress, updatedAt: new Date().toISOString() }

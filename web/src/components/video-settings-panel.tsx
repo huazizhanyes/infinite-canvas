@@ -4,7 +4,7 @@ import { Switch } from "antd";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceDurationOptions, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
+import { modelOptionName, videoCapabilitiesOf, type AiConfig, type VideoModelCapabilities } from "@/stores/use-config-store";
 
 const resolutionOptions = [
     { value: "720", label: "720p" },
@@ -28,13 +28,18 @@ export const videoSecondOptions = secondOptions.map((value) => String(value));
 
 type VideoSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark", value: string) => void;
+    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode", value: string) => void;
     theme: CanvasTheme;
+    hasReferenceVideo?: boolean;
     showTitle?: boolean;
     className?: string;
 };
 
-export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: VideoSettingsPanelProps) {
+export function VideoSettingsPanel({ config, onConfigChange, theme, hasReferenceVideo = false, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: VideoSettingsPanelProps) {
+    const backendCapabilities = videoCapabilitiesOf(config, config.model) || videoCapabilitiesOf(config, config.videoModel);
+    if (backendCapabilities) {
+        return <BackendVideoSettingsPanel config={config} capabilities={backendCapabilities} onConfigChange={onConfigChange} theme={theme} hasReferenceVideo={hasReferenceVideo} showTitle={showTitle} className={className} />;
+    }
     if (isSeedanceVideoConfig(config)) {
         return <SeedanceVideoSettingsPanel config={config} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
     }
@@ -102,6 +107,87 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
             </div>
         </ImageSettingsTheme>
     );
+}
+
+function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme, hasReferenceVideo, showTitle, className }: VideoSettingsPanelProps & { capabilities: VideoModelCapabilities }) {
+    const quality = capabilities.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities.qualities[0]?.quality || "";
+    const ratio = capabilities.aspectRatios.includes(config.size) ? config.size : capabilities.aspectRatios[0] || "";
+    const mode = capabilities.modes.includes(config.videoMode) ? config.videoMode : capabilities.modes[0] || "";
+    const durationOptions = capabilities.duration.options || [];
+    const requestedDuration = Math.floor(Number(config.videoSeconds));
+    const duration = durationOptions.length
+        ? (durationOptions.includes(requestedDuration) ? requestedDuration : durationOptions[0])
+        : Math.max(capabilities.duration.min ?? 1, Math.min(capabilities.duration.max ?? 60, Number.isFinite(requestedDuration) ? requestedDuration : capabilities.duration.min ?? 5));
+    const selectedQuality = capabilities.qualities.find((item) => item.quality === quality) || capabilities.qualities[0];
+    const unit = selectedQuality?.pricing.type === "per_second" ? "积分/秒" : "积分/条";
+    const referenceMultiplier = hasReferenceVideo ? Number(selectedQuality?.pricing.inputVideoMultiplier || 1) : 1;
+    const estimatedCredits = Math.ceil((selectedQuality?.pricing.type === "per_second" ? Number(selectedQuality?.pricing.credits || 0) * duration : Number(selectedQuality?.pricing.credits || 0)) * referenceMultiplier);
+
+    return (
+        <ImageSettingsTheme theme={theme}>
+            <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
+                {showTitle ? <div className="text-lg font-semibold">视频设置</div> : null}
+                <SettingGroup title="生成模式" color={theme.node.muted}>
+                    <div className="grid grid-cols-3 gap-2.5">
+                        {capabilities.modes.map((value) => (
+                            <OptionPill key={value} selected={mode === value} theme={theme} onClick={() => onConfigChange("videoMode", value)}>
+                                {videoModeLabel(value)}
+                            </OptionPill>
+                        ))}
+                    </div>
+                </SettingGroup>
+                <SettingGroup title="清晰度" color={theme.node.muted}>
+                    <div className="grid grid-cols-3 gap-2.5">
+                        {capabilities.qualities.map((item) => (
+                            <OptionPill key={item.quality} selected={quality === item.quality} theme={theme} onClick={() => onConfigChange("vquality", item.quality)}>
+                                <span className="flex flex-col items-center leading-tight">
+                                    <span>{item.quality}</span>
+                                    <span className="text-[10px] opacity-60">{item.pricing.credits}{item.pricing.type === "per_second" ? "积分/秒" : "积分/条"}</span>
+                                </span>
+                            </OptionPill>
+                        ))}
+                    </div>
+                </SettingGroup>
+                <SettingGroup title="画幅比例" color={theme.node.muted}>
+                    <div className="grid grid-cols-3 gap-2.5">
+                        {capabilities.aspectRatios.map((value) => {
+                            const preview = ratioPreview(value);
+                            return (
+                                <button key={value} type="button" className="flex h-[68px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border bg-transparent px-1 text-sm transition hover:opacity-80" style={{ borderColor: ratio === value ? theme.node.text : theme.node.stroke, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={() => onConfigChange("size", value)}>
+                                    <SizePreview width={preview.width} height={preview.height} color={theme.node.text} />
+                                    <span>{value}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </SettingGroup>
+                <SettingGroup title="时长" color={theme.node.muted}>
+                    {durationOptions.length ? (
+                        <div className="grid grid-cols-4 gap-2.5">
+                            {durationOptions.map((value) => (
+                                <OptionPill key={value} selected={duration === value} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
+                                    {value}s
+                                </OptionPill>
+                            ))}
+                        </div>
+                    ) : (
+                        <NumberInput value={String(duration)} min={capabilities.duration.min ?? 1} max={capabilities.duration.max ?? 60} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                    )}
+                </SettingGroup>
+                <div className="rounded-md border px-3 py-2 text-sm" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
+                    <div className="flex items-center justify-between gap-3"><span style={{ color: theme.node.muted }}>预计消费</span><strong>{estimatedCredits} 积分</strong></div>
+                    <div className="mt-1 text-[11px] opacity-60">{selectedQuality?.pricing.credits || 0} {unit}{selectedQuality?.pricing.type === "per_second" ? ` × ${duration} 秒` : ""}{hasReferenceVideo && referenceMultiplier > 1 ? ` × ${referenceMultiplier} 参考视频倍率` : ""}</div>
+                </div>
+            </div>
+        </ImageSettingsTheme>
+    );
+}
+
+function videoModeLabel(mode: string) {
+    if (mode === "text2video") return "文生视频";
+    if (mode === "image2video") return "参考生成";
+    if (mode === "frames2video") return "首尾帧";
+    return mode;
 }
 
 function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, className }: VideoSettingsPanelProps) {

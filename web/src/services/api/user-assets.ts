@@ -68,6 +68,8 @@ export type ImageRechargePlan = {
     recommended?: boolean
 }
 
+export type VideoRechargePlan = ImageRechargePlan
+
 export type RechargeOrder = {
     out_trade_no: string
     qr_url?: string
@@ -120,6 +122,23 @@ export const userAssetsApi = {
             { headers: authHeaders(connection.token) },
         )
         if (!data.data?.out_trade_no) throw new Error('创建 Token 充值订单失败')
+        return data.data
+    },
+
+    async getVideoPlans(connection: UserAssetConnection) {
+        const { data } = await axios.get<{ data?: VideoRechargePlan[] }>(`${trimBase(connection.canvasBaseUrl)}/v1/video/recharge-plans`, {
+            headers: authHeaders(connection.token),
+        })
+        return data.data || []
+    },
+
+    async createVideoOrder(connection: UserAssetConnection, planId: string) {
+        const { data } = await axios.post<{ data?: RechargeOrder }>(
+            `${trimBase(connection.apiBaseUrl)}/payments/video/create`,
+            { plan_id: planId },
+            { headers: authHeaders(connection.token) },
+        )
+        if (!data.data?.out_trade_no) throw new Error('创建视频积分充值订单失败')
         return data.data
     },
 

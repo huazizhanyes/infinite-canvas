@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { App, Avatar, Button, Drawer, Empty, Grid, Modal, Popover, Spin, Tag, Tooltip } from 'antd'
 import { AudioLines, ExternalLink, Image, RefreshCw, Type, UserRound, Video, WalletCards, X } from 'lucide-react'
 
-import { userAssetsApi, type ImageRechargePlan, type TextTokenPlan, type TextTokenTransaction, type UserAssetBalance, type UserAssetSummary } from '@/services/api/user-assets'
+import { userAssetsApi, type ImageRechargePlan, type TextTokenPlan, type TextTokenTransaction, type UserAssetBalance, type UserAssetSummary, type VideoRechargePlan } from '@/services/api/user-assets'
 import { useUserStore } from '@/stores/use-user-store'
 
 const AUDIO_RECHARGE_URL = 'https://peiyin.hzzy.xyz/#/online/subscription'
@@ -27,7 +27,11 @@ export function UserAssetMenu({ style }: { style?: CSSProperties }) {
     const [imagePlanLoading, setImagePlanLoading] = useState(false)
     const [imagePlans, setImagePlans] = useState<ImageRechargePlan[]>([])
     const [imageOrderingPlanId, setImageOrderingPlanId] = useState('')
-    const [payment, setPayment] = useState<{ kind: 'image' | 'text'; outTradeNo: string; qrUrl?: string } | null>(null)
+    const [videoOpen, setVideoOpen] = useState(false)
+    const [videoPlanLoading, setVideoPlanLoading] = useState(false)
+    const [videoPlans, setVideoPlans] = useState<VideoRechargePlan[]>([])
+    const [videoOrderingPlanId, setVideoOrderingPlanId] = useState('')
+    const [payment, setPayment] = useState<{ kind: 'image' | 'text' | 'video'; outTradeNo: string; qrUrl?: string } | null>(null)
 
     const loadTokenDetails = async () => {
         if (!connection) return
@@ -97,6 +101,28 @@ export function UserAssetMenu({ style }: { style?: CSSProperties }) {
         }
     }
 
+    const loadVideoPlans = async () => {
+        if (!connection) return
+        setVideoPlanLoading(true)
+        try { setVideoPlans(await userAssetsApi.getVideoPlans(connection)) } catch (reason) { message.error(readError(reason, '视频积分套餐读取失败')) } finally { setVideoPlanLoading(false) }
+    }
+
+    const openVideoRecharge = () => {
+        setOpen(false)
+        setVideoOpen(true)
+        void loadAssets()
+        void loadVideoPlans()
+    }
+
+    const createVideoOrder = async (plan: VideoRechargePlan) => {
+        if (!connection) return
+        setVideoOrderingPlanId(plan.id)
+        try {
+            const order = await userAssetsApi.createVideoOrder(connection, plan.id)
+            setPayment({ kind: 'video', outTradeNo: order.out_trade_no, qrUrl: order.qr_url || order.code_url })
+        } catch (reason) { message.error(readError(reason, '创建视频积分充值订单失败')) } finally { setVideoOrderingPlanId('') }
+    }
+
     useEffect(() => {
         if (!payment || !connection) return
         const timer = window.setInterval(() => {
@@ -104,13 +130,24 @@ export function UserAssetMenu({ style }: { style?: CSSProperties }) {
                 if (status !== 'paid') return
                 window.clearInterval(timer)
                 setPayment(null)
-                message.success(payment.kind === 'image' ? '图片额度已到账' : 'Token 已到账')
+                message.success(payment.kind === 'image' ? '图片额度已到账' : payment.kind === 'video' ? '视频积分已到账' : 'Token 已到账')
                 void loadAssets()
                 if (payment.kind === 'text') void loadTokenDetails()
             }).catch(() => undefined)
         }, 2500)
         return () => window.clearInterval(timer)
     }, [connection, loadAssets, message, payment])
+
+    useEffect(() => {
+        const refresh = () => void loadAssets()
+        const openRecharge = () => { setOpen(false); setVideoOpen(true); void loadAssets(); void loadVideoPlans() }
+        window.addEventListener('canvas-video-balance-changed', refresh)
+        window.addEventListener('canvas-video-recharge-required', openRecharge)
+        return () => {
+            window.removeEventListener('canvas-video-balance-changed', refresh)
+            window.removeEventListener('canvas-video-recharge-required', openRecharge)
+        }
+    }, [loadAssets, connection])
 
     const content = (
         <AssetPanel
@@ -121,6 +158,7 @@ export function UserAssetMenu({ style }: { style?: CSSProperties }) {
             onOpenToken={openDetails}
             onOpenImage={openImageRecharge}
             onOpenAudio={() => window.open(AUDIO_RECHARGE_URL, '_blank', 'noopener,noreferrer')}
+            onOpenVideo={openVideoRecharge}
         />
     )
     const trigger = (
@@ -166,6 +204,7 @@ export function UserAssetMenu({ style }: { style?: CSSProperties }) {
                 onRefresh={() => { void loadAssets(); void loadImagePlans() }}
                 onBuy={(plan) => void createImageOrder(plan)}
             />
+            <VideoCreditModal open={videoOpen} balance={summary?.assets.video} loading={loading || videoPlanLoading} plans={videoPlans} orderingPlanId={videoOrderingPlanId} onClose={() => setVideoOpen(false)} onRefresh={() => { void loadAssets(); void loadVideoPlans() }} onBuy={(plan) => void createVideoOrder(plan)} />
             <Modal title="文本 Token" width={760} open={detailOpen} onCancel={() => setDetailOpen(false)} footer={null} destroyOnHidden>
                 <Spin spinning={detailLoading}>
                     <section className="border-y border-stone-200 py-4 dark:border-stone-800">
@@ -307,7 +346,36 @@ function ImageQuotaModal({ open, summary, loading, plans, orderingPlanId, onClos
     )
 }
 
-function AssetPanel({ summary, loading, error, onRefresh, onOpenToken, onOpenImage, onOpenAudio }: {
+function VideoCreditModal({ open, balance, loading, plans, orderingPlanId, onClose, onRefresh, onBuy }: {
+    open: boolean
+    balance?: UserAssetBalance
+    loading: boolean
+    plans: VideoRechargePlan[]
+    orderingPlanId: string
+    onClose: () => void
+    onRefresh: () => void
+    onBuy: (plan: VideoRechargePlan) => void
+}) {
+    return (
+        <Modal title="视频积分" width={520} open={open} onCancel={onClose} footer={null} destroyOnHidden>
+            <Spin spinning={loading}>
+                <section className="border-y border-stone-200 py-4 dark:border-stone-800">
+                    <div className="text-sm text-stone-500">当前可用</div>
+                    <div className="mt-1 text-3xl font-semibold">{formatNumber(balance?.totalAvailable)} 积分</div>
+                </section>
+                <div className="mb-3 mt-5 flex items-center justify-between"><h3 className="text-base font-semibold">充值套餐</h3><Button type="text" size="small" icon={<RefreshCw className="size-3.5" />} onClick={onRefresh}>刷新</Button></div>
+                {plans.length ? <div className="grid gap-2 sm:grid-cols-3">{plans.map((plan) => (
+                    <button key={plan.id} type="button" className="min-h-24 rounded-md border border-stone-200 p-3 text-left transition hover:border-stone-500 dark:border-stone-700" disabled={!!orderingPlanId} onClick={() => onBuy(plan)}>
+                        <div className="flex items-start justify-between gap-2"><strong>{formatNumber(plan.credits)} 积分</strong>{plan.recommended ? <Tag color="blue" className="m-0">推荐</Tag> : null}</div>
+                        <div className="mt-3 text-sm text-stone-500">{orderingPlanId === plan.id ? '创建订单中...' : `¥ ${Number(plan.price).toFixed(2)}`}</div>
+                    </button>
+                ))}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可用视频积分套餐" />}
+            </Spin>
+        </Modal>
+    )
+}
+
+function AssetPanel({ summary, loading, error, onRefresh, onOpenToken, onOpenImage, onOpenAudio, onOpenVideo }: {
     summary: UserAssetSummary | null
     loading: boolean
     error: string
@@ -315,6 +383,7 @@ function AssetPanel({ summary, loading, error, onRefresh, onOpenToken, onOpenIma
     onOpenToken: () => void
     onOpenImage: () => void
     onOpenAudio: () => void
+    onOpenVideo: () => void
 }) {
     const rows = useMemo(() => summary ? [
         { key: 'image', label: '图片额度', icon: Image, balance: summary.assets.image },
@@ -347,7 +416,7 @@ function AssetPanel({ summary, loading, error, onRefresh, onOpenToken, onOpenIma
                                 ? <Button type="link" size="small" className="!h-auto !p-0" icon={<WalletCards className="size-3.5" />} onClick={onOpenToken}>充值与明细</Button>
                                 : key === 'audio'
                                     ? <Button type="link" size="small" className="!h-auto !p-0" icon={<ExternalLink className="size-3.5" />} onClick={onOpenAudio}>去充值</Button>
-                                    : null}
+                                    : <Button type="link" size="small" className="!h-auto !p-0" icon={<WalletCards className="size-3.5" />} onClick={onOpenVideo}>充值</Button>}
                     />
                 ))}
             </div>
@@ -370,7 +439,7 @@ function AssetRow({ label, icon, balance, action }: { label: string; icon: React
             </div>
             {!unavailable ? (
                 <div className="mt-1.5 flex items-center justify-between gap-3 pl-6 text-xs text-stone-500">
-                    <span className="min-w-0 truncate">{balance.unlimited ? `${balance.membershipName || '永久会员'} · 不限字符` : `月赠剩余 ${formatNumber(balance.monthlyRemaining)} · 充值/永久 ${formatNumber(balance.purchasedBalance)}`}</span>
+                    <span className="min-w-0 truncate">{balance.unlimited ? `${balance.membershipName || '永久会员'} · 不限字符` : balance.unit === '积分' ? `独立视频积分账户` : `月赠剩余 ${formatNumber(balance.monthlyRemaining)} · 充值/永久 ${formatNumber(balance.purchasedBalance)}`}</span>
                     {action ? <span className="shrink-0">{action}</span> : null}
                 </div>
             ) : null}

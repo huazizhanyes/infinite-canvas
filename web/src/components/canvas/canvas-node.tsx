@@ -410,6 +410,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 </div>
 
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
+                {hovered && hasVideoContent && data.metadata?.videoProvider === "canvas-video" ? <VideoInfoBar node={data} /> : null}
                 {resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
                 {!isGroup && !hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
@@ -642,14 +643,50 @@ function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batc
 }
 
 function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
-    if (!node.metadata?.content)
+    const [loadError, setLoadError] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
+    if (!node.metadata?.content) {
+        if (node.metadata?.status === "loading" && node.metadata?.videoProvider === "canvas-video") {
+            const phase = node.metadata.videoPhase === "archiving" ? "正在归档" : node.metadata.videoPhase === "queued" ? "正在排队" : "正在生成";
+            return (
+                <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-5 text-center" style={{ color: theme.node.text }}>
+                    <RefreshCw className="size-7 animate-spin opacity-55" />
+                    <div className="text-sm font-medium">{phase} · {Math.max(0, node.metadata.videoProgress || 0)}%</div>
+                    <div className="h-1.5 w-full max-w-48 overflow-hidden rounded-full" style={{ background: theme.node.stroke }}><div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${Math.max(3, node.metadata.videoProgress || 0)}%` }} /></div>
+                    {node.metadata.estimatedCostCredits != null ? <div className="text-xs opacity-60">已预扣 {node.metadata.estimatedCostCredits} 视频积分</div> : null}
+                </div>
+            );
+        }
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
                 <Video className="size-7 opacity-35" />
                 <span className="text-sm">空视频节点</span>
             </div>
         );
-    return <video src={node.metadata.content} controls className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />;
+    }
+    if (loadError) {
+        return (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-5 text-center" style={{ color: theme.node.text }}>
+                <Video className="size-7 opacity-40" />
+                <span className="text-sm">视频加载失败</span>
+                <button type="button" className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs" style={{ borderColor: theme.node.stroke }} onClick={(event) => { event.stopPropagation(); setLoadError(false); setReloadKey((value) => value + 1); }}><RefreshCw className="size-3.5" />重新加载</button>
+            </div>
+        );
+    }
+    return <video key={reloadKey} src={node.metadata.content} controls preload="metadata" playsInline className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom onError={() => setLoadError(true)} />;
+}
+
+function VideoInfoBar({ node }: { node: CanvasNodeData }) {
+    const meta = node.metadata;
+    return (
+        <div className="pointer-events-none absolute inset-x-2 bottom-2 z-20 flex flex-wrap gap-x-2 gap-y-0.5 rounded-md bg-black/70 px-2 py-1.5 text-[10px] text-white backdrop-blur-sm">
+            <span>{meta?.videoRouteLabel || "视频线路"}</span>
+            {meta?.model ? <span>{meta.model}</span> : null}
+            {meta?.vquality ? <span>{meta.vquality}</span> : null}
+            {meta?.seconds ? <span>{meta.seconds}s</span> : null}
+            {meta?.chargedCredits != null ? <strong>{meta.chargedCredits} 积分</strong> : null}
+        </div>
+    );
 }
 
 function AudioNodeContent({ node, theme }: NodeContentRendererProps) {

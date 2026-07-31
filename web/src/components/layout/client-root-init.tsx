@@ -56,18 +56,57 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             return;
         }
 
-        void fetch(`${SUCAI_API_BASE}/v1/models`, {
-            headers: { Authorization: `Bearer ${token}` },
-        })
-            .then(async (response) => {
-                const payload = await response.json().catch(() => ({}));
-                if (!response.ok) throw new Error(payload?.message || payload?.error?.message || "读取画布配置失败");
-                const models = Array.isArray(payload?.data) ? payload.data : [];
+        const requestModels = async (path: string, optional = false) => {
+            const response = await fetch(`${SUCAI_API_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                if (optional) return [];
+                throw new Error(payload?.message || payload?.error?.message || "读取画布配置失败");
+            }
+            return Array.isArray(payload?.data) ? payload.data : [];
+        };
+        const mapVideoModel = (item: any) => ({
+            name: item.id,
+            capability: "video" as const,
+            videoCapabilities: {
+                provider: "canvas-video" as const,
+                displayName: item.display_name || item.id,
+                channel: item.channel,
+                routeLabel: item.routeLabel || item.channel_title || item.channel,
+                upstreamModel: item.upstream_model,
+                pricingVersion: Number(item.pricingVersion || 0),
+                qualities: Array.isArray(item.qualities) ? item.qualities : [],
+                aspectRatios: Array.isArray(item.aspect_ratios) ? item.aspect_ratios : [],
+                duration: item.duration || {},
+                modes: Array.isArray(item.modes) ? item.modes : [],
+                inputImagesMax: Number(item.input_images_max || 0),
+                inputVideosMax: Number(item.input_videos_max || 0),
+                inputAudiosMax: Number(item.input_audios_max || 0),
+            },
+        });
+        const refreshVideoPricing = () => {
+            void requestModels("/v1/video/models", true).then((videoModels) => {
+                const current = useConfigStore.getState().config;
+                const channels = current.channels.map((channel) => channel.id === SUCAI_CHANNEL_ID
+                    ? createModelChannel({ ...channel, models: [...channel.models.filter((item) => item.capability !== "video"), ...videoModels.map(mapVideoModel)] })
+                    : channel);
+                const selectedExists = channels.some((channel) => channel.models.some((item) => encodeChannelModel(channel.id, item.name) === current.videoModel));
+                const nextDefault = videoModels.find((item: { default_option?: boolean }) => item.default_option) || videoModels[0];
+                updateConfig("channels", channels);
+                updateConfig("models", modelOptionsFromChannels(channels));
+                if (!selectedExists && nextDefault?.id) updateConfig("videoModel", encodeChannelModel(SUCAI_CHANNEL_ID, nextDefault.id));
+            }).catch(() => undefined);
+        };
+        window.addEventListener("canvas-video-pricing-changed", refreshVideoPricing);
+
+        void Promise.all([requestModels("/v1/models"), requestModels("/v1/video/models", true).catch(() => [])])
+            .then(async ([models, videoModels]) => {
                 const imageModel = models.find((item: { capability?: string }) => item.capability === "image") || models[0];
                 const textModels = models.filter((item: { capability?: string }) => item.capability === "text");
                 const audioModels = models.filter((item: { capability?: string }) => item.capability === "audio");
                 const textModel = textModels.find((item: { is_default?: boolean }) => item.is_default) || textModels[0];
                 const audioModel = audioModels.find((item: { is_default?: boolean }) => item.is_default) || audioModels[0];
+                const videoModel = videoModels.find((item: { default_option?: boolean }) => item.default_option) || videoModels[0];
                 if (!imageModel?.id) throw new Error("管理员尚未配置画布生图模型");
                 const channel = createModelChannel({
                     id: SUCAI_CHANNEL_ID,
@@ -75,13 +114,17 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     baseUrl: SUCAI_API_BASE,
                     apiKey: token,
                     apiFormat: "openai",
-                    models: models
-                        .filter((item: { id?: string; capability?: string }) => item.id && ["image", "text", "audio"].includes(item.capability || ""))
-                        .map((item: { id: string; capability: "image" | "text" | "audio" }) => ({ name: item.id, capability: item.capability })),
+                    models: [
+                        ...models
+                            .filter((item: { id?: string; capability?: string }) => item.id && ["image", "text", "audio"].includes(item.capability || ""))
+                            .map((item: { id: string; capability: "image" | "text" | "audio" }) => ({ name: item.id, capability: item.capability })),
+                        ...videoModels.map(mapVideoModel),
+                    ],
                 });
                 const imageModelValue = encodeChannelModel(channel.id, imageModel.id);
                 const textModelValue = textModel?.id ? encodeChannelModel(channel.id, textModel.id) : "";
                 const audioModelValue = audioModel?.id ? encodeChannelModel(channel.id, audioModel.id) : "";
+                const videoModelValue = videoModel?.id ? encodeChannelModel(channel.id, videoModel.id) : "";
                 updateConfig("channels", [channel]);
                 updateConfig("models", modelOptionsFromChannels([channel]));
                 updateConfig("baseUrl", channel.baseUrl);
@@ -90,6 +133,13 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 updateConfig("model", imageModelValue);
                 updateConfig("imageModel", imageModelValue);
                 if (textModelValue) updateConfig("textModel", textModelValue);
+                if (videoModelValue) {
+                    updateConfig("videoModel", videoModelValue);
+                    updateConfig("videoMode", videoModel.modes?.[0] || "text2video");
+                    updateConfig("size", videoModel.aspect_ratios?.[0] || "16:9");
+                    updateConfig("vquality", videoModel.qualities?.[0]?.quality || "720p");
+                    updateConfig("videoSeconds", String(videoModel.duration?.options?.[0] || videoModel.duration?.min || 5));
+                }
                 if (audioModelValue) {
                     updateConfig("audioModel", audioModelValue);
                     updateConfig("audioFormat", "wav");
@@ -108,6 +158,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 setSucaiError(error instanceof Error ? error.message : "画布初始化失败");
                 setSucaiState("error");
             });
+        return () => window.removeEventListener("canvas-video-pricing-changed", refreshVideoPricing);
     }, [setConfigDialogOpen, updateConfig]);
 
     useEffect(() => {

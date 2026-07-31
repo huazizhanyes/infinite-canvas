@@ -7,6 +7,7 @@ import { saveAs } from "file-saver";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { cancelCanvasAudioTask, pollCanvasAudioTask, requestAudioGeneration, storeGeneratedAudio, type StoredGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
+import { createCanvasVideoTask, isCanvasVideoModel, waitForCanvasVideoTask, type CanvasVideoStoredResult, type CanvasVideoTask } from "@/services/api/canvas-video";
 import { SHOW_AGENT_UI } from "@/constant/env";
 import { defaultConfig, modelOptionName, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
@@ -447,6 +448,8 @@ function InfiniteCanvasPage() {
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
     const resumedAudioTaskIdsRef = useRef(new Set<string>());
+    const resumedVideoTaskIdsRef = useRef(new Set<string>());
+    const pausedVideoTaskIdsRef = useRef(new Set<string>());
     const storyboardGridPlanningRef = useRef(new Set<string>());
     const storyboardGridGeneratingRef = useRef(new Set<string>());
 
@@ -509,12 +512,21 @@ function InfiniteCanvasPage() {
         }, 0);
     }, []);
 
+    const updateVideoHostTask = useCallback((targetNodeId: string, task: CanvasVideoTask) => {
+        const request = generationRequestsRef.current.get(targetNodeId);
+        if (!request) return;
+        const phase = task.archiveStatus === "archiving" ? "视频归档中" : task.status === "queued" ? "视频排队中" : task.status === "completed" ? "视频已完成" : task.status === "failed" ? "视频生成失败" : "视频生成中";
+        const billing = task.billingStatus === "refunded" ? "已退款" : task.billingStatus === "consumed" ? `消费 ${task.chargedCredits || 0} 积分` : task.estimatedCostCredits != null ? `预扣 ${task.estimatedCostCredits} 积分` : "";
+        useCanvasHostTaskStore.getState().updateTask(request.taskId, { progress: task.progress, stage: [phase, billing].filter(Boolean).join(" · ") });
+    }, []);
+
     const stopGenerationByRunningId = useCallback(
         (runningId: string) => {
         const affectedNodeIds = new Set<string>();
         generationRequestsRef.current.forEach((request) => {
             if (request.runningNodeId !== runningId) return;
             const node = nodesRef.current.find((item) => item.id === request.targetNodeId);
+            if (node?.metadata?.videoTaskId) pausedVideoTaskIdsRef.current.add(node.metadata.videoTaskId);
             if (node?.metadata?.sourceType === "tts" && node.metadata.audioTaskId) {
                 const generationConfig = buildGenerationConfig(effectiveConfig, node, "audio");
                 void cancelCanvasAudioTask(generationConfig, node.metadata.audioTaskId).catch(() => undefined);
@@ -534,11 +546,12 @@ function InfiniteCanvasPage() {
 
     const confirmStopGeneration = useCallback(
         (nodeId: string) => {
+            const waitingForServerVideo = nodesRef.current.some((node) => node.id === nodeId && node.metadata?.videoProvider === "canvas-video");
             modal.confirm({
-                title: "停止生成？",
-                content: "当前生成请求会被中断，已经生成完成的内容会保留。",
-                okText: "停止",
-                cancelText: "继续生成",
+                title: waitingForServerVideo ? "停止等待？" : "停止生成？",
+                content: waitingForServerVideo ? "视频会继续在服务器生成和归档，重新进入画布后可恢复结果。" : "当前生成请求会被中断，已经生成完成的内容会保留。",
+                okText: waitingForServerVideo ? "停止等待" : "停止",
+                cancelText: waitingForServerVideo ? "继续等待" : "继续生成",
                 okButtonProps: { danger: true },
                 onOk: () => stopGenerationByRunningId(nodeId),
             });
@@ -667,6 +680,40 @@ function InfiniteCanvasPage() {
                 .finally(() => finishGenerationRequest(node.id, controller));
         });
     }, [effectiveConfig, finishGenerationRequest, nodes, projectLoaded, startGenerationRequest]);
+
+    useEffect(() => {
+        if (!projectLoaded) return;
+        nodes.forEach((node) => {
+            const taskId = node.metadata?.videoTaskId;
+            if (node.type !== CanvasNodeType.Video || node.metadata?.content || !taskId) return;
+            if (pausedVideoTaskIdsRef.current.has(taskId) || resumedVideoTaskIdsRef.current.has(taskId) || generationRequestsRef.current.has(node.id)) return;
+            resumedVideoTaskIdsRef.current.add(taskId);
+            const generationConfig = buildGenerationConfig(effectiveConfig, node, "video");
+            const controller = startGenerationRequest(node.id, node.id, node.id);
+            setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item));
+            void waitForCanvasVideoTask(generationConfig, taskId, controller.signal, (task) => {
+                updateVideoHostTask(node.id, task);
+                setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, ...canvasVideoTaskMetadata(task) } } : item));
+            })
+                .then((video) => {
+                    const size = fitNodeSize(video.width || node.width, video.height || node.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                    setNodes((prev) => prev.map((item) => item.id === node.id ? {
+                        ...item,
+                        width: size.width,
+                        height: size.height,
+                        position: { x: item.position.x + item.width / 2 - size.width / 2, y: item.position.y + item.height / 2 - size.height / 2 },
+                        metadata: { ...item.metadata, ...canvasVideoMetadata(video), errorDetails: undefined },
+                    } : item));
+                    playGenerationCompleteSound();
+                })
+                .catch((error) => {
+                    if (isGenerationCanceled(error)) return;
+                    const errorDetails = error instanceof Error ? error.message : "视频任务恢复失败";
+                    setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item));
+                })
+                .finally(() => finishGenerationRequest(node.id, controller));
+        });
+    }, [effectiveConfig, finishGenerationRequest, nodes, projectLoaded, startGenerationRequest, updateVideoHostTask]);
 
     useLayoutEffect(() => {
         nodesRef.current = nodes;
@@ -3089,6 +3136,9 @@ function InfiniteCanvasPage() {
                             vquality: generationConfig.vquality,
                             generateAudio: generationConfig.videoGenerateAudio,
                             watermark: generationConfig.videoWatermark,
+                            videoMode: generationConfig.videoMode,
+                            generationRequestId: nanoid(),
+                            videoProvider: isCanvasVideoModel(generationConfig) ? "canvas-video" : undefined,
                             references: generationReferenceUrls(generationContext),
                         },
                     };
@@ -3101,9 +3151,29 @@ function InfiniteCanvasPage() {
                     if (!isEmptyVideoNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: videoId }]);
                     const controller = startGenerationRequest(videoId, nodeId, nodeId, runController);
                     try {
-                        const video = await storeGeneratedVideo(
-                            await requestVideoGeneration(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, { signal: controller.signal }),
-                        );
+                        let video: UploadedFile | CanvasVideoStoredResult;
+                        if (isCanvasVideoModel(generationConfig)) {
+                            const clientRequestId = String(videoNode.metadata?.generationRequestId || nanoid());
+                            const task = await createCanvasVideoTask(generationConfig, {
+                                projectId,
+                                nodeId: videoId,
+                                clientRequestId,
+                                prompt: effectivePrompt,
+                                referenceImages: generationContext.referenceImages,
+                                referenceVideos: generationContext.referenceVideos,
+                                referenceAudios: generationContext.referenceAudios,
+                            }, controller.signal);
+                            if (controller.signal.aborted) pausedVideoTaskIdsRef.current.add(task.id);
+                            setNodes((prev) => prev.map((node) => node.id === videoId ? { ...node, metadata: { ...node.metadata, videoTaskId: task.id, videoProvider: "canvas-video", generationRequestId: clientRequestId, ...canvasVideoTaskMetadata(task) } } : node));
+                            video = await waitForCanvasVideoTask(generationConfig, task.id, controller.signal, (state) => {
+                                updateVideoHostTask(videoId, state);
+                                setNodes((prev) => prev.map((node) => node.id === videoId ? { ...node, metadata: { ...node.metadata, ...canvasVideoTaskMetadata(state) } } : node));
+                            });
+                        } else {
+                            video = await storeGeneratedVideo(
+                                await requestVideoGeneration(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, { signal: controller.signal }),
+                            );
+                        }
                         const videoSize = fitNodeSize(video.width || spec.width, video.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                         setNodes((prev) =>
                             prev.map((node) =>
@@ -3115,14 +3185,15 @@ function InfiniteCanvasPage() {
                                           position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 },
                                           metadata: {
                                               ...node.metadata,
-                                              ...videoMetadata(video),
+                                               ...(isCanvasVideoModel(generationConfig) ? canvasVideoMetadata(video as CanvasVideoStoredResult) : videoMetadata(video as UploadedFile)),
                                               prompt: effectivePrompt,
                                               model: generationConfig.model,
                                               size: generationConfig.size,
                                               seconds: generationConfig.videoSeconds,
                                               vquality: generationConfig.vquality,
                                               generateAudio: generationConfig.videoGenerateAudio,
-                                              watermark: generationConfig.videoWatermark,
+                                               watermark: generationConfig.videoWatermark,
+                                               videoMode: generationConfig.videoMode,
                                               references: generationReferenceUrls(generationContext),
                                           },
                                       }
@@ -3327,7 +3398,28 @@ function InfiniteCanvasPage() {
                     return;
                 }
                 if (node.type === CanvasNodeType.Video) {
-                    const video = await storeGeneratedVideo(await requestVideoGeneration(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], { signal: controller.signal }));
+                    let video: UploadedFile | CanvasVideoStoredResult;
+                    if (isCanvasVideoModel(generationConfig)) {
+                        const clientRequestId = nanoid();
+                        setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, content: undefined, status: NODE_STATUS_LOADING, generationRequestId: clientRequestId, videoTaskId: undefined, videoProvider: "canvas-video", serverStorageKey: undefined } } : item));
+                        const task = await createCanvasVideoTask(generationConfig, {
+                            projectId,
+                            nodeId: node.id,
+                            clientRequestId,
+                            prompt,
+                            referenceImages: retryImages,
+                            referenceVideos: context?.referenceVideos || [],
+                            referenceAudios: context?.referenceAudios || [],
+                        }, controller.signal);
+                        if (controller.signal.aborted) pausedVideoTaskIdsRef.current.add(task.id);
+                        setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, videoTaskId: task.id, videoProvider: "canvas-video", ...canvasVideoTaskMetadata(task) } } : item));
+                        video = await waitForCanvasVideoTask(generationConfig, task.id, controller.signal, (state) => {
+                            updateVideoHostTask(node.id, state);
+                            setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, ...canvasVideoTaskMetadata(state) } } : item));
+                        });
+                    } else {
+                        video = await storeGeneratedVideo(await requestVideoGeneration(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], { signal: controller.signal }));
+                    }
                     const videoSize = fitNodeSize(video.width || node.width, video.height || node.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                     setNodes((prev) =>
                         prev.map((item) =>
@@ -3339,14 +3431,15 @@ function InfiniteCanvasPage() {
                                       position: { x: item.position.x + item.width / 2 - videoSize.width / 2, y: item.position.y + item.height / 2 - videoSize.height / 2 },
                                       metadata: {
                                           ...item.metadata,
-                                          ...videoMetadata(video),
+                                           ...(isCanvasVideoModel(generationConfig) ? canvasVideoMetadata(video as CanvasVideoStoredResult) : videoMetadata(video as UploadedFile)),
                                           prompt,
                                           model: generationConfig.model,
                                           size: generationConfig.size,
                                           seconds: generationConfig.videoSeconds,
                                           vquality: generationConfig.vquality,
                                           generateAudio: generationConfig.videoGenerateAudio,
-                                          watermark: generationConfig.videoWatermark,
+                                           watermark: generationConfig.videoWatermark,
+                                           videoMode: generationConfig.videoMode,
                                       },
                                   }
                                 : item,
@@ -3490,7 +3583,8 @@ function InfiniteCanvasPage() {
                           seconds: effectiveConfig.videoSeconds,
                           vquality: effectiveConfig.vquality,
                           generateAudio: effectiveConfig.videoGenerateAudio,
-                          watermark: effectiveConfig.videoWatermark,
+                           watermark: effectiveConfig.videoWatermark,
+                           videoMode: effectiveConfig.videoMode,
                           sourceNodeId: sourceNode.id,
                           sourceScope: textSelections[node.id] ? "selection" : "full",
                       },
@@ -3518,6 +3612,7 @@ function InfiniteCanvasPage() {
             effectiveConfig.videoModel,
             effectiveConfig.videoSeconds,
             effectiveConfig.videoWatermark,
+            effectiveConfig.videoMode,
             effectiveConfig.vquality,
             generateImageFromTextNode,
             message,
@@ -4166,6 +4261,40 @@ function videoMetadata(video: UploadedFile): CanvasNodeMetadata {
     return { content: video.url, storageKey: video.storageKey, status: "success", naturalWidth: video.width, naturalHeight: video.height, bytes: video.bytes, mimeType: video.mimeType || "video/mp4", durationMs: video.durationMs };
 }
 
+function canvasVideoMetadata(video: CanvasVideoStoredResult): CanvasNodeMetadata {
+    return {
+        content: video.url,
+        serverStorageKey: video.storageKey || undefined,
+        storageKey: undefined,
+        status: "success",
+        naturalWidth: video.width,
+        naturalHeight: video.height,
+        bytes: video.bytes,
+        mimeType: video.mimeType || "video/mp4",
+        durationMs: video.durationMs,
+        estimatedCostCredits: video.estimatedCostCredits,
+        chargedCredits: video.chargedCredits,
+        videoBalanceAfter: video.balanceAfter == null ? undefined : video.balanceAfter,
+        videoBillingStatus: video.billingStatus,
+        videoRouteLabel: video.routeLabel,
+        pricingVersion: video.pricingVersion,
+        videoProgress: 100,
+    };
+}
+
+function canvasVideoTaskMetadata(task: CanvasVideoTask): CanvasNodeMetadata {
+    return {
+        videoProgress: task.progress,
+        videoPhase: task.archiveStatus === "archiving" ? "archiving" : task.status === "queued" ? "queued" : "generating",
+        estimatedCostCredits: task.estimatedCostCredits,
+        chargedCredits: task.chargedCredits,
+        videoBalanceAfter: task.balanceAfter == null ? undefined : task.balanceAfter,
+        videoBillingStatus: task.billingStatus,
+        videoRouteLabel: task.pricingSnapshot?.routeLabel,
+        pricingVersion: task.pricingVersion,
+    };
+}
+
 function audioMetadata(audio: UploadedFile | StoredGeneratedAudio, sourceType: "upload" | "tts" = "upload"): CanvasNodeMetadata {
     const generated = audio as StoredGeneratedAudio;
     return {
@@ -4425,6 +4554,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         vquality: node?.metadata?.vquality || config.vquality || defaultConfig.vquality,
         videoGenerateAudio: node?.metadata?.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
         videoWatermark: node?.metadata?.watermark || config.videoWatermark || defaultConfig.videoWatermark,
+        videoMode: node?.metadata?.videoMode || config.videoMode || defaultConfig.videoMode,
         audioVoice: node?.metadata?.audioVoice || config.audioVoice || defaultConfig.audioVoice,
         audioFormat: node?.metadata?.audioFormat || config.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node?.metadata?.audioSpeed || config.audioSpeed || defaultConfig.audioSpeed,
@@ -4437,6 +4567,7 @@ function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
     return nodes.map((node) => {
         if (node.metadata?.status !== "loading") return node;
         if (node.type === CanvasNodeType.Audio && node.metadata.sourceType === "tts" && node.metadata.audioTaskId) return node;
+        if (node.type === CanvasNodeType.Video && node.metadata.videoTaskId) return node;
         return { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: "页面刷新后生成已中断，请重新生成。" } };
     });
 }
