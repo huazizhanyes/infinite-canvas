@@ -1,7 +1,9 @@
 import { useMemo } from "react";
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
 import { nanoid } from "nanoid";
+import { accountScopedKey } from "@/lib/canvas-account-scope";
+import { localForageStorage } from "@/lib/localforage-storage";
 
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -224,6 +226,11 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
+            storage: createJSONStorage(() => ({
+                getItem: (name) => localForageStorage.getItem(accountScopedKey(name)),
+                setItem: (name, value) => localForageStorage.setItem(accountScopedKey(name), value),
+                removeItem: (name) => localForageStorage.removeItem(accountScopedKey(name)),
+            })),
             partialize: (state) => ({ config: state.config, webdav: state.webdav }),
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
@@ -263,6 +270,11 @@ export const useConfigStore = create<ConfigStore>()(
         },
     ),
 );
+
+export async function rehydrateConfigForAccount() {
+    useConfigStore.setState({ config: defaultConfig, webdav: defaultWebdavSyncConfig });
+    await useConfigStore.persist.rehydrate();
+}
 
 export function useEffectiveConfig() {
     const config = useConfigStore((state) => state.config);

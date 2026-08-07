@@ -6,6 +6,7 @@ import {
     Check,
     CircleDot,
     Clapperboard,
+    Clock3,
     Eraser,
     Grid2x2,
     Group,
@@ -141,7 +142,7 @@ export function CanvasToolbar({
         color: theme.toolbar.item,
         boxShadow: colorTheme === "dark" ? "0 20px 52px rgba(0,0,0,.42), 0 0 28px rgba(14,165,233,.06), 0 0 44px rgba(139,92,246,.05)" : "0 18px 46px rgba(28,25,23,.14), 0 0 24px rgba(14,165,233,.05), 0 0 36px rgba(139,92,246,.04)",
     };
-    const saveAccent = saveStatus === "error" ? TOOL_ACCENTS.rose : saveStatus === "saving" ? TOOL_ACCENTS.amber : TOOL_ACCENTS.emerald;
+    const saveAccent = saveStatus === "error" ? TOOL_ACCENTS.rose : saveStatus === "saving" || saveStatus === "pending" ? TOOL_ACCENTS.amber : TOOL_ACCENTS.emerald;
     const saveColor = colorTheme === "dark" ? saveAccent.dark : saveAccent.light;
     const tip = hovered ? toolLabel(hovered) : "";
 
@@ -159,16 +160,16 @@ export function CanvasToolbar({
     }, [extensionsOpen, appearanceOpen]);
 
     return (
-        <div ref={rootRef} className="pointer-events-none absolute bottom-5 z-50 flex justify-center" style={{ left: 300, right: 16 }}>
+        <div ref={rootRef} className="pointer-events-none absolute bottom-4 z-50 flex justify-center" style={{ left: 280, right: 16 }}>
             {tip ? <DockTip label={tip} x={tipX} theme={theme} /> : null}
-            <div ref={wrapRef} className="thin-scrollbar pointer-events-auto flex h-14 max-w-full items-center gap-1 overflow-x-auto rounded-xl border px-2 shadow-lg backdrop-blur [&>*]:shrink-0" style={dockStyle}>
+            <div ref={wrapRef} data-canvas-toolbar-dock className="thin-scrollbar pointer-events-auto flex h-12 max-w-full items-center gap-1 overflow-x-auto rounded-lg border px-1.5 shadow-lg backdrop-blur [&>*]:shrink-0" style={dockStyle}>
                 <span
                     className="inline-flex h-8 w-[76px] items-center justify-center gap-1 rounded-lg border text-[11px] font-medium transition-colors"
                     style={{ color: saveColor, background: `rgba(${saveAccent.rgb},.08)`, borderColor: `rgba(${saveAccent.rgb},.16)` }}
-                    title={saveStatus === "error" ? saveError || "画布保存失败" : saveStatus === "saving" ? "正在保存画布" : "画布已保存到本地"}
+                    title={saveStatus === "error" ? saveError || "画布保存失败" : saveStatus === "saving" ? "正在写入本地画布" : saveStatus === "pending" ? "改动将在停止操作后自动保存" : "画布已保存到本地"}
                 >
-                    {saveStatus === "saving" ? <LoaderCircle className="size-3 animate-spin" /> : saveStatus === "error" ? <TriangleAlert className="size-3 text-red-400" /> : <Check className="size-3" />}
-                    {saveStatus === "saving" ? "保存中" : saveStatus === "error" ? "保存失败" : "已保存"}
+                    {saveStatus === "saving" ? <LoaderCircle className="size-3 animate-spin" /> : saveStatus === "pending" ? <Clock3 className="size-3" /> : saveStatus === "error" ? <TriangleAlert className="size-3 text-red-400" /> : <Check className="size-3" />}
+                    {saveStatus === "saving" ? "保存中" : saveStatus === "pending" ? "待保存" : saveStatus === "error" ? "保存失败" : "已保存"}
                 </span>
                 <Divider theme={theme} />
                 <ToolbarButton id="tool-hand" label="移动/选择" active={!selectedCount} hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onDeselect}>
@@ -395,6 +396,7 @@ function ToolbarButton({
         <Button
             type="text"
             aria-label={label}
+            title={label}
             className="!h-9 !w-9 !min-w-9 !rounded-lg !border !border-solid !p-0 !transition-all !duration-200"
             disabled={disabled}
             style={buttonStyle}
@@ -452,6 +454,8 @@ function toolLabel(id: string) {
     if (id === "tool-config") return "生成配置";
     if (id === "tool-group") return "组";
     if (id === "tool-script-set") return "剧本集";
+    if (id === "tool-storyboard") return "分镜脚本";
+    if (id === "tool-storyboard-grid") return "九宫格分镜";
     if (id === "tool-extensions") return "扩展节点";
     if (id === "tool-upload") return "上传资产";
     if (id === "tool-style") return "画布外观";

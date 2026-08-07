@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { localForageStorage } from "@/lib/localforage-storage";
+import { accountScopedKey } from "@/lib/canvas-account-scope";
 
 export type CanvasHostTaskStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
@@ -50,8 +51,21 @@ export const useCanvasHostTaskStore = create<CanvasHostTaskStore>()(
         }),
         {
             name: "infinite-canvas:desktop-task-snapshots",
-            storage: createJSONStorage(() => localForageStorage),
+            storage: createJSONStorage(() => ({
+                getItem: (name) => localForageStorage.getItem(accountScopedKey(name)),
+                setItem: (name, value) => localForageStorage.setItem(accountScopedKey(name), value),
+                removeItem: (name) => localForageStorage.removeItem(accountScopedKey(name)),
+            })),
             partialize: (state) => ({ tasks: state.tasks }),
         },
     ),
 );
+
+export async function rehydrateCanvasHostTaskStoreForAccount() {
+    useCanvasHostTaskStore.setState({ tasks: [] });
+    await useCanvasHostTaskStore.persist.rehydrate();
+}
+
+export function clearCanvasHostTaskStoreMemory() {
+    useCanvasHostTaskStore.setState({ tasks: [] });
+}

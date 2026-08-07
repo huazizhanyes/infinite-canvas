@@ -3,13 +3,14 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 
 import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
+import { accountScopedKey } from "@/lib/canvas-account-scope";
 import { cleanupUnusedImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
 
 export type AssetKind = "text" | "image" | "video";
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
-export type ImageAsset = AssetBase<"image"> & { data: { dataUrl: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string } };
-export type VideoAsset = AssetBase<"video"> & { data: { url: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string } };
+export type ImageAsset = AssetBase<"image"> & { data: { dataUrl: string; storageKey?: string; mediaId?: string; mediaStatus?: "uploading" | "synced" | "missing" | "failed"; width: number; height: number; bytes: number; mimeType: string } };
+export type VideoAsset = AssetBase<"video"> & { data: { url: string; storageKey?: string; mediaId?: string; mediaStatus?: "uploading" | "synced" | "missing" | "failed"; width: number; height: number; bytes: number; mimeType: string } };
 export type Asset = TextAsset | ImageAsset | VideoAsset;
 
 type AssetBase<T extends AssetKind> = {
@@ -39,7 +40,7 @@ const ASSET_STORE_KEY = "infinite-canvas:asset_store";
 
 const assetStorage: PersistStorage<AssetStore> = {
     getItem: async (name) => {
-        const value = await localForageStorage.getItem(name);
+        const value = await localForageStorage.getItem(accountScopedKey(name));
         if (!value) return null;
         const parsed = JSON.parse(value) as StorageValue<AssetStore>;
         parsed.state.assets = await Promise.all(
@@ -59,8 +60,8 @@ const assetStorage: PersistStorage<AssetStore> = {
         );
         return parsed;
     },
-    setItem: (name, value) => localForageStorage.setItem(name, JSON.stringify(value)),
-    removeItem: (name) => localForageStorage.removeItem(name),
+    setItem: (name, value) => localForageStorage.setItem(accountScopedKey(name), JSON.stringify(value)),
+    removeItem: (name) => localForageStorage.removeItem(accountScopedKey(name)),
 };
 
 export const useAssetStore = create<AssetStore>()(
@@ -103,3 +104,12 @@ export const useAssetStore = create<AssetStore>()(
         },
     ),
 );
+
+export async function rehydrateAssetStoreForAccount() {
+    useAssetStore.setState({ hydrated: false, assets: [] });
+    await useAssetStore.persist.rehydrate();
+}
+
+export function clearAssetStoreMemory() {
+    useAssetStore.setState({ hydrated: false, assets: [] });
+}

@@ -18,7 +18,7 @@ export const NODE_DEFAULT_SIZE = {
 
 export const NODE_SPECS = {
     [CanvasNodeType.Image]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.Image], metadata: { content: "", status: "idle" } },
-    [CanvasNodeType.Text]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.Text], metadata: { content: "", status: "idle", fontSize: 14 } },
+    [CanvasNodeType.Text]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.Text], metadata: { content: "", status: "idle", fontSize: 13 } },
     [CanvasNodeType.Config]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.Config], metadata: { content: "", status: "idle", generationMode: "image" } },
     [CanvasNodeType.Video]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.Video], metadata: { content: "", status: "idle" } },
     [CanvasNodeType.Audio]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.Audio], metadata: { content: "", status: "idle" } },

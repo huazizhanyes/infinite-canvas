@@ -11,6 +11,14 @@ type HostMessage = {
     [key: string]: unknown;
 };
 
+export type HostToCanvasMessage =
+    | { type: "navigate"; pathname: "/canvas" }
+    | { type: "open-side-panel"; tab: "canvas" | "assets" }
+    | { type: "request-task-snapshot" }
+    | { type: "flush-persistence"; requestId: string }
+    | { type: "account-changing" }
+    | { type: "account-ready" };
+
 let cachedConfig: HostBridgeConfig | null | undefined;
 
 export function getCanvasHostBridgeConfig(): HostBridgeConfig | null {
@@ -40,5 +48,9 @@ export function readCanvasHostMessage(event: MessageEvent): HostMessage | null {
     if (!event.data || typeof event.data !== "object") return null;
     const data = event.data as Partial<HostMessage>;
     if (data.source !== "flash-creator-host" || data.nonce !== config.nonce || typeof data.type !== "string") return null;
+    if (data.pathname !== undefined && data.pathname !== "/canvas") return null;
+    if (data.type === "open-side-panel" && data.tab !== "canvas" && data.tab !== "assets") return null;
+    if (data.type === "navigate" && data.pathname !== "/canvas") return null;
+    if (data.type === "flush-persistence" && typeof data.requestId !== "string") return null;
     return data as HostMessage;
 }

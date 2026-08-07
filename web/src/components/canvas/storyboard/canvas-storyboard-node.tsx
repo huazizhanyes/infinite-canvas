@@ -196,13 +196,13 @@ export function CanvasStoryboardNode({ ctx }: { ctx: CanvasNodeContext }) {
             }}
             onWheel={(event) => event.stopPropagation()}
         >
-            <div className="flex shrink-0 items-center gap-3 border-b px-4 py-3" style={{ borderColor: ctx.theme.node.stroke, background: ctx.theme.toolbar.panel }}>
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl" style={{ background: ctx.theme.toolbar.activeBg, color: ctx.theme.toolbar.activeText }}>
-                    <Clapperboard className="size-5" />
+            <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2" style={{ borderColor: ctx.theme.node.stroke, background: ctx.theme.toolbar.panel }}>
+                <span className="grid size-8 shrink-0 place-items-center rounded-lg" style={{ background: ctx.theme.toolbar.activeBg, color: ctx.theme.toolbar.activeText }}>
+                    <Clapperboard className="size-4" />
                 </span>
                 <span className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-semibold tracking-tight">{storyboard?.title || ctx.node.title}</span>
-                    <span className="mt-1 block truncate text-[11px]" style={{ color: ctx.theme.node.faint }}>
+                    <span className="mt-0.5 block truncate text-[11px]" style={{ color: ctx.theme.node.faint }}>
                         {loading ? "正在加载..." : `${scenes.length} 场景 · ${shotCount} 镜头 · ${Math.round(totalDuration)}秒`}
                     </span>
                 </span>
@@ -246,7 +246,7 @@ export function CanvasStoryboardNode({ ctx }: { ctx: CanvasNodeContext }) {
 
 function CollapsedContent({ theme, scenes, shotCount, reviewCount, storyboard, onExpand }: { theme: StoryboardTheme; scenes: StoryboardScene[]; shotCount: number; reviewCount: number; storyboard: Storyboard | null; onExpand: () => void }) {
     return (
-        <button type="button" className="flex min-h-0 w-full flex-1 flex-col p-4 text-left transition hover:bg-black/[.03]" style={{ color: theme.node.text }} onClick={onExpand}>
+        <button type="button" className="flex min-h-0 w-full flex-1 flex-col p-3 text-left transition hover:bg-black/[.03]" style={{ color: theme.node.text }} onClick={onExpand}>
             <div className="grid grid-cols-3 gap-2">
                 <Stat theme={theme} icon={<Film className="size-3.5" />} label="场景" value={scenes.length} />
                 <Stat theme={theme} icon={<Clapperboard className="size-3.5" />} label="镜头" value={shotCount} />
@@ -353,10 +353,10 @@ function ExpandedContent({
                             </button>
                         ))}
                     </div>
-                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
-                        <div className="mb-3 flex items-end justify-between gap-3">
+                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+                        <div className="mb-2 flex items-end justify-between gap-2">
                             <div>
-                                <div className="text-sm font-semibold">{activeScene?.title}</div>
+                                <div className="text-[12px] font-semibold">{activeScene?.title}</div>
                                 <div className="mt-1 text-[11px]" style={{ color: theme.node.faint }}>
                                     {activeScene?.location || "未设置地点"}
                                     {activeScene?.time ? ` · ${activeScene.time}` : ""}
@@ -366,7 +366,7 @@ function ExpandedContent({
                                 {activeScene?.shots.length || 0} 镜头
                             </span>
                         </div>
-                        <div className="grid min-h-0 flex-1 gap-3 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.35fr)]">
+                        <div className="grid min-h-0 flex-1 gap-2 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.35fr)]">
                             <div className="thin-scrollbar min-h-0 space-y-2 overflow-y-auto pr-1">
                                 {activeScene?.shots.map((shot) => (
                                     <ShotCard key={shot.id} theme={theme} shot={shot} active={shot.id === shotId} onClick={() => setShotId(shot.id)} />
@@ -376,7 +376,7 @@ function ExpandedContent({
                                 {activeShot ? (
                                     <InlineShotEditor theme={theme} shot={activeShot} onUpdate={onUpdateShot} onDuplicate={onDuplicate} onCopyPrompt={onCopyPrompt} onGenerateImage={onGenerateImage} />
                                 ) : (
-                                    <div className="grid h-full place-items-center rounded-xl border border-dashed text-xs" style={{ borderColor: theme.node.stroke, color: theme.node.faint }}>
+                                    <div className="grid h-full place-items-center rounded-md border border-dashed text-[11px]" style={{ borderColor: theme.node.stroke, color: theme.node.faint }}>
                                         选择一个镜头开始编辑
                                     </div>
                                 )}
@@ -385,7 +385,7 @@ function ExpandedContent({
                     </div>
                 </>
             ) : (
-                <div className="grid flex-1 place-items-center p-8">
+                <div className="grid flex-1 place-items-center p-4">
                     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先点击生成" />
                 </div>
             )}
@@ -397,11 +397,11 @@ function ShotCard({ theme, shot, active, onClick }: { theme: StoryboardTheme; sh
     return (
         <button
             type="button"
-            className="rounded-xl border p-3 text-left transition hover:-translate-y-px"
+            className="rounded-md border p-2 text-left transition hover:bg-black/[.03]"
             style={{ borderColor: active ? theme.toolbar.activeText : theme.node.stroke, background: active ? theme.toolbar.activeBg : theme.node.fill, color: theme.node.text }}
             onClick={onClick}
         >
-            <div className="flex items-start gap-2.5">
+            <div className="flex items-start gap-2">
                 <span className="grid size-7 shrink-0 place-items-center rounded-lg text-[11px] font-bold" style={{ background: active ? theme.toolbar.activeText : theme.toolbar.activeBg, color: active ? theme.node.panel : theme.node.muted }}>
                     {shot.shotNo}
                 </span>
@@ -440,8 +440,8 @@ function InlineShotEditor({
     onGenerateImage: (value: string) => void;
 }) {
     return (
-        <div className="rounded-xl border p-4" style={{ borderColor: theme.toolbar.activeText, background: theme.toolbar.panel }}>
-            <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="rounded-md border p-3" style={{ borderColor: theme.toolbar.activeText, background: theme.toolbar.panel }}>
+            <div className="mb-2 flex items-center justify-between gap-2">
                 <div>
                     <span className="block text-xs font-semibold">编辑镜头 #{shot.shotNo}</span>
                     <span className="mt-1 block text-[10px]" style={{ color: theme.node.faint }}>
@@ -457,7 +457,7 @@ function InlineShotEditor({
                     </Button>
                 </div>
             </div>
-            <div className="grid gap-3">
+            <div className="grid gap-2">
                 {longFields.map((field) => (
                     <label key={field} className={wideFields.has(field) ? "sm:col-span-2" : ""}>
                         <span className="mb-1.5 flex items-center gap-1 text-[10px] font-medium" style={{ color: theme.node.muted }}>
@@ -485,12 +485,12 @@ function InlineShotEditor({
 
 function Stat({ theme, icon, label, value }: { theme: StoryboardTheme; icon: ReactNode; label: string; value: number }) {
     return (
-        <span className="flex min-w-0 flex-col gap-1 rounded-xl border px-3 py-2.5" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
+        <span className="flex min-w-0 flex-col gap-1 rounded-md border px-2 py-2" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
             <span className="flex items-center gap-1.5 text-[10px]" style={{ color: theme.node.faint }}>
                 {icon}
                 {label}
             </span>
-            <span className="text-lg font-semibold tracking-tight" style={{ color: theme.node.text }}>
+            <span className="text-sm font-semibold" style={{ color: theme.node.text }}>
                 {value}
             </span>
         </span>
@@ -503,7 +503,7 @@ function StatusBadge({ status, theme }: { status?: string; theme: StoryboardThem
     const success = status === "success" || status === "succeeded";
     return (
         <span
-            className="rounded-full px-2.5 py-1 text-[10px] font-semibold"
+            className="rounded-md px-2 py-0.5 text-[10px] font-semibold"
             style={{ background: success ? "rgba(34,197,94,.14)" : running ? "rgba(245,158,11,.14)" : "rgba(148,163,184,.16)", color: success ? "#4ade80" : running ? "#fbbf24" : theme.node.muted }}
         >
             {running ? "分析中" : statusLabels[status] || status}

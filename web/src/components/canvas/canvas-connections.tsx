@@ -1,32 +1,66 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
+import { memo, useCallback, useMemo, type MouseEvent as ReactMouseEvent } from "react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import type { CanvasBounds } from "@/lib/canvas/canvas-spatial-index";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasConnection, CanvasNodeData, ConnectionHandle, Position } from "@/types/canvas";
 
-export function ConnectionPath({
+type ConnectionPathProps = {
+    connection: CanvasConnection;
+    from: CanvasNodeData;
+    to: CanvasNodeData;
+    active: boolean;
+    onSelect: (connectionId: string) => void;
+    onContextMenu?: (event: ReactMouseEvent<SVGPathElement>, connectionId: string) => void;
+};
+
+export function getConnectionGeometry(from: CanvasNodeData, to: CanvasNodeData) {
+    const startX = from.position.x + from.width;
+    const startY = from.position.y + from.height / 2;
+    const endX = to.position.x;
+    const endY = to.position.y + to.height / 2;
+    const curvature = Math.max(Math.abs(endX - startX) * 0.5, 50);
+    return { startX, startY, endX, endY, curvature };
+}
+
+export function getConnectionBounds(from: CanvasNodeData, to: CanvasNodeData): CanvasBounds {
+    const { startX, startY, endX, endY, curvature } = getConnectionGeometry(from, to);
+    return {
+        left: Math.min(startX, startX + curvature, endX - curvature, endX),
+        top: Math.min(startY, endY),
+        right: Math.max(startX, startX + curvature, endX - curvature, endX),
+        bottom: Math.max(startY, endY),
+    };
+}
+
+export const ConnectionPath = memo(function ConnectionPath({
     connection,
     from,
     to,
     active,
     onSelect,
     onContextMenu,
-}: {
-    connection: CanvasConnection;
-    from: CanvasNodeData;
-    to: CanvasNodeData;
-    active: boolean;
-    onSelect: () => void;
-    onContextMenu?: (event: ReactMouseEvent<SVGPathElement>) => void;
-}) {
+}: ConnectionPathProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const startX = from.position.x + from.width;
-    const startY = from.position.y + from.height / 2;
-    const endX = to.position.x;
-    const endY = to.position.y + to.height / 2;
-    const dx = Math.abs(endX - startX);
-    const curvature = Math.max(dx * 0.5, 50);
-    const pathD = `M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`;
+    const pathD = useMemo(() => {
+        const { startX, startY, endX, endY, curvature } = getConnectionGeometry(from, to);
+        return `M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`;
+    }, [from.height, from.position.x, from.position.y, from.width, to.height, to.position.x, to.position.y]);
+    const handleSelect = useCallback(
+        (event: ReactMouseEvent<SVGPathElement>) => {
+            event.stopPropagation();
+            onSelect(connection.id);
+        },
+        [connection.id, onSelect],
+    );
+    const handleContextMenu = useCallback(
+        (event: ReactMouseEvent<SVGPathElement>) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onContextMenu?.(event, connection.id);
+        },
+        [connection.id, onContextMenu],
+    );
 
     return (
         <g>
@@ -37,15 +71,8 @@ export function ConnectionPath({
                 strokeWidth="16"
                 fill="none"
                 style={{ cursor: "pointer", pointerEvents: "stroke" }}
-                onClick={(event) => {
-                    event.stopPropagation();
-                    onSelect();
-                }}
-                onContextMenu={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onContextMenu?.(event);
-                }}
+                onClick={handleSelect}
+                onContextMenu={handleContextMenu}
             />
             <path
                 d={pathD}
@@ -57,6 +84,20 @@ export function ConnectionPath({
             />
         </g>
     );
+}, areConnectionPathPropsEqual);
+
+function areConnectionPathPropsEqual(previous: ConnectionPathProps, next: ConnectionPathProps) {
+    return previous.connection.id === next.connection.id
+        && previous.active === next.active
+        && previous.onSelect === next.onSelect
+        && previous.onContextMenu === next.onContextMenu
+        && previous.from.position.x === next.from.position.x
+        && previous.from.position.y === next.from.position.y
+        && previous.from.width === next.from.width
+        && previous.from.height === next.from.height
+        && previous.to.position.x === next.to.position.x
+        && previous.to.position.y === next.to.position.y
+        && previous.to.height === next.to.height;
 }
 
 export function ActiveConnectionPath({ node, handle, mouseWorld, target }: { node?: CanvasNodeData; handle: ConnectionHandle; mouseWorld: Position; target?: CanvasNodeData }) {

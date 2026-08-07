@@ -18,6 +18,22 @@ type InfiniteCanvasProps = {
     children: React.ReactNode;
 };
 
+export function calculateWheelViewport(viewport: ViewportTransform, pointerX: number, pointerY: number, deltaY: number, deltaMode: number, pageHeight: number) {
+    const deltaUnit = deltaMode === 1 ? 16 : deltaMode === 2 ? pageHeight : 1;
+    const normalizedDelta = Math.max(-240, Math.min(240, deltaY * deltaUnit));
+    if (!normalizedDelta) return viewport;
+
+    const nextScale = Math.min(Math.max(viewport.k * Math.exp(-normalizedDelta * 0.001), 0.05), 5);
+    if (nextScale === viewport.k) return viewport;
+    const worldX = (pointerX - viewport.x) / viewport.k;
+    const worldY = (pointerY - viewport.y) / viewport.k;
+    return {
+        x: pointerX - worldX * nextScale,
+        y: pointerY - worldY * nextScale,
+        k: nextScale,
+    };
+}
+
 export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onViewportInteractionStart, onCanvasMouseDown, onCanvasDeselect, onCanvasDoubleClick, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const panState = useRef({
@@ -31,23 +47,62 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     const viewportRef = useRef(viewport);
     const sceneRef = useRef<HTMLDivElement>(null);
     const gridRef = useRef<HTMLDivElement>(null);
-    const frameRef = useRef<number | null>(null);
+    const panFrameRef = useRef<number | null>(null);
+    const wheelFrameRef = useRef<number | null>(null);
     const nextViewportRef = useRef<ViewportTransform | null>(null);
+    const nextWheelViewportRef = useRef<ViewportTransform | null>(null);
+    const wheelInteractionActiveRef = useRef(false);
+    const wheelInteractionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const finishWheelInteractionRef = useRef<() => void>(() => undefined);
     const onViewportChangeRef = useRef(onViewportChange);
     const onViewportInteractionStartRef = useRef(onViewportInteractionStart);
     const onCanvasDeselectRef = useRef(onCanvasDeselect);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
 
+    const syncInteractionAttribute = () => {
+        containerRef.current?.toggleAttribute("data-canvas-interacting", panState.current.isPanning || wheelInteractionActiveRef.current);
+    };
+
+    const applyPendingWheelPreview = () => {
+        if (wheelFrameRef.current !== null) {
+            cancelAnimationFrame(wheelFrameRef.current);
+            wheelFrameRef.current = null;
+        }
+        const nextViewport = nextWheelViewportRef.current;
+        nextWheelViewportRef.current = null;
+        if (!nextViewport) return;
+        viewportRef.current = nextViewport;
+        applyViewportPreview(sceneRef.current, gridRef.current, nextViewport);
+    };
+
+    const finishWheelInteraction = () => {
+        if (wheelInteractionTimerRef.current) clearTimeout(wheelInteractionTimerRef.current);
+        wheelInteractionTimerRef.current = null;
+        applyPendingWheelPreview();
+        if (!wheelInteractionActiveRef.current) return;
+        wheelInteractionActiveRef.current = false;
+        onViewportChangeRef.current(viewportRef.current);
+        syncInteractionAttribute();
+    };
+    finishWheelInteractionRef.current = finishWheelInteraction;
+
     useEffect(() => {
-        viewportRef.current = viewport;
+        if (!wheelInteractionActiveRef.current && !panState.current.isPanning) viewportRef.current = viewport;
+    }, [viewport]);
+
+    useEffect(() => {
         onViewportChangeRef.current = onViewportChange;
         onViewportInteractionStartRef.current = onViewportInteractionStart;
         onCanvasDeselectRef.current = onCanvasDeselect;
-    }, [onCanvasDeselect, onViewportChange, onViewportInteractionStart, viewport]);
+    }, [onCanvasDeselect, onViewportChange, onViewportInteractionStart]);
 
     useEffect(
         () => () => {
-            if (frameRef.current) cancelAnimationFrame(frameRef.current);
+            if (panFrameRef.current !== null) cancelAnimationFrame(panFrameRef.current);
+            if (wheelFrameRef.current !== null) cancelAnimationFrame(wheelFrameRef.current);
+            if (wheelInteractionTimerRef.current) clearTimeout(wheelInteractionTimerRef.current);
+            containerRef.current?.removeAttribute("data-canvas-interacting");
+            document.body.style.cursor = "";
         },
         [],
     );
@@ -62,12 +117,18 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
         const handleKeyUp = (event: KeyboardEvent) => {
             if (event.code === "Space") setIsSpacePressed(false);
         };
+        const handleBlur = () => {
+            setIsSpacePressed(false);
+            finishWheelInteractionRef.current();
+        };
 
         window.addEventListener("keydown", handleKeyDown);
         window.addEventListener("keyup", handleKeyUp);
+        window.addEventListener("blur", handleBlur);
         return () => {
             window.removeEventListener("keydown", handleKeyDown);
             window.removeEventListener("keyup", handleKeyUp);
+            window.removeEventListener("blur", handleBlur);
         };
     }, []);
 
@@ -75,21 +136,30 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
         const target = event.target instanceof Element ? event.target : null;
         if (target?.closest("[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
 
-        const delta = -event.deltaY;
-        const factor = Math.pow(1.1, delta / 100);
-        const newScale = Math.min(Math.max(viewport.k * factor, 0.05), 5);
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
 
+        const currentViewport = nextWheelViewportRef.current || viewportRef.current;
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;
-        const worldX = (mouseX - viewport.x) / viewport.k;
-        const worldY = (mouseY - viewport.y) / viewport.k;
-
-        onViewportChange({
-            x: mouseX - worldX * newScale,
-            y: mouseY - worldY * newScale,
-            k: newScale,
+        const nextViewport = calculateWheelViewport(currentViewport, mouseX, mouseY, event.deltaY, event.deltaMode, rect.height);
+        if (nextViewport === currentViewport) return;
+        nextWheelViewportRef.current = nextViewport;
+        if (!wheelInteractionActiveRef.current) {
+            wheelInteractionActiveRef.current = true;
+            onViewportInteractionStartRef.current?.();
+            syncInteractionAttribute();
+        }
+        if (wheelInteractionTimerRef.current) clearTimeout(wheelInteractionTimerRef.current);
+        wheelInteractionTimerRef.current = setTimeout(() => finishWheelInteractionRef.current(), 160);
+        if (wheelFrameRef.current !== null) return;
+        wheelFrameRef.current = requestAnimationFrame(() => {
+            wheelFrameRef.current = null;
+            const nextViewport = nextWheelViewportRef.current;
+            nextWheelViewportRef.current = null;
+            if (!nextViewport) return;
+            viewportRef.current = nextViewport;
+            applyViewportPreview(sceneRef.current, gridRef.current, nextViewport);
         });
     };
 
@@ -106,7 +176,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             return;
         }
 
-        if (event.button === 1 || (event.button === 0 && !isSpacePressed && isBackgroundClick)) {
+        if (event.button === 1 || (event.button === 0 && (isSpacePressed || isBackgroundClick))) {
             event.preventDefault();
             event.currentTarget.setPointerCapture(event.pointerId);
             panState.current = {
@@ -118,13 +188,11 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
                 hasMoved: false,
             };
             onViewportInteractionStartRef.current?.();
+            syncInteractionAttribute();
             document.body.style.cursor = "grabbing";
             return;
         }
 
-        if (event.button === 0 && isSpacePressed && isBackgroundClick) {
-            event.preventDefault();
-        }
     };
 
     const handleDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -148,9 +216,9 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
                 y: panState.current.initialY + dy,
                 k: viewportRef.current.k,
             };
-            if (frameRef.current) return;
-            frameRef.current = requestAnimationFrame(() => {
-                frameRef.current = null;
+            if (panFrameRef.current !== null) return;
+            panFrameRef.current = requestAnimationFrame(() => {
+                panFrameRef.current = null;
                 if (nextViewportRef.current) applyViewportPreview(sceneRef.current, gridRef.current, nextViewportRef.current);
             });
         };
@@ -162,10 +230,10 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
                 onCanvasDeselectRef.current?.();
             }
             panState.current.isPanning = false;
-            document.body.style.cursor = "default";
-            if (frameRef.current) {
-                cancelAnimationFrame(frameRef.current);
-                frameRef.current = null;
+            document.body.style.cursor = "";
+            if (panFrameRef.current !== null) {
+                cancelAnimationFrame(panFrameRef.current);
+                panFrameRef.current = null;
             }
             if (nextViewportRef.current) {
                 applyViewportPreview(sceneRef.current, gridRef.current, nextViewportRef.current);
@@ -173,13 +241,18 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
                 onViewportChangeRef.current(nextViewportRef.current);
                 nextViewportRef.current = null;
             }
+            syncInteractionAttribute();
         };
 
         window.addEventListener("pointermove", handlePointerMove);
         window.addEventListener("pointerup", handlePointerUp);
+        window.addEventListener("pointercancel", handlePointerUp);
+        window.addEventListener("blur", handlePointerUp);
         return () => {
             window.removeEventListener("pointermove", handlePointerMove);
             window.removeEventListener("pointerup", handlePointerUp);
+            window.removeEventListener("pointercancel", handlePointerUp);
+            window.removeEventListener("blur", handlePointerUp);
         };
     }, []);
 
@@ -200,7 +273,8 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     return (
         <div
             ref={containerRef}
-            className="relative h-full w-full cursor-grab select-none overflow-hidden"
+            data-infinite-canvas
+            className="relative h-full w-full touch-none cursor-grab select-none overflow-hidden"
             style={{ background: theme.canvas.background }}
             onPointerDown={handlePointerDown}
             onDoubleClick={handleDoubleClick}

@@ -3,6 +3,7 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 
 import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
+import { accountScopedKey, getCanvasStorageScopeId } from "@/lib/canvas-account-scope";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
 
@@ -35,8 +36,8 @@ type CanvasStore = {
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
 const CANVAS_STORE_KEY = "infinite-canvas:canvas_store";
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
-type PendingCanvasWrite = { name: string; value: string };
-export type CanvasPersistenceStatus = "idle" | "saving" | "saved" | "error";
+type PendingCanvasWrite = { name: string; value: StorageValue<CanvasStore>; scopeId: string };
+export type CanvasPersistenceStatus = "idle" | "pending" | "saving" | "saved" | "error";
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedPersistState: PersistedCanvasState | null = null;
@@ -49,13 +50,13 @@ export const useCanvasPersistenceStatus = create<{ status: CanvasPersistenceStat
 }));
 
 function queueCanvasWrite(name: string, value: StorageValue<CanvasStore>) {
-    pendingCanvasWrite = { name, value: JSON.stringify(value) };
-    useCanvasPersistenceStatus.setState({ status: "saving", error: null });
+    pendingCanvasWrite = { name, value, scopeId: getCanvasStorageScopeId() };
+    useCanvasPersistenceStatus.setState({ status: "pending", error: null });
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
         saveTimer = null;
         void flushCanvasPersistence();
-    }, 400);
+    }, 3000);
 }
 
 export async function flushCanvasPersistence() {
@@ -65,10 +66,12 @@ export async function flushCanvasPersistence() {
     while (pendingCanvasWrite) {
         const write = pendingCanvasWrite;
         pendingCanvasWrite = null;
+        if (write.scopeId !== getCanvasStorageScopeId()) continue;
+        useCanvasPersistenceStatus.setState({ status: "saving", error: null });
         canvasWriteChain = canvasWriteChain
             .catch(() => undefined)
             .then(async () => {
-                await localForageStorage.setItem(write.name, write.value);
+                await localForageStorage.setItem(accountScopedKey(write.name, write.scopeId), JSON.stringify(write.value));
             });
         try {
             await canvasWriteChain;
@@ -84,7 +87,7 @@ export async function flushCanvasPersistence() {
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
-        const value = await localForageStorage.getItem(name);
+        const value = await localForageStorage.getItem(accountScopedKey(name));
         if (!value) return null;
         const parsed = JSON.parse(value) as StorageValue<CanvasStore>;
         queuedPersistState = parsed.state as PersistedCanvasState;
@@ -96,7 +99,7 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         queuedPersistState = nextState;
         queueCanvasWrite(name, value);
     },
-    removeItem: (name) => localForageStorage.removeItem(name),
+    removeItem: (name) => localForageStorage.removeItem(accountScopedKey(name)),
 };
 
 export const useCanvasStore = create<CanvasStore>()(
@@ -172,3 +175,16 @@ export const useCanvasStore = create<CanvasStore>()(
         },
     ),
 );
+
+export async function rehydrateCanvasStoreForAccount() {
+    useCanvasStore.setState({ hydrated: false, projects: [] });
+    queuedPersistState = null;
+    pendingCanvasWrite = null;
+    await useCanvasStore.persist.rehydrate();
+}
+
+export function clearCanvasStoreMemory() {
+    useCanvasStore.setState({ hydrated: false, projects: [] });
+    queuedPersistState = null;
+    pendingCanvasWrite = null;
+}

@@ -3,11 +3,15 @@ import { Empty, Input, Select, Tag } from "antd";
 import { BookOpenText, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Images, ListTree, Music2, Search, Settings2, Square, Type, Video } from "lucide-react";
 
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
+import { readCanvasHostMessage } from "@/lib/canvas-host-bridge";
 import { SUCAI_INTEGRATION } from "@/constant/env";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { cn } from "@/lib/utils";
 import { useAssetStore, type Asset, type AssetKind } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { clearCanvasStoreMemory } from "@/stores/canvas/use-canvas-store";
+import { clearAssetStoreMemory } from "@/stores/use-asset-store";
+import { clearCanvasHostTaskStoreMemory } from "@/stores/canvas/use-canvas-host-task-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 import type { InsertAssetPayload } from "./asset-picker-modal";
@@ -52,9 +56,17 @@ export function CanvasSidePanel({ nodes, selectedNodeIds, onFocusNode, onInsertA
         if (!SUCAI_INTEGRATION || window.parent === window) return;
         const handleHostMessage = (event: MessageEvent) => {
             if (event.source !== window.parent) return;
-            const data = event.data as { source?: string; type?: string; tab?: PanelTab } | null;
-            if (data?.source !== "flash-creator-host" || data.type !== "open-side-panel" || (data.tab !== "canvas" && data.tab !== "assets")) return;
-            openTab(data.tab);
+            const data = readCanvasHostMessage(event);
+            if (!data) return;
+            if (data.type === "account-changing") {
+                clearCanvasStoreMemory();
+                clearAssetStoreMemory();
+                clearCanvasHostTaskStoreMemory();
+                setOpen(false);
+                return;
+            }
+            if (data.type !== "open-side-panel") return;
+            openTab(data.tab as PanelTab);
         };
         window.addEventListener("message", handleHostMessage);
         return () => window.removeEventListener("message", handleHostMessage);
@@ -75,7 +87,7 @@ export function CanvasSidePanel({ nodes, selectedNodeIds, onFocusNode, onInsertA
     }
 
     return (
-        <aside className="flex h-full w-[280px] shrink-0 flex-col overflow-hidden border-r" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} data-canvas-no-zoom>
+        <aside className="flex h-full w-[260px] shrink-0 flex-col overflow-hidden border-r" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} data-canvas-no-zoom>
             <div className="flex items-center gap-1 px-3 pt-3">
                 <TabButton label="画布" active={tab === "canvas"} theme={theme} onClick={() => setTab("canvas")} />
                 <TabButton label="资产" active={tab === "assets"} theme={theme} onClick={() => setTab("assets")} />
@@ -90,7 +102,7 @@ export function CanvasSidePanel({ nodes, selectedNodeIds, onFocusNode, onInsertA
 
 function TabButton({ label, active, theme, onClick }: { label: string; active: boolean; theme: CanvasTheme; onClick: () => void }) {
     return (
-        <button type="button" onClick={onClick} className={cn("rounded-lg px-3 py-1.5 text-sm font-semibold transition", active ? "" : "opacity-55 hover:opacity-90")} style={active ? { background: theme.toolbar.activeBg, color: theme.toolbar.activeText } : { color: theme.node.text }}>
+        <button type="button" onClick={onClick} className={cn("rounded-md px-2.5 py-1.5 text-xs font-semibold transition", active ? "" : "opacity-55 hover:opacity-90")} style={active ? { background: theme.toolbar.activeBg, color: theme.toolbar.activeText } : { color: theme.node.text }}>
             {label}
         </button>
     );
@@ -147,14 +159,14 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, theme }: { nodes:
                                     key={node.id}
                                     type="button"
                                     onClick={() => onFocusNode(node.id)}
-                                    className={cn("flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition", active ? "" : "hover:bg-black/5 dark:hover:bg-white/5")}
+                                    className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition", active ? "" : "hover:bg-black/5 dark:hover:bg-white/5")}
                                     style={active ? { background: theme.toolbar.activeBg } : undefined}
                                 >
-                                    <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-md" style={{ background: theme.node.fill }}>
+                                    <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-md" style={{ background: theme.node.fill }}>
                                         {isImage ? <img src={node.metadata!.content} alt={node.title} className="size-full object-cover" /> : <Icon className="size-4.5 opacity-70" />}
                                     </span>
                                     <span className="min-w-0 flex-1 space-y-0.5">
-                                        <span className="block truncate text-sm font-medium leading-snug">{node.title || getNodeDefinition(node.type)?.title || "未命名节点"}</span>
+                                        <span className="block truncate text-xs font-medium leading-snug">{node.title || getNodeDefinition(node.type)?.title || "未命名节点"}</span>
                                         <span className="block truncate text-xs leading-snug opacity-50">{nodePreviewText(node)}</span>
                                     </span>
                                     {node.metadata?.status && node.metadata.status !== "idle" ? <span className="size-1.5 shrink-0 rounded-full" style={{ background: STATUS_COLOR[node.metadata.status] || "transparent" }} /> : null}

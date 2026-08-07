@@ -84,6 +84,7 @@ export function CanvasNodeHoverToolbar({
     const [mediaMenuOpen, setMediaMenuOpen] = useState(false);
     const { message } = App.useApp();
     const copyText = useCopyText();
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     useEffect(() => {
         try {
@@ -107,7 +108,7 @@ export function CanvasNodeHoverToolbar({
 
     const activeNode = node;
     const left = viewport.x + (node.position.x + node.width / 2) * viewport.k;
-    const top = viewport.y + node.position.y * viewport.k - 14;
+    const top = viewport.y + node.position.y * viewport.k - 10;
     const isImage = node.type === CanvasNodeType.Image;
     const isVideo = node.type === CanvasNodeType.Video;
     const isAudio = node.type === CanvasNodeType.Audio;
@@ -183,8 +184,8 @@ export function CanvasNodeHoverToolbar({
     return (
         <>
             <div
-                className="absolute z-[70] flex h-12 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-[18px] border border-black/10 bg-white text-[15px] text-[#242529] shadow-[0_8px_28px_rgba(15,23,42,.12)]"
-                style={{ left, top }}
+                className="absolute z-[70] flex h-9 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-lg border text-xs backdrop-blur"
+                style={{ left, top, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item, boxShadow: "0 8px 24px rgba(0,0,0,.18)" }}
                 onMouseEnter={() => onKeep(node.id)}
                 onMouseLeave={() => {
                     if (!imageToolSettingsOpen) onLeave();
@@ -195,10 +196,10 @@ export function CanvasNodeHoverToolbar({
                 {toolbarTools.map((tool) => (
                     <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} />
                 ))}
-                {isText && mediaMenuOpen ? <div className="absolute bottom-[52px] right-0 z-40 min-w-[150px] rounded-xl border border-black/10 bg-white p-1.5 text-sm shadow-xl">
-                    <button type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-[#f0f0f1]" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "image"); }}><ImageIcon className="size-4" />图片</button>
-                    <button type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-[#f0f0f1]" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "audio"); }}><Music2 className="size-4" />配音</button>
-                    <button type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-[#f0f0f1]" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "video"); }}><Video className="size-4" />视频</button>
+                {isText && mediaMenuOpen ? <div className="absolute bottom-10 right-0 z-40 min-w-[132px] rounded-lg border p-1 text-xs shadow-xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
+                    <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-black/5 dark:hover:bg-white/10" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "image"); }}><ImageIcon className="size-3.5" />图片</button>
+                    <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-black/5 dark:hover:bg-white/10" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "audio"); }}><Music2 className="size-3.5" />配音</button>
+                    <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-black/5 dark:hover:bg-white/10" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "video"); }}><Video className="size-3.5" />视频</button>
                 </div> : null}
                 {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} /> : null}
             </div>
@@ -291,9 +292,9 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
 function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false }: ToolbarTool & { showLabel: boolean }) {
     const hasText = showLabel && Boolean(label);
     return (
-        <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff" styles={{ root: { color: "#242529", boxShadow: "0 8px 24px rgba(15,23,42,.16)", fontSize: 13, fontWeight: 500 } }}>
-            <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap px-1.5 ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
-                <span className={`flex h-9 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-[#f0f0f1] ${active ? "bg-[#eeeeef]" : ""}`}>
+        <Tooltip title={title} placement="top" mouseEnterDelay={0.2}>
+            <button type="button" className={`group relative flex h-9 items-center whitespace-nowrap px-0.5 ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
+                <span className={`flex h-7 items-center ${hasText ? "gap-1.5 px-2" : "justify-center px-1.5"} rounded-md text-xs transition group-hover:bg-black/5 dark:group-hover:bg-white/10 ${active ? "bg-black/5 dark:bg-white/10" : ""} [&_svg]:size-3.5`}>
                     {icon}
                     {hasText ? <span>{label}</span> : null}
                 </span>

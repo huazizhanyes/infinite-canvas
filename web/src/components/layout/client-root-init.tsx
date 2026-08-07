@@ -2,9 +2,14 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Result, Spin } from "antd";
 
-import { createModelChannel, encodeChannelModel, modelOptionsFromChannels, useConfigStore } from "@/stores/use-config-store";
+import { createModelChannel, encodeChannelModel, modelOptionsFromChannels, useConfigStore, rehydrateConfigForAccount } from "@/stores/use-config-store";
 import { initializeSucaiCanvasSync } from "@/services/sucai-canvas-sync";
+import { stopSucaiCanvasSync } from "@/services/sucai-canvas-sync";
 import { useUserStore } from "@/stores/use-user-store";
+import { setCanvasAccountScope, migrateLegacyCanvasData, clearCanvasAccountScope } from "@/lib/canvas-account-scope";
+import { rehydrateCanvasStoreForAccount, clearCanvasStoreMemory } from "@/stores/canvas/use-canvas-store";
+import { rehydrateAssetStoreForAccount, clearAssetStoreMemory } from "@/stores/use-asset-store";
+import { rehydrateCanvasHostTaskStoreForAccount, clearCanvasHostTaskStoreMemory } from "@/stores/canvas/use-canvas-host-task-store";
 
 const SUCAI_MODE_KEY = "infinite-canvas:sucai-mode";
 const SUCAI_TOKEN_KEY = "sucai_token";
@@ -101,6 +106,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
 
         void Promise.all([requestModels("/v1/models"), requestModels("/v1/video/models", true).catch(() => [])])
             .then(async ([models, videoModels]) => {
+                await transitionCanvasAccount(token);
                 const imageModel = models.find((item: { capability?: string }) => item.capability === "image") || models[0];
                 const textModels = models.filter((item: { capability?: string }) => item.capability === "text");
                 const audioModels = models.filter((item: { capability?: string }) => item.capability === "audio");
@@ -147,9 +153,8 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     updateConfig("audioVoiceName", "");
                 }
                 setConfigDialogOpen(false);
-                useUserStore.getState().configure({ canvasBaseUrl: SUCAI_API_BASE, apiBaseUrl: SUCAI_BACKEND_BASE, token });
-                void useUserStore.getState().loadAssets();
-                await initializeSucaiCanvasSync({ baseUrl: SUCAI_API_BASE, token }).catch((error) => {
+                const scope = setCanvasAccountScope(useUserStore.getState().user?.id || null);
+                await initializeSucaiCanvasSync({ baseUrl: SUCAI_API_BASE, token, userId: scope?.userId, sessionEpoch: scope?.sessionEpoch }).catch((error) => {
                     console.warn("[SucaiCanvasSync] initialization failed", error);
                 });
                 setSucaiState("ready");
@@ -160,6 +165,53 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             });
         return () => window.removeEventListener("canvas-video-pricing-changed", refreshVideoPricing);
     }, [setConfigDialogOpen, updateConfig]);
+
+    useEffect(() => {
+        if (!isSucaiModeRequested()) return;
+        let handling = false;
+        const checkAccountTransition = () => {
+            const nextToken = localStorage.getItem(SUCAI_TOKEN_KEY) || "";
+            const currentToken = useUserStore.getState().connection?.token || "";
+            if (!nextToken || !currentToken || nextToken === currentToken || handling) return;
+            handling = true;
+            setSucaiState("loading");
+            void stopSucaiCanvasSync().catch(() => undefined).finally(() => {
+                clearCanvasStoreMemory();
+                clearAssetStoreMemory();
+                clearCanvasHostTaskStoreMemory();
+                clearCanvasAccountScope();
+                window.location.reload();
+            });
+        };
+        const timer = window.setInterval(checkAccountTransition, 1000);
+        window.addEventListener("storage", checkAccountTransition);
+        window.addEventListener("canvas-account-changed", checkAccountTransition);
+        return () => {
+            window.clearInterval(timer);
+            window.removeEventListener("storage", checkAccountTransition);
+            window.removeEventListener("canvas-account-changed", checkAccountTransition);
+        };
+    }, []);
+
+    async function transitionCanvasAccount(nextToken: string) {
+        const currentToken = useUserStore.getState().connection?.token;
+        if (currentToken && currentToken !== nextToken) {
+            await stopSucaiCanvasSync().catch(() => undefined);
+            clearCanvasStoreMemory();
+            clearAssetStoreMemory();
+            clearCanvasHostTaskStoreMemory();
+            clearCanvasAccountScope();
+            useUserStore.getState().clearSession();
+        }
+        useUserStore.getState().configure({ canvasBaseUrl: SUCAI_API_BASE, apiBaseUrl: SUCAI_BACKEND_BASE, token: nextToken });
+        await useUserStore.getState().loadAssets();
+        const userId = useUserStore.getState().user?.id;
+        if (!userId) throw new Error("无法确认当前账号");
+        setCanvasAccountScope(userId);
+        const migratedLegacyData = await migrateLegacyCanvasData(userId);
+        if (migratedLegacyData) message.warning("检测到旧版未分账号的画布数据，已归属到本次首次登录账号");
+        await Promise.all([rehydrateCanvasStoreForAccount(), rehydrateAssetStoreForAccount(), rehydrateCanvasHostTaskStoreForAccount(), rehydrateConfigForAccount()]);
+    }
 
     useEffect(() => {
         if (handledConfigParams.current) return;

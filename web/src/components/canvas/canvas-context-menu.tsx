@@ -21,7 +21,7 @@ export function CanvasNodeContextMenu({ menu, onClose, onDuplicate, onDelete, ca
 
     return (
         <div
-            className="fixed z-[80] min-w-44 overflow-hidden rounded-xl border py-1 shadow-2xl"
+            className="fixed z-[80] min-w-40 overflow-hidden rounded-lg border py-1 shadow-2xl"
             style={{ left: menu.x, top: menu.y, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onPointerDown={(event) => event.stopPropagation()}
         >

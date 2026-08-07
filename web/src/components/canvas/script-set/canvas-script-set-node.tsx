@@ -82,13 +82,13 @@ export function CanvasScriptSetNode({ ctx }: { ctx: CanvasNodeContext }) {
                 if ((event.target as HTMLElement).closest("[data-script-workspace-interactive]")) event.stopPropagation();
             }}
         >
-            <header className="flex shrink-0 items-center gap-3 border-b px-4 py-3" style={{ borderColor: ctx.theme.node.stroke, background: ctx.theme.toolbar.panel }}>
-                <span className="grid size-10 shrink-0 place-items-center rounded-lg" style={{ background: ctx.theme.toolbar.activeBg, color: ctx.theme.toolbar.activeText }}>
-                    <BookOpenText className="size-5" />
+            <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2" style={{ borderColor: ctx.theme.node.stroke, background: ctx.theme.toolbar.panel }}>
+                <span className="grid size-8 shrink-0 place-items-center rounded-lg" style={{ background: ctx.theme.toolbar.activeBg, color: ctx.theme.toolbar.activeText }}>
+                    <BookOpenText className="size-4" />
                 </span>
                 <span className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-semibold">{scriptSet?.title || ctx.node.title}</span>
-                    <span className="mt-1 block truncate text-[11px]" style={{ color: error ? "#ef4444" : ctx.theme.node.faint }}>
+                    <span className="mt-0.5 block truncate text-[11px]" style={{ color: error ? "#ef4444" : ctx.theme.node.faint }}>
                         {error || (scriptSetId ? `${stats?.episodeCount || 0} 集 · ${assetCount} 个资产 · ${stats?.pendingCount || 0} 项待确认` : "正在初始化剧本集...")}
                     </span>
                 </span>
@@ -104,7 +104,7 @@ export function CanvasScriptSetNode({ ctx }: { ctx: CanvasNodeContext }) {
             {!expanded ? <CollapsedSummary ctx={ctx} stats={stats} assetCount={assetCount} loading={loading} error={error} onExpand={toggleExpanded} onRetry={refresh} /> : null}
 
             {expanded && error ? (
-                <div className="flex shrink-0 items-center gap-2 border-b px-5 py-2.5 text-xs text-red-500" style={{ borderColor: ctx.theme.node.stroke }} data-script-workspace-interactive onMouseDown={(event) => event.stopPropagation()}>
+                <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2 text-[11px] text-red-500" style={{ borderColor: ctx.theme.node.stroke }} data-script-workspace-interactive onMouseDown={(event) => event.stopPropagation()}>
                     <AlertCircle className="size-4" />
                     <span className="min-w-0 flex-1 truncate">{error}</span>
                     <button type="button" className="rounded-md px-2 py-1 font-medium hover:bg-red-500/10" onClick={refresh}>
@@ -142,7 +142,7 @@ function CollapsedSummary({ ctx, stats, assetCount, loading, error, onExpand, on
     return (
         <button
             type="button"
-            className="flex min-h-0 w-full flex-1 flex-col p-4 text-left transition hover:bg-black/[.03]"
+            className="flex min-h-0 w-full flex-1 flex-col p-3 text-left transition hover:bg-black/[.03]"
             style={{ color: ctx.theme.node.text }}
             onClick={error ? onRetry : onExpand}
             onMouseDown={(event) => event.stopPropagation()}
@@ -153,7 +153,7 @@ function CollapsedSummary({ ctx, stats, assetCount, loading, error, onExpand, on
                 <Stat icon={<UsersRound className="size-3.5" />} label="人物" value={stats?.assetCounts.character || 0} ctx={ctx} />
                 <Stat icon={<Boxes className="size-3.5" />} label="资产" value={assetCount} ctx={ctx} />
             </div>
-            <div className="mt-auto flex w-full items-center justify-between gap-3 pt-3 text-[11px]" style={{ color: error ? "#ef4444" : ctx.theme.node.muted }}>
+            <div className="mt-auto flex w-full items-center justify-between gap-2 pt-2 text-[11px]" style={{ color: error ? "#ef4444" : ctx.theme.node.muted }}>
                 <span>{error ? "点击重试" : `待确认 ${stats?.pendingCount || 0}`}</span>
                 <span>{loading ? "正在读取..." : error ? "读取失败" : "点击展开组件"}</span>
             </div>
@@ -185,7 +185,7 @@ function Stat({ icon, label, value, ctx }: { icon: ReactNode; label: string; val
                 {icon}
                 {label}
             </span>
-            <span className="text-base font-semibold">{value}</span>
+            <span className="text-sm font-semibold">{value}</span>
         </span>
     );
 }

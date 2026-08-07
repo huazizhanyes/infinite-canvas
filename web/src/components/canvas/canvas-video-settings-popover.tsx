@@ -77,7 +77,7 @@ function VideoSettingsPortal({
     hasReferenceVideo: boolean;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
 }) {
-    const width = 356;
+    const width = 320;
     const gap = 8;
     const margin = 12;
     const alignRight = placement?.endsWith("Right");
@@ -91,9 +91,10 @@ function VideoSettingsPortal({
         left: Math.max(margin, Math.min(window.innerWidth - width - margin, left)),
         ...(topPlacement ? { bottom: window.innerHeight - buttonRect.top + gap, maxHeight: Math.max(260, buttonRect.top - margin * 2) } : { top: buttonRect.bottom + gap, maxHeight: Math.max(260, window.innerHeight - buttonRect.bottom - margin * 2) }),
         background: theme.toolbar.panel,
-        borderRadius: 18,
-        boxShadow: "0 18px 54px rgba(28, 25, 23, 0.16)",
-        padding: 18,
+        border: `1px solid ${theme.toolbar.border}`,
+        borderRadius: 8,
+        boxShadow: "0 16px 40px rgba(0, 0, 0, 0.22)",
+        padding: 12,
         overflowY: "auto",
         color: theme.node.text,
     } as const;
@@ -107,7 +108,7 @@ function VideoSettingsPortal({
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
         >
-            <VideoSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} hasReferenceVideo={hasReferenceVideo} className="space-y-4" />
+            <VideoSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} hasReferenceVideo={hasReferenceVideo} className="space-y-3" />
         </div>,
         document.body,
     );

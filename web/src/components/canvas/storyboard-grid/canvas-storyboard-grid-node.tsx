@@ -27,21 +27,21 @@ export function CanvasStoryboardGridNode({ ctx }: { ctx: CanvasNodeContext }) {
 
     return (
         <div data-canvas-no-zoom className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-[inherit]" style={{ background: ctx.theme.node.panel, color: ctx.theme.node.text }} onWheel={(event) => event.stopPropagation()}>
-            <div className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2" style={{ borderColor: ctx.theme.node.stroke }}>
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1.5" style={{ borderColor: ctx.theme.node.stroke }}>
                 <div className="flex min-w-0 items-center gap-2">
                     <WandSparkles className="size-4 text-violet-400" />
-                    <span className="truncate text-sm font-semibold">{plan?.title || "九宫格分镜"}</span>
+                    <span className="truncate text-[12px] font-semibold">{plan?.title || "九宫格分镜"}</span>
                     <span className="text-[11px] opacity-60">{statusLabel[metadata.storyboardGridStatus || "idle"]}</span>
                 </div>
-                <span className="text-xs opacity-60">{generated}/9 已生成</span>
+                <span className="text-[11px] opacity-60">{generated}/9 已生成</span>
             </div>
-            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3 lg:flex-row">
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-2.5 lg:flex-row">
                 <div className="min-w-0 flex-1">
                     <div className="mb-2 flex items-center justify-between text-[11px] opacity-65">
                         <span>九宫格镜头</span>
                         <span>{metadata.storyboardGridAspectRatio || "16:9"}</span>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-3 gap-1.5">
                         {Array.from({ length: 9 }, (_, index) => {
                             const shot = shots[index];
                             const image = shot?.imageNodeId ? ctx.getNode(shot.imageNodeId) : null;
@@ -52,7 +52,7 @@ export function CanvasStoryboardGridNode({ ctx }: { ctx: CanvasNodeContext }) {
                                 <button
                                     key={shot?.id || index}
                                     type="button"
-                                    className={`relative min-w-0 overflow-hidden rounded-lg border text-left ${activeSlot === index + 1 ? "ring-2 ring-violet-400" : ""}`}
+                                    className={`relative min-w-0 overflow-hidden rounded-md border text-left ${activeSlot === index + 1 ? "ring-1 ring-violet-400" : ""}`}
                                     style={{ borderColor: ctx.theme.node.stroke, aspectRatio: "16 / 9", background: ctx.theme.node.fill }}
                                     onClick={() => setActiveSlot(index + 1)}
                                 >

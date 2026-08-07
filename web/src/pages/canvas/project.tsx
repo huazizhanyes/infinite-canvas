@@ -24,7 +24,7 @@ import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
 import { playGenerationCompleteSound, unlockGenerationCompleteSound } from "@/lib/generation-complete-sound";
 import { App, Button, Dropdown, Modal } from "antd";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "@/constant/canvas";
-import { ActiveConnectionPath, ConnectionPath } from "@/components/canvas/canvas-connections";
+import { ActiveConnectionPath, ConnectionPath, getConnectionBounds } from "@/components/canvas/canvas-connections";
 import { CanvasConfigComposer } from "@/components/canvas/canvas-config-composer";
 import { CanvasConfigNodePanel } from "@/components/canvas/canvas-config-node-panel";
 import { CanvasNodeContextMenu } from "@/components/canvas/canvas-context-menu";
@@ -57,6 +57,7 @@ import { syncSucaiCanvasProject } from "@/services/sucai-canvas-sync";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { createCanvasGraphIndex, incomingConnections, outgoingConnections } from "@/lib/canvas/canvas-graph-index";
+import { createCanvasSpatialIndex } from "@/lib/canvas/canvas-spatial-index";
 import { emitCanvasEvent, onCanvasEvent } from "@/lib/canvas/canvas-event-bus";
 import { getNodeDefinition, getNodePluginId, isBuiltinNodeType as isBuiltinType, listNodeDefinitions, useNodeRegistryVersion } from "@/lib/canvas/node-registry";
 import { buildNodeContext } from "@/lib/canvas/plugin-node-context";
@@ -268,23 +269,23 @@ function ConnectionCreateMenu({
     );
 }
 
-function ConnectionCreateOption({ theme, icon, title, description, onClick }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; icon: React.ReactNode; title: string; description?: string; onClick?: () => void }) {
+function ConnectionCreateOption({ theme, icon, title, description, accent, onClick }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; icon: React.ReactNode; title: string; description?: string; accent?: { color: string; background: string }; onClick?: () => void }) {
     return (
         <button
             type="button"
-            className="flex h-16 w-full cursor-pointer items-center gap-3 rounded-2xl px-3 text-left transition"
+            className="flex min-h-10 w-full cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1 text-left transition"
             style={{ color: theme.node.text }}
             onClick={onClick}
             onMouseEnter={(event) => (event.currentTarget.style.background = theme.node.fill)}
             onMouseLeave={(event) => (event.currentTarget.style.background = "transparent")}
         >
-            <span className="grid size-11 shrink-0 place-items-center rounded-xl" style={{ background: theme.node.fill, color: theme.node.muted }}>
+            <span className="grid size-8 shrink-0 place-items-center rounded-md [&_svg]:size-4" style={{ background: accent?.background || theme.node.fill, color: accent?.color || theme.node.muted }}>
                 {icon}
             </span>
             <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2 text-base font-semibold leading-5">{title}</span>
+                <span className="flex items-center gap-1.5 text-[13px] font-semibold leading-4">{title}</span>
                 {description ? (
-                    <span className="mt-1 block truncate text-sm" style={{ color: theme.node.muted }}>
+                    <span className="block truncate text-[11px] leading-[14px]" style={{ color: theme.node.muted }}>
                         {description}
                     </span>
                 ) : null}
@@ -293,7 +294,22 @@ function ConnectionCreateOption({ theme, icon, title, description, onClick }: { 
     );
 }
 
-function NodeCreateMenu({ position, onCreate, onClose }: { position: Position; onCreate: (type: string) => void; onClose: () => void }) {
+function nodeCreateMenuAccent(type: string) {
+    const accents: Record<string, { color: string; background: string }> = {
+        [CanvasNodeType.Text]: { color: "#818cf8", background: "rgba(99,102,241,.14)" },
+        [CanvasNodeType.Image]: { color: "#34d399", background: "rgba(16,185,129,.14)" },
+        [CanvasNodeType.Video]: { color: "#22d3ee", background: "rgba(6,182,212,.14)" },
+        [CanvasNodeType.Audio]: { color: "#fb7185", background: "rgba(244,63,94,.14)" },
+        [CanvasNodeType.Config]: { color: "#fbbf24", background: "rgba(245,158,11,.14)" },
+        [CanvasNodeType.Group]: { color: "#a78bfa", background: "rgba(139,92,246,.14)" },
+        [CanvasNodeType.ScriptSet]: { color: "#fbbf24", background: "rgba(245,158,11,.14)" },
+        [CanvasNodeType.Storyboard]: { color: "#fb7185", background: "rgba(244,63,94,.14)" },
+        [CanvasNodeType.StoryboardGrid]: { color: "#22d3ee", background: "rgba(6,182,212,.14)" },
+    };
+    return accents[type] || { color: "#38bdf8", background: "rgba(14,165,233,.14)" };
+}
+
+function NodeCreateMenu({ position, scale, onCreate, onClose }: { position: Position; scale: number; onCreate: (type: string) => void; onClose: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     useNodeRegistryVersion();
     const menuRef = useRef<HTMLDivElement>(null);
@@ -309,22 +325,22 @@ function NodeCreateMenu({ position, onCreate, onClose }: { position: Position; o
     return (
         <div
             ref={menuRef}
-            className="absolute z-[120] max-h-[70vh] w-[300px] overflow-y-auto rounded-[18px] border p-3 shadow-2xl backdrop-blur thin-scrollbar"
+            className="absolute z-[120] max-h-[66vh] w-[240px] origin-top-left overflow-y-auto rounded-xl border p-2 shadow-2xl backdrop-blur thin-scrollbar"
             data-canvas-no-zoom
-            style={{ left: position.x, top: position.y, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
+            style={{ left: position.x, top: position.y, transform: `scale(${1 / Math.max(scale, 0.05)})`, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             onPointerDown={(event) => event.stopPropagation()}
         >
-            <div className="mb-2 flex items-center justify-between px-1">
-                <span className="text-sm font-medium" style={{ color: theme.node.muted }}>
+            <div className="mb-1 flex items-center justify-between px-1">
+                <span className="text-xs font-medium" style={{ color: theme.node.muted }}>
                     选择节点
                 </span>
-                <button type="button" className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100" onClick={onClose} aria-label="关闭">
-                    <X className="size-4" />
+                <button type="button" className="grid size-6 place-items-center rounded-md opacity-55 transition hover:opacity-100" onClick={onClose} aria-label="关闭">
+                    <X className="size-3.5" />
                 </button>
             </div>
-            <div className="grid gap-1">
+            <div className="grid gap-0.5">
                 {definitions.map((def) => (
-                    <ConnectionCreateOption key={def.type} theme={theme} icon={def.icon} title={def.title} description={def.description} onClick={() => onCreate(def.type)} />
+                    <ConnectionCreateOption key={def.type} theme={theme} icon={def.icon} title={def.title} description={def.description} accent={nodeCreateMenuAccent(def.type)} onClick={() => onCreate(def.type)} />
                 ))}
             </div>
         </div>
@@ -386,7 +402,7 @@ function InfiniteCanvasPage() {
     const updateProject = useCanvasStore((state) => state.updateProject);
     const renameProject = useCanvasStore((state) => state.renameProject);
     const deleteProjects = useCanvasStore((state) => state.deleteProjects);
-    const currentProject = useCanvasStore((state) => state.projects.find((project) => project.id === projectId));
+    const currentProjectTitle = useCanvasStore((state) => state.projects.find((project) => project.id === projectId)?.title);
     const userConnection = useUserStore((state) => state.connection);
     const userAssets = useUserStore((state) => state.assets);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -484,14 +500,14 @@ function InfiniteCanvasPage() {
         useCanvasHostTaskStore.getState().startTask({
             id: taskId,
             projectId,
-            projectTitle: currentProject?.title || "未命名画布",
+            projectTitle: currentProjectTitle || "未命名画布",
             nodeId: targetNodeId,
             title: targetNode?.title || "画布 AI 生成",
             stage: canvasTaskStage(targetNode),
         });
         generationRequestsRef.current.set(targetNodeId, { targetNodeId, originNodeId, runningNodeId: runningId, controller, taskId });
         return controller;
-    }, [currentProject?.title, projectId]);
+    }, [currentProjectTitle, projectId]);
 
     const finishGenerationRequest = useCallback((targetNodeId: string, controller: AbortController) => {
         const request = generationRequestsRef.current.get(targetNodeId);
@@ -644,6 +660,31 @@ function InfiniteCanvasPage() {
     useEffect(() => {
         if (!dialogNodeId) setNodeImageSettingsOpen(false);
     }, [dialogNodeId]);
+
+    useEffect(() => {
+        if (!dialogNodeId) return;
+        const timer = window.setTimeout(() => {
+            const panel = Array.from(document.querySelectorAll<HTMLElement>("[data-canvas-node-panel]")).find((element) => element.dataset.canvasNodePanel === dialogNodeId);
+            const dock = document.querySelector<HTMLElement>("[data-canvas-toolbar-dock]");
+            const container = containerRef.current;
+            if (!panel || !container) return;
+
+            const panelRect = panel.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            const dockRect = dock?.getBoundingClientRect();
+            const overlapsDockHorizontally = Boolean(dockRect && panelRect.left < dockRect.right && panelRect.right > dockRect.left);
+            const safeBottom = Math.min(containerRect.bottom - 16, overlapsDockHorizontally && dockRect ? dockRect.top - 12 : Number.POSITIVE_INFINITY);
+            const overflow = panelRect.bottom - safeBottom;
+            if (overflow <= 0) return;
+
+            setViewport((current) => {
+                const next = { ...current, y: current.y - Math.ceil(overflow) };
+                viewportRef.current = next;
+                return next;
+            });
+        }, 140);
+        return () => window.clearTimeout(timer);
+    }, [dialogNodeId, size.height, size.width, viewport.k]);
 
     useEffect(() => {
         if (!projectLoaded) return;
@@ -982,6 +1023,26 @@ function InfiniteCanvasPage() {
 
     const graphIndex = useMemo(() => createCanvasGraphIndex(nodes, connections), [connections, nodes]);
     const nodeById = graphIndex.nodeById;
+    const nodeSpatialIndex = useMemo(
+        () => createCanvasSpatialIndex(nodes.map((node) => ({
+            bounds: {
+                left: node.position.x,
+                top: node.position.y,
+                right: node.position.x + node.width,
+                bottom: node.position.y + node.height,
+            },
+            value: node,
+        }))),
+        [nodes],
+    );
+    const connectionSpatialIndex = useMemo(
+        () => createCanvasSpatialIndex(connections.flatMap((connection) => {
+            const from = nodeById.get(connection.fromNodeId);
+            const to = nodeById.get(connection.toNodeId);
+            return from && to ? [{ bounds: getConnectionBounds(from, to), value: connection }] : [];
+        })),
+        [connections, nodeById],
+    );
     const canvasViewBounds = useMemo(() => {
         const padding = 280;
         const rect = containerRef.current?.getBoundingClientRect();
@@ -997,35 +1058,21 @@ function InfiniteCanvasPage() {
 
     const visibleNodes = useMemo(
         () =>
-            nodes.filter(
-                (node) =>
-                    !isHiddenBatchChild(node, nodeById, collapsingBatchIds) &&
-                    node.position.x + node.width > canvasViewBounds.left &&
-                    node.position.x < canvasViewBounds.right &&
-                    node.position.y + node.height > canvasViewBounds.top &&
-                    node.position.y < canvasViewBounds.bottom,
+            nodeSpatialIndex.query(canvasViewBounds).filter(
+                (node) => !isHiddenBatchChild(node, nodeById, collapsingBatchIds),
             ),
-        [canvasViewBounds, collapsingBatchIds, nodeById, nodes],
+        [canvasViewBounds, collapsingBatchIds, nodeById, nodeSpatialIndex],
     );
 
     const visibleConnections = useMemo(
         () =>
-            connections.filter((connection) => {
+            connectionSpatialIndex.query(canvasViewBounds).filter((connection) => {
                 const from = nodeById.get(connection.fromNodeId);
                 const to = nodeById.get(connection.toNodeId);
                 if (!from || !to || isHiddenBatchConnectionEndpoint(from, nodeById) || isHiddenBatchConnectionEndpoint(to, nodeById)) return false;
-                const startX = from.position.x + from.width;
-                const startY = from.position.y + from.height / 2;
-                const endX = to.position.x;
-                const endY = to.position.y + to.height / 2;
-                const curvature = Math.max(Math.abs(endX - startX) * 0.5, 50);
-                const left = Math.min(startX, startX + curvature, endX - curvature, endX);
-                const right = Math.max(startX, startX + curvature, endX - curvature, endX);
-                const top = Math.min(startY, endY);
-                const bottom = Math.max(startY, endY);
-                return right >= canvasViewBounds.left && left <= canvasViewBounds.right && bottom >= canvasViewBounds.top && top <= canvasViewBounds.bottom;
+                return true;
             }),
-        [canvasViewBounds, connections, nodeById],
+        [canvasViewBounds, connectionSpatialIndex, nodeById],
     );
     // 工具条跟随「单选节点」:点击/新建/框选/键盘选中任一节点都会显示,不再仅靠精确点中触发。
     // 多选时不显示;拖拽中由下方 isNodeDragging 守卫隐藏。
@@ -1102,13 +1149,13 @@ function InfiniteCanvasPage() {
         return map;
     }, [connections, graphIndex, nodes]);
     const agentSnapshot = useMemo<CanvasAgentSnapshot>(
-        () => ({ projectId, title: currentProject?.title || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }),
-        [connections, currentProject?.title, nodes, projectId, selectedNodeIds, viewport],
+        () => ({ projectId, title: currentProjectTitle || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }),
+        [connections, currentProjectTitle, nodes, projectId, selectedNodeIds, viewport],
     );
     const applyAgentOps = useCallback(
         (ops?: CanvasAgentOp[]) => {
             const safeOps = Array.isArray(ops) ? ops.filter((op) => op?.type) : [];
-            const before = { projectId, title: currentProject?.title || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current };
+            const before = { projectId, title: currentProjectTitle || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current };
             const generationOps = safeOps.filter((op): op is Extract<CanvasAgentOp, { type: "run_generation" }> => op.type === "run_generation" && Boolean(op.nodeId));
             const next = applyCanvasAgentOps(
                 before,
@@ -1134,9 +1181,9 @@ function InfiniteCanvasPage() {
                     }),
                 );
             }
-            return { ...next, projectId, title: currentProject?.title || "未命名画布" };
+            return { ...next, projectId, title: currentProjectTitle || "未命名画布" };
         },
-        [currentProject?.title, projectId],
+        [currentProjectTitle, projectId],
     );
     const undoAgentOps = useCallback(() => {
         if (!agentUndoSnapshot) return null;
@@ -1151,8 +1198,8 @@ function InfiniteCanvasPage() {
         setViewport(agentUndoSnapshot.viewport);
         setContextMenu(null);
         setAgentUndoSnapshot(null);
-        return { ...agentUndoSnapshot, projectId, title: currentProject?.title || "未命名画布" };
-    }, [agentUndoSnapshot, currentProject?.title, projectId]);
+        return { ...agentUndoSnapshot, projectId, title: currentProjectTitle || "未命名画布" };
+    }, [agentUndoSnapshot, currentProjectTitle, projectId]);
 
     useEffect(() => {
         if (!SHOW_AGENT_UI) {
@@ -2828,9 +2875,9 @@ function InfiniteCanvasPage() {
     );
 
     const startTitleEditing = useCallback(() => {
-        setTitleDraft(currentProject?.title || "未命名画布");
+        setTitleDraft(currentProjectTitle || "未命名画布");
         setTitleEditing(true);
-    }, [currentProject?.title]);
+    }, [currentProjectTitle]);
 
     const finishTitleEditing = useCallback(() => {
         const nextTitle = titleDraft.trim();
@@ -3765,6 +3812,16 @@ function InfiniteCanvasPage() {
         event.stopPropagation();
         setContextMenu({ type: "node", x: event.clientX, y: event.clientY, nodeId });
     }, []);
+    const handleConnectionSelect = useCallback((connectionId: string) => {
+        setSelectedConnectionId(connectionId);
+        setSelectedNodeIds(new Set());
+        setContextMenu(null);
+    }, []);
+    const handleConnectionContextMenu = useCallback((event: ReactMouseEvent<SVGPathElement>, connectionId: string) => {
+        setSelectedConnectionId(connectionId);
+        setSelectedNodeIds(new Set());
+        setContextMenu({ type: "connection", x: event.clientX, y: event.clientY, connectionId });
+    }, []);
 
     if (!projectLoaded) return <CanvasRefreshShell />;
 
@@ -3773,7 +3830,7 @@ function InfiniteCanvasPage() {
             <CanvasSidePanel nodes={nodes} selectedNodeIds={selectedNodeIds} onFocusNode={focusNode} onInsertAsset={handleAssetInsert} />
             <section className="relative min-w-0 flex-1 overflow-hidden">
                 <CanvasTopBar
-                    title={currentProject?.title || "未命名画布"}
+                    title={currentProjectTitle || "未命名画布"}
                     titleDraft={titleDraft}
                     isTitleEditing={titleEditing}
                     onTitleDraftChange={setTitleDraft}
@@ -3823,16 +3880,8 @@ function InfiniteCanvasPage() {
                                     from={from}
                                     to={to}
                                     active={selectedConnectionId === connection.id || relatedHighlight.connectionIds.has(connection.id)}
-                                    onSelect={() => {
-                                        setSelectedConnectionId(connection.id);
-                                        setSelectedNodeIds(new Set());
-                                        setContextMenu(null);
-                                    }}
-                                    onContextMenu={(event) => {
-                                        setSelectedConnectionId(connection.id);
-                                        setSelectedNodeIds(new Set());
-                                        setContextMenu({ type: "connection", x: event.clientX, y: event.clientY, connectionId: connection.id });
-                                    }}
+                                    onSelect={handleConnectionSelect}
+                                    onContextMenu={handleConnectionContextMenu}
                                 />
                             );
                         })}
@@ -3901,6 +3950,7 @@ function InfiniteCanvasPage() {
                     {nodeCreatePosition ? (
                         <NodeCreateMenu
                             position={nodeCreatePosition}
+                            scale={viewport.k}
                             onCreate={(type) => {
                                 createNode(type, nodeCreatePosition);
                                 setNodeCreatePosition(null);
@@ -4013,15 +4063,19 @@ function InfiniteCanvasPage() {
                 {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
 
                 <Modal
-                    title="图片详情"
-                    open={Boolean(previewNode?.metadata?.content)}
+                    title={previewNode?.type === CanvasNodeType.Text ? previewNode.title || "文本预览" : "图片详情"}
+                    open={Boolean(previewNode && (previewNode.type === CanvasNodeType.Text || previewNode.metadata?.content))}
                     centered
                     onCancel={() => setPreviewNodeId(null)}
                     footer={null}
-                    width="auto"
-                    styles={{ body: { padding: 0, display: "flex", justifyContent: "center", alignItems: "center", maxHeight: "80vh" } }}
+                    width={previewNode?.type === CanvasNodeType.Text ? 760 : "auto"}
+                    styles={{ body: { padding: previewNode?.type === CanvasNodeType.Text ? 20 : 0, display: "flex", justifyContent: "center", alignItems: "center", maxHeight: "80vh" } }}
                 >
-                    {previewNode?.metadata?.content ? <img src={previewNode.metadata.content} alt={previewNode.title || "图片"} style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain" }} /> : null}
+                    {previewNode?.type === CanvasNodeType.Text ? (
+                        <div className="thin-scrollbar max-h-[72vh] w-full overflow-y-auto whitespace-pre-wrap break-words rounded-lg border p-5 font-mono text-sm leading-7" style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}>
+                            {previewNode.metadata?.content || "暂无文本内容"}
+                        </div>
+                    ) : previewNode?.metadata?.content ? <img src={previewNode.metadata.content} alt={previewNode.title || "图片"} style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain" }} /> : null}
                 </Modal>
 
                 <Modal
@@ -4254,11 +4308,11 @@ function audioExtension(mimeType?: string) {
 }
 
 function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
-    return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType };
+    return { content: image.url, storageKey: image.storageKey, mediaId: image.mediaId, mediaStatus: image.mediaStatus || (image.mediaId ? "synced" : undefined), status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType };
 }
 
 function videoMetadata(video: UploadedFile): CanvasNodeMetadata {
-    return { content: video.url, storageKey: video.storageKey, status: "success", naturalWidth: video.width, naturalHeight: video.height, bytes: video.bytes, mimeType: video.mimeType || "video/mp4", durationMs: video.durationMs };
+    return { content: video.url, storageKey: video.storageKey, mediaId: video.mediaId, mediaStatus: video.mediaStatus || (video.mediaId ? "synced" : undefined), status: "success", naturalWidth: video.width, naturalHeight: video.height, bytes: video.bytes, mimeType: video.mimeType || "video/mp4", durationMs: video.durationMs };
 }
 
 function canvasVideoMetadata(video: CanvasVideoStoredResult): CanvasNodeMetadata {
