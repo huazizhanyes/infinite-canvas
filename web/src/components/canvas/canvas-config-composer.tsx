@@ -51,7 +51,7 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                 return;
             }
             const input = referenceById.get(token.nodeId);
-            if (input) editor.append(createReferenceChip(input, inputs, theme, setImagePreview));
+            if (input) editor.append(createReferenceChip(input, inputs, theme, setImagePreview), document.createTextNode("\uFEFF"));
         });
     }, [inputs, referenceById, theme, tokens]);
 
@@ -137,6 +137,15 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                     onCompositionEnd={() => {
                         composingRef.current = false;
                         syncFromEditor();
+                    }}
+                    onMouseDown={(event) => {
+                        event.stopPropagation();
+                        if (event.target !== editorRef.current) return;
+                        requestAnimationFrame(() => {
+                            const editor = editorRef.current;
+                            if (!editor || document.activeElement !== editor) return;
+                            if (!window.getSelection()?.rangeCount) placeCaretAtEnd(editor);
+                        });
                     }}
                     onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
                         event.stopPropagation();
@@ -243,7 +252,16 @@ function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationI
         image.className = "size-6 rounded object-cover";
         wrapper.className = "mx-px inline-flex size-6 items-center justify-center overflow-hidden rounded align-middle";
         wrapper.appendChild(image);
-        wrapper.addEventListener("click", (event) => {
+        wrapper.title = "单击后继续输入，双击预览图片";
+        wrapper.addEventListener("mousedown", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const editor = wrapper.closest<HTMLElement>("[contenteditable='true']");
+            if (!editor) return;
+            editor.focus();
+            placeCaretAfter(wrapper);
+        });
+        wrapper.addEventListener("dblclick", (event) => {
             event.preventDefault();
             event.stopPropagation();
             onImagePreview(input.image?.dataUrl || "");
@@ -339,6 +357,15 @@ function placeCaretAtEnd(element: HTMLElement) {
     const range = document.createRange();
     range.selectNodeContents(element);
     range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+}
+
+function placeCaretAfter(node: Node) {
+    const range = document.createRange();
+    range.setStartAfter(node);
+    range.collapse(true);
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);

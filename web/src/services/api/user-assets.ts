@@ -31,32 +31,16 @@ export type UserAssetSummary = {
     }
     assets: {
         image: UserAssetBalance
-        text: UserAssetBalance
         audio: UserAssetBalance
-        video: UserAssetBalance
+        wallet: {
+            status: 'active'
+            unit: 'CNY_MICROS'
+            availableMicros: string
+            reservedMicros: string
+            totalSpentMicros: string
+            trialGrantedAt?: string | null
+        }
     }
-}
-
-export type TextTokenPlan = {
-    id: string
-    name: string
-    tokenAmount: number
-    price: number
-    badge?: string
-    isRecommended?: boolean
-}
-
-export type TextTokenTransaction = {
-    id: number
-    type: string
-    amount: number
-    balanceAfter: number
-    platform?: string
-    modelKey?: string
-    inputTokens?: number
-    outputTokens?: number
-    description?: string
-    createdAt: string
 }
 
 export type ImageRechargePlan = {
@@ -67,8 +51,6 @@ export type ImageRechargePlan = {
     badge?: string
     recommended?: boolean
 }
-
-export type VideoRechargePlan = ImageRechargePlan
 
 export type RechargeOrder = {
     out_trade_no: string
@@ -85,19 +67,6 @@ export const userAssetsApi = {
         return data
     },
 
-    async getTokenPlans(connection: UserAssetConnection) {
-        const { data } = await axios.get<{ data?: TextTokenPlan[] }>(`${trimBase(connection.apiBaseUrl)}/text-tokens/recharge-plans`, { headers: authHeaders(connection.token) })
-        return data.data || []
-    },
-
-    async getTokenTransactions(connection: UserAssetConnection) {
-        const { data } = await axios.get<{ data?: { items?: TextTokenTransaction[] } }>(`${trimBase(connection.apiBaseUrl)}/text-tokens/transactions`, {
-            headers: authHeaders(connection.token),
-            params: { page: 1, limit: 30 },
-        })
-        return data.data?.items || []
-    },
-
     async getImagePlans(connection: UserAssetConnection) {
         const { data } = await axios.get<{ data?: ImageRechargePlan[] }>(`${trimBase(connection.apiBaseUrl)}/plug/image/recharge-plans`, {
             headers: authHeaders(connection.token),
@@ -112,33 +81,6 @@ export const userAssetsApi = {
             { headers: authHeaders(connection.token) },
         )
         if (!data.data?.out_trade_no) throw new Error('创建图片额度充值订单失败')
-        return data.data
-    },
-
-    async createTokenOrder(connection: UserAssetConnection, planId: string) {
-        const { data } = await axios.post<{ data?: RechargeOrder }>(
-            `${trimBase(connection.apiBaseUrl)}/payments/text-token/create`,
-            { plan_id: planId },
-            { headers: authHeaders(connection.token) },
-        )
-        if (!data.data?.out_trade_no) throw new Error('创建 Token 充值订单失败')
-        return data.data
-    },
-
-    async getVideoPlans(connection: UserAssetConnection) {
-        const { data } = await axios.get<{ data?: VideoRechargePlan[] }>(`${trimBase(connection.canvasBaseUrl)}/v1/video/recharge-plans`, {
-            headers: authHeaders(connection.token),
-        })
-        return data.data || []
-    },
-
-    async createVideoOrder(connection: UserAssetConnection, planId: string) {
-        const { data } = await axios.post<{ data?: RechargeOrder }>(
-            `${trimBase(connection.apiBaseUrl)}/payments/video/create`,
-            { plan_id: planId },
-            { headers: authHeaders(connection.token) },
-        )
-        if (!data.data?.out_trade_no) throw new Error('创建视频积分充值订单失败')
         return data.data
     },
 

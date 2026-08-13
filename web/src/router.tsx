@@ -1,14 +1,20 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter, createHashRouter, Outlet } from "react-router-dom";
 
 import UserLayout from "@/layouts/user-layout";
-import AssetsPage from "@/pages/assets";
-import CanvasPage from "@/pages/canvas";
-import CanvasProjectPage from "@/pages/canvas/project";
-import ConfigPage from "@/pages/config";
-import ImagePage from "@/pages/image";
-import NotFound from "@/pages/not-found";
-import PromptsPage from "@/pages/prompts";
-import VideoPage from "@/pages/video";
+
+const AssetsPage = lazy(() => import("@/pages/assets"));
+const CanvasPage = lazy(() => import("@/pages/canvas"));
+const CanvasProjectPage = lazy(() => import("@/pages/canvas/project"));
+const ConfigPage = lazy(() => import("@/pages/config"));
+const ImagePage = lazy(() => import("@/pages/image"));
+const NotFound = lazy(() => import("@/pages/not-found"));
+const PromptsPage = lazy(() => import("@/pages/prompts"));
+const VideoPage = lazy(() => import("@/pages/video"));
+
+function routeElement(element: React.ReactNode) {
+    return <Suspense fallback={<div className="h-full min-h-0 bg-background" />}>{element}</Suspense>;
+}
 
 const routes = [
     {
@@ -18,17 +24,17 @@ const routes = [
             </UserLayout>
         ),
         children: [
-            { path: "/", element: <CanvasPage /> },
-            { path: "/image", element: <ImagePage /> },
-            { path: "/video", element: <VideoPage /> },
-            { path: "/assets", element: <AssetsPage /> },
-            { path: "/prompts", element: <PromptsPage /> },
-            { path: "/canvas", element: <CanvasPage /> },
-            { path: "/canvas/:id", element: <CanvasProjectPage /> },
-            { path: "/config", element: <ConfigPage /> },
+            { path: "/", element: routeElement(<CanvasPage />) },
+            { path: "/image", element: routeElement(<ImagePage />) },
+            { path: "/video", element: routeElement(<VideoPage />) },
+            { path: "/assets", element: routeElement(<AssetsPage />) },
+            { path: "/prompts", element: routeElement(<PromptsPage />) },
+            { path: "/canvas", element: routeElement(<CanvasPage />) },
+            { path: "/canvas/:id", element: routeElement(<CanvasProjectPage />) },
+            { path: "/config", element: routeElement(<ConfigPage />) },
         ],
     },
-    { path: "*", element: <NotFound /> },
+    { path: "*", element: routeElement(<NotFound />) },
 ];
 
 const basename = import.meta.env.BASE_URL === "/" ? undefined : import.meta.env.BASE_URL.replace(/\/$/, "");

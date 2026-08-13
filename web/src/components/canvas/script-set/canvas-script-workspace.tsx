@@ -149,7 +149,7 @@ export function CanvasScriptWorkspace({
                 return;
             }
             if (run.status === "succeeded") {
-                message.success(`资产分析完成，消耗 ${run.chargedTokens.toLocaleString("zh-CN")} Token`);
+                message.success("资产分析完成");
                 await Promise.all([load(), refreshUserAssets()]);
                 if (scriptSetId) notifyScriptSetUpdated(scriptSetId);
             } else {

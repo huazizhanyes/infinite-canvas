@@ -152,37 +152,28 @@ export function CanvasStoryboardNode({ ctx }: { ctx: CanvasNodeContext }) {
             message.warning("请先在上游文本节点填写来源文本");
             return;
         }
-        const estimate = await canvasStoryboardApi.estimate(connection, storyboardId, { content: sourceContent, density, targetDuration: duration });
-        modal.confirm({
-            title: "生成分镜",
-            content: `预计消耗 ${estimate.estimatedTotalTokens.toLocaleString()} Token，余额 ${estimate.availableTokens.toLocaleString()} Token`,
-            okText: "开始生成",
-            cancelText: "取消",
-            onOk: async () => {
-                const run = await canvasStoryboardApi.analyze(connection, storyboardId, {
-                    content: sourceContent,
-                    density,
-                    targetDuration: duration,
-                    sourceScope: ctx.node.metadata?.sourceScope || "full",
-                    requestId: `storyboard-${storyboardId}-${Date.now()}`,
-                });
-                setAnalyzing(true);
-                const poll = async () => {
-                    const latest = await canvasStoryboardApi.analysis(connection, run.id);
-                    if (latest.status === "queued" || latest.status === "running") {
-                        window.setTimeout(poll, 3000);
-                        return;
-                    }
-                    setAnalyzing(false);
-                    if (latest.status === "succeeded") {
-                        message.success("分镜生成完成");
-                        notifyStoryboardUpdated(storyboardId);
-                        await load();
-                    } else message.error(latest.error || "分镜分析失败");
-                };
-                void poll();
-            },
+        const run = await canvasStoryboardApi.analyze(connection, storyboardId, {
+            content: sourceContent,
+            density,
+            targetDuration: duration,
+            sourceScope: ctx.node.metadata?.sourceScope || "full",
+            requestId: `storyboard-${storyboardId}-${Date.now()}`,
         });
+        setAnalyzing(true);
+        const poll = async () => {
+            const latest = await canvasStoryboardApi.analysis(connection, run.id);
+            if (latest.status === "queued" || latest.status === "running") {
+                window.setTimeout(poll, 3000);
+                return;
+            }
+            setAnalyzing(false);
+            if (latest.status === "succeeded") {
+                message.success("分镜生成完成");
+                notifyStoryboardUpdated(storyboardId);
+                await load();
+            } else message.error(latest.error || "分镜分析失败");
+        };
+        void poll();
     };
 
     return (

@@ -65,6 +65,8 @@ type CreateInput = {
     referenceVideos?: ReferenceVideo[];
     referenceAudios?: ReferenceAudio[];
 };
+import { canvasBillingApi } from "./canvas-billing";
+import { useUserStore } from "@/stores/use-user-store";
 
 export function isCanvasVideoModel(config: AiConfig, model = config.model || config.videoModel) {
     return videoCapabilitiesOf(config, model)?.provider === "canvas-video";
@@ -90,6 +92,14 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
     if (imageAssetIds.length && mode === "text2video" && capabilities.modes.includes("image2video")) mode = "image2video";
     if (!aspectRatio || !quality || !mode) throw new Error("视频模型能力配置不完整，请稍后重试");
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const connection = useUserStore.getState().connection;
+    if (!connection) throw new Error("请先登录后生成视频");
+    const quotePayload = {
+        feature: "canvas.video.generate", requestId: input.clientRequestId,
+        modelId: modelOptionName(config.model || config.videoModel), prompt: input.prompt,
+        aspectRatio, quality, duration, mode, imageAssetIds, videoAssetIds, audioAssetIds,
+    };
+    const quote = await canvasBillingApi.quote(connection, quotePayload, signal);
 
     try {
         const response = await axios.post<CanvasVideoTask>(canvasVideoUrl(requestConfig, "/tasks"), {
@@ -107,6 +117,7 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
             audioAssetIds,
             pricingVersion,
             expectedCostCredits,
+            quoteToken: quote.quoteToken,
         }, { headers: canvasVideoHeaders(requestConfig) });
         window.dispatchEvent(new CustomEvent("canvas-video-balance-changed"));
         return response.data;

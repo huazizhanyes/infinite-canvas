@@ -18,6 +18,10 @@ function screenUiScale(scale: number) {
     return 1 / Math.max(1, scale / 1.25);
 }
 
+function screenFixedScale(scale: number) {
+    return 1 / Math.max(scale, 0.05);
+}
+
 type CanvasNodeProps = {
     data: CanvasNodeData;
     scale: number;
@@ -66,6 +70,7 @@ type NodeContentRendererProps = {
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     isEditingContent: boolean;
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+    textContentRef: React.RefObject<HTMLDivElement | null>;
     isBatchRoot: boolean;
     batchCount: number;
     batchExpanded: boolean;
@@ -142,6 +147,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const imageBorderColor = isActive ? selectionWhite : isRelated && !isBatchChild ? theme.node.muted : "transparent";
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const textContentRef = useRef<HTMLDivElement>(null);
     const titleInputRef = useRef<HTMLInputElement>(null);
     const resizeRef = useRef({
         isResizing: false,
@@ -310,6 +316,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     return (
         <div
             data-node-id={data.id}
+            data-canvas-no-zoom={data.type === CanvasNodeType.Text ? true : undefined}
             className={`node-element group/node absolute flex select-none flex-col transition-shadow duration-200 ${isGroup ? "z-[5]" : isSelected ? "z-50" : "z-10"}`}
             style={{
                 transform: `translate(${data.position.x}px, ${data.position.y}px)`,
@@ -328,6 +335,14 @@ export const CanvasNode = React.memo(function CanvasNode({
             }}
             onMouseDownCapture={(event) => onSelectCapture?.(event, data.id)}
             onContextMenu={(event) => onContextMenu(event, data.id)}
+            onWheel={(event) => {
+                if (data.type !== CanvasNodeType.Text) return;
+                event.stopPropagation();
+                const scrollElement = isEditingContent ? textareaRef.current : textContentRef.current;
+                if (!scrollElement || scrollElement.contains(event.target as Node)) return;
+                event.preventDefault();
+                scrollElement.scrollTop += event.deltaY / Math.max(scale, 0.05);
+            }}
         >
             <div
                 className="absolute left-0 top-[-24px] z-[65] flex h-5 max-w-full items-center gap-1.5 text-[12px]"
@@ -421,6 +436,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         theme={theme}
                         isEditingContent={isEditingContent}
                         textareaRef={textareaRef}
+                        textContentRef={textContentRef}
                         isBatchRoot={isBatchRoot}
                         batchCount={batchCount}
                         batchExpanded={batchExpanded}
@@ -442,7 +458,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
                 {hovered && hasVideoContent && data.metadata?.videoProvider === "canvas-video" ? <VideoInfoBar node={data} /> : null}
-                {resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
+                {resourceLabel && data.type !== CanvasNodeType.Text ? <ResourceLabelBadge reference={resourceLabel} /> : null}
                 {data.type === CanvasNodeType.Text ? (
                     <button
                         type="button"
@@ -476,10 +492,10 @@ export const CanvasNode = React.memo(function CanvasNode({
             {showPanel && !isGroup && renderPanel ? (
                 <div
                     data-canvas-node-panel={data.id}
-                    className="absolute left-1/2 z-[70] w-[460px]"
+                    className="absolute left-1/2 z-[70] w-[420px]"
                     style={{
                         top: "calc(100% + 8px)",
-                        transform: `translateX(-50%) scale(${1 / Math.max(1, scale / 1.25)})`,
+                        transform: `translateX(-50%) scale(${screenFixedScale(scale)})`,
                         transformOrigin: "top center",
                     }}
                 >
@@ -493,8 +509,8 @@ export const CanvasNode = React.memo(function CanvasNode({
 function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
-    if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} scale={props.scale} />;
-    if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} scale={props.scale} onRetry={props.onRetry} />;
+    if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
+    if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type as keyof typeof nodeContentRenderers];
     if (Renderer) return <Renderer {...props} />;
@@ -534,18 +550,23 @@ function GroupNodeContent({ node, theme, groupChildCount }: NodeContentRendererP
     );
 }
 
-function LoadingContent({ theme, scale }: Pick<NodeContentRendererProps, "theme" | "scale">) {
+function imageContentScale(node: CanvasNodeData) {
+    if (node.type !== CanvasNodeType.Image) return 1;
+    return Math.max(0.25, Math.min(node.width / 340, node.height / 240));
+}
+
+function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
     return (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-2" style={{ color: theme.node.activeStroke, transform: `scale(${screenUiScale(scale)})` }}>
+        <div className="flex h-full w-full flex-col items-center justify-center gap-2" style={{ color: theme.node.activeStroke, transform: `scale(${imageContentScale(node)})` }}>
             <div className="size-7 animate-spin rounded-full border" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
             <span className="text-[11px]">生成中</span>
         </div>
     );
 }
 
-function ErrorContent({ node, theme, scale, onRetry }: Pick<NodeContentRendererProps, "node" | "theme" | "scale" | "onRetry">) {
+function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry">) {
     return (
-        <div className="flex max-w-[260px] flex-col items-center gap-2 px-4 text-center" style={{ transform: `scale(${screenUiScale(scale)})` }}>
+        <div className="flex max-w-[260px] flex-col items-center gap-2 px-4 text-center" style={{ transform: `scale(${imageContentScale(node)})` }}>
             <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || "生成失败"}</div>
             <button
                 type="button"
@@ -574,8 +595,8 @@ function MissingPluginContent({ theme, scale, type }: Pick<NodeContentRendererPr
     );
 }
 
-function TextContent({ node, theme, scale, isEditingContent, textareaRef, mentionReferences, onContentChange, onTextSelectionChange, onOpenPanel, onStopEditing }: NodeContentRendererProps) {
-    const fontSize = (node.metadata?.fontSize || 13) * screenUiScale(scale);
+function TextContent({ node, theme, isEditingContent, textareaRef, textContentRef, mentionReferences, onContentChange, onTextSelectionChange, onOpenPanel, onStopEditing }: NodeContentRendererProps) {
+    const fontSize = node.metadata?.fontSize || 13;
     const textStyle = { fontSize: `${fontSize}px`, lineHeight: `${Math.round(fontSize * 1.55)}px`, color: theme.node.text, boxSizing: "border-box" } as React.CSSProperties;
     const [findReplaceOpen, setFindReplaceOpen] = useState(false);
     const [findText, setFindText] = useState("");
@@ -624,6 +645,8 @@ function TextContent({ node, theme, scale, isEditingContent, textareaRef, mentio
                 />
             ) : (
                 <div
+                    ref={textContentRef}
+                    data-canvas-no-zoom
                     className="thin-scrollbar block h-full w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-3 pb-7 pt-0 font-mono"
                     style={textStyle}
                     onWheel={(event) => event.stopPropagation()}
@@ -657,9 +680,9 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     if (!props.node.metadata?.content && props.isBatchRoot) {
         const content =
             props.node.metadata?.status === "loading" ? (
-                <LoadingContent theme={props.theme} scale={props.scale} />
+                <LoadingContent node={props.node} theme={props.theme} />
             ) : props.node.metadata?.status === "error" ? (
-                <ErrorContent node={props.node} theme={props.theme} scale={props.scale} onRetry={props.onRetry} />
+                <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />
             ) : (
                 <EmptyImageContent {...props} isBatchRoot={false} />
             );
@@ -714,7 +737,6 @@ function VideoNodeContent({ node, theme, scale }: NodeContentRendererProps) {
                     <RefreshCw className="size-6 animate-spin opacity-55" />
                     <div className="text-[12px] font-medium">{phase} · {Math.max(0, node.metadata.videoProgress || 0)}%</div>
                     <div className="h-1.5 w-full max-w-48 overflow-hidden rounded-full" style={{ background: theme.node.stroke }}><div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${Math.max(3, node.metadata.videoProgress || 0)}%` }} /></div>
-                    {node.metadata.estimatedCostCredits != null ? <div className="text-[11px] opacity-60">已预扣 {node.metadata.estimatedCostCredits} 视频积分</div> : null}
                 </div>
             );
         }
@@ -747,7 +769,6 @@ function VideoInfoBar({ node }: { node: CanvasNodeData }) {
             {meta?.model ? <span>{meta.model}</span> : null}
             {meta?.vquality ? <span>{meta.vquality}</span> : null}
             {meta?.seconds ? <span>{meta.seconds}s</span> : null}
-            {meta?.chargedCredits != null ? <strong>{meta.chargedCredits} 积分</strong> : null}
         </div>
     );
 }

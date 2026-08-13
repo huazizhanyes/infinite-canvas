@@ -1,0 +1,288 @@
+.canvas-login-modal .ant-modal-content {
+    overflow: hidden;
+    padding: 0;
+    border: 1px solid #303237;
+    border-radius: 16px;
+    background: #1c1d1f;
+    box-shadow: 0 24px 72px rgb(0 0 0 / 48%);
+}
+
+.canvas-login-modal .ant-modal-close {
+    top: 14px;
+    right: 14px;
+    width: 44px;
+    height: 44px;
+    color: #8e9299;
+}
+
+.canvas-login-modal .ant-modal-close:hover {
+    color: #f4f5f7;
+    background: #292b2f;
+}
+
+.canvas-login-header {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 26px 64px 20px 30px;
+    border-bottom: 1px solid #292b2f;
+}
+
+.canvas-login-logo {
+    width: 48px;
+    height: 48px;
+    flex: 0 0 auto;
+    object-fit: contain;
+}
+
+.canvas-login-brand h2 {
+    margin: 0;
+    color: #f7f7f8;
+    font-size: 21px;
+    font-weight: 650;
+    line-height: 1.35;
+    letter-spacing: 0;
+}
+
+.canvas-login-brand p {
+    margin: 5px 0 0;
+    color: #9a9da3;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.canvas-login-content {
+    padding: 20px 30px 24px;
+}
+
+.canvas-login-switch.ant-segmented {
+    padding: 4px;
+    border: 1px solid #303237;
+    border-radius: 10px;
+    background: #141517;
+}
+
+.canvas-login-switch .ant-segmented-item {
+    min-height: 40px;
+    color: #a9acb2;
+    border-radius: 7px;
+}
+
+.canvas-login-switch .ant-segmented-item-selected {
+    color: #f6f7f8;
+    background: #2a2c30;
+    box-shadow: none;
+}
+
+.canvas-login-switch .ant-segmented-item-label {
+    display: grid;
+    min-height: 40px;
+    place-items: center;
+}
+
+.canvas-login-switch .ant-segmented-item-label span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 550;
+}
+
+.canvas-login-switch svg {
+    width: 16px;
+    height: 16px;
+}
+
+.canvas-login-qr-panel {
+    display: flex;
+    min-height: 326px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.canvas-login-qr-shell {
+    display: grid;
+    width: 218px;
+    height: 218px;
+    place-items: center;
+    overflow: hidden;
+    padding: 10px;
+    border: 1px solid #3a3c41;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 12px 30px rgb(0 0 0 / 24%);
+}
+
+.canvas-login-qr-shell > img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.canvas-login-qr-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    color: #62666d;
+    font-size: 13px;
+}
+
+.canvas-login-qr-state > svg {
+    width: 32px;
+    height: 32px;
+}
+
+.canvas-login-qr-state .ant-btn svg {
+    width: 15px;
+    height: 15px;
+}
+
+.canvas-login-qr-panel > strong {
+    margin-top: 18px;
+    color: #f0f1f2;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.canvas-login-qr-panel > p {
+    margin: 5px 0 0;
+    color: #8f939a;
+    font-size: 13px;
+}
+
+.canvas-login-form {
+    width: min(100%, 430px);
+    min-height: 326px;
+    margin: 0 auto;
+    padding-top: 24px;
+}
+
+.canvas-login-form .ant-form-item {
+    margin-bottom: 18px;
+}
+
+.canvas-login-form .ant-form-item-label > label,
+.canvas-login-form .ant-checkbox-wrapper {
+    color: #d7d9dd;
+    font-size: 14px;
+    font-weight: 550;
+}
+
+.canvas-login-form .ant-input-affix-wrapper {
+    min-height: 46px;
+    border-color: #3a3c41;
+    border-radius: 9px;
+    color: #f3f4f6;
+    background: #151618;
+    box-shadow: none;
+}
+
+.canvas-login-form .ant-input-affix-wrapper:hover,
+.canvas-login-form .ant-input-affix-wrapper-focused {
+    border-color: #61b8df;
+    box-shadow: 0 0 0 3px rgb(97 184 223 / 12%);
+}
+
+.canvas-login-form .ant-input {
+    color: #f3f4f6;
+    background: transparent;
+}
+
+.canvas-login-form .ant-input::placeholder {
+    color: #666a72;
+}
+
+.canvas-login-form .ant-input-prefix,
+.canvas-login-form .ant-input-password-icon {
+    color: #7f838a;
+}
+
+.canvas-login-form .ant-input-prefix svg {
+    width: 16px;
+    height: 16px;
+}
+
+.canvas-login-remember {
+    margin-top: -2px;
+    margin-bottom: 20px !important;
+}
+
+.canvas-login-submit.ant-btn {
+    height: 46px;
+    border: 0;
+    border-radius: 9px;
+    color: #10212a;
+    background: #66bee4;
+    font-size: 15px;
+    font-weight: 650;
+    box-shadow: none;
+}
+
+.canvas-login-submit.ant-btn:hover:not(:disabled) {
+    color: #0c1b22;
+    background: #7bc8e8;
+}
+
+.canvas-login-terms {
+    margin: 0;
+    color: #73777e;
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: center;
+}
+
+@media (max-width: 640px) {
+    .canvas-login-modal {
+        width: calc(100vw - 24px) !important;
+        max-width: none;
+        margin: 12px auto;
+    }
+
+    .canvas-login-modal .ant-modal-content {
+        border-radius: 14px;
+    }
+
+    .canvas-login-header {
+        padding: 22px 54px 18px 20px;
+    }
+
+    .canvas-login-logo {
+        width: 42px;
+        height: 42px;
+    }
+
+    .canvas-login-brand h2 {
+        font-size: 18px;
+    }
+
+    .canvas-login-brand p {
+        font-size: 12px;
+    }
+
+    .canvas-login-content {
+        padding: 16px 20px 20px;
+    }
+
+    .canvas-login-qr-panel,
+    .canvas-login-form {
+        min-height: 310px;
+    }
+
+    .canvas-login-qr-shell {
+        width: 202px;
+        height: 202px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .canvas-login-modal *,
+    .canvas-login-modal *::before,
+    .canvas-login-modal *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+    }
+}

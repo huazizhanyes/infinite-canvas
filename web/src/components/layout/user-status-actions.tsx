@@ -1,11 +1,14 @@
 import type { CSSProperties } from "react";
-import { Keyboard, Puzzle, Settings2 } from "lucide-react";
+import { Keyboard, LogIn, Puzzle, Settings2 } from "lucide-react";
 
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { UserAssetMenu } from "@/components/layout/user-asset-menu";
+import { CanvasLoginModal, requestCanvasLogin } from "@/components/layout/canvas-login-modal";
+import { SUCAI_INTEGRATION } from "@/constant/env";
+import { useUserStore } from "@/stores/use-user-store";
 
 type UserStatusActionsProps = {
     showConfig?: boolean;
@@ -18,6 +21,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     const theme = useThemeStore((state) => state.theme);
     const setTheme = useThemeStore((state) => state.setTheme);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const user = useUserStore((state) => state.user);
     const canvasTheme = canvasThemes[theme];
     const naturalIconClass = "inline-flex size-7 shrink-0 items-center justify-center text-stone-600 transition hover:text-stone-950 dark:text-stone-300 dark:hover:text-white [&_svg]:size-4";
     const iconStyle: CSSProperties | undefined = variant === "canvas" ? { color: canvasTheme.node.text } : undefined;
@@ -40,7 +44,14 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                     <Keyboard className="size-4" />
                 </button>
             ) : null}
+            {SUCAI_INTEGRATION && !user ? (
+                <button type="button" className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-medium text-cyan-700 transition hover:bg-cyan-500/10 dark:text-cyan-300" onClick={requestCanvasLogin}>
+                    <LogIn className="size-3.5" />
+                    登录
+                </button>
+            ) : null}
             <UserAssetMenu style={iconStyle} />
+            <CanvasLoginModal />
         </div>
     );
 }

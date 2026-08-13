@@ -4,6 +4,9 @@ import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, nor
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { buildApiUrl, decodeChannelModel, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
+import { canvasBillingApi } from "./canvas-billing";
+import { nanoid } from "nanoid";
+import { useUserStore } from "@/stores/use-user-store";
 
 type RequestOptions = {
     signal?: AbortSignal;
@@ -155,6 +158,13 @@ async function requestCanvasAudioGeneration(config: AiConfig, prompt: string, fo
     const voiceId = Number(config.audioVoice);
     if (!Number.isInteger(voiceId) || voiceId <= 0) throw new Error("请先从音色库选择音色");
     const engine = config.model === "voxcpm2" ? "voxcpm2" : "speech";
+    const connection = useUserStore.getState().connection;
+    if (!connection) throw new Error("请先登录后生成配音");
+    const requestId = nanoid();
+    const quote = await canvasBillingApi.quote(connection, {
+        feature: "canvas.audio.speech", requestId, model: config.model, engine, input: prompt, voiceId, format,
+        speed: Number(normalizeAudioSpeedValue(config.audioSpeed)),
+    }, options?.signal);
     const response = await axios.post<{ task_id?: string; status?: string }>(
         aiApiUrl(config, "/audio/speech"),
         {
@@ -166,6 +176,8 @@ async function requestCanvasAudioGeneration(config: AiConfig, prompt: string, fo
             speed: Number(normalizeAudioSpeedValue(config.audioSpeed)),
             emotion: config.audioInstructions.trim(),
             controlInstruction: config.audioInstructions.trim(),
+            requestId,
+            quoteToken: quote.quoteToken,
         },
         { headers: aiHeaders(config), signal: options?.signal },
     );

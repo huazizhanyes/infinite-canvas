@@ -4,16 +4,19 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { SHOW_AGENT_UI, SUCAI_HOME_URL, SUCAI_INTEGRATION } from "@/constant/env";
-import { AppConfigModal } from "@/components/layout/app-config-modal";
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAgentStore } from "@/stores/use-agent-store";
+import { useConfigStore } from "@/stores/use-config-store";
 import { useCanvasHostTaskStore } from "@/stores/canvas/use-canvas-host-task-store";
 import { flushCanvasPersistence } from "@/stores/canvas/use-canvas-store";
 import { flushSucaiCanvasSync } from "@/services/sucai-canvas-sync";
 import { postCanvasHostMessage, readCanvasHostMessage } from "@/lib/canvas-host-bridge";
+import { lazy, Suspense } from "react";
+
+const AppConfigModal = lazy(() => import("@/components/layout/app-config-modal").then((module) => ({ default: module.AppConfigModal })));
 
 export function AppTopNav() {
     const { pathname } = useLocation();
@@ -28,6 +31,7 @@ export function AppTopNav() {
     const togglePanel = useAgentStore((state) => state.togglePanel);
     const panelOpen = useAgentStore((state) => state.panelOpen);
     const canvasTasks = useCanvasHostTaskStore((state) => state.tasks);
+    const isConfigOpen = useConfigStore((state) => state.isConfigOpen);
     const hideHeader = /^\/canvas\/[^/]+/.test(pathname);
     const slug = pathname === "/" ? "canvas" : pathname.split("/").filter(Boolean)[0];
     const activeToolSlug = navigationTools.some((tool) => tool.slug === slug) ? (slug as NavigationToolSlug) : undefined;
@@ -101,7 +105,7 @@ export function AppTopNav() {
                 <header className="sticky top-0 z-20 h-14 shrink-0 border-b border-stone-200 bg-background/90 backdrop-blur-xl dark:border-stone-800">
                     <div className="mx-auto flex h-full max-w-7xl items-stretch justify-between gap-5 px-6">
                         <div className="flex min-w-0 items-center">
-                            {!SUCAI_INTEGRATION ? (
+                            {!SUCAI_INTEGRATION || window.parent === window ? (
                                 <a
                                     href={SUCAI_HOME_URL}
                                     className="mr-4 flex h-14 shrink-0 items-center gap-2 text-sm text-stone-500 transition hover:text-stone-950 md:mr-7 dark:text-stone-400 dark:hover:text-stone-100"
@@ -153,7 +157,11 @@ export function AppTopNav() {
             ) : null}
 
             <MobileNavDrawer open={mobileNavOpen} activeToolSlug={activeToolSlug} onClose={() => setMobileNavOpen(false)} />
-            <AppConfigModal />
+            {isConfigOpen ? (
+                <Suspense fallback={null}>
+                    <AppConfigModal />
+                </Suspense>
+            ) : null}
         </>
     );
 }

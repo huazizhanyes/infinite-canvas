@@ -14,7 +14,8 @@
         "jsx": "react-jsx",
         "incremental": true,
         "paths": {
-            "@/*": ["./src/*"]
+            "@/*": ["./src/*"],
+            "@sucai-auth": ["../../shared/sucai-auth-core.ts"]
         }
     },
     "include": ["vite.config.ts", "src/**/*.ts", "src/**/*.tsx"],

@@ -44,6 +44,7 @@ export default defineConfig({
     resolve: {
         alias: {
             "@": resolve(webDir, "src"),
+            "@sucai-auth": resolve(webDir, "../../shared/sucai-auth-core.ts"),
         },
     },
     define: {

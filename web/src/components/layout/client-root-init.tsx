@@ -17,6 +17,7 @@ const SUCAI_CHANNEL_ID = "sucai-canvas";
 const SUCAI_API_BASE = import.meta.env.VITE_SUCAI_CANVAS_API_BASE || "";
 const SUCAI_BACKEND_BASE = import.meta.env.VITE_SUCAI_API_BASE || SUCAI_API_BASE.replace(/\/canvas\/?$/, "");
 const SUCAI_HOME_URL = import.meta.env.VITE_SUCAI_HOME_URL || "/";
+const SUCAI_DEV_PORT = import.meta.env.VITE_SUCAI_DEV_PORT || "";
 
 type SucaiInitState = "idle" | "loading" | "ready" | "error";
 
@@ -49,6 +50,11 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         if (searchParams.get("sucai") === "1") sessionStorage.setItem(SUCAI_MODE_KEY, "1");
         const sucaiMode = isSucaiModeRequested();
         if (!sucaiMode) return;
+        if (import.meta.env.DEV && SUCAI_DEV_PORT && window.location.port !== SUCAI_DEV_PORT) {
+            const entry = new URL(`/canvas/${window.location.search}${window.location.hash}`, `${window.location.protocol}//${window.location.hostname}:${SUCAI_DEV_PORT}`);
+            window.location.replace(entry.toString());
+            return;
+        }
         handledSucaiInit.current = true;
         setSucaiState("loading");
         searchParams.delete("sucai");
@@ -56,8 +62,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
 
         const token = localStorage.getItem(SUCAI_TOKEN_KEY) || "";
         if (!token) {
-            setSucaiError("请先返回素材网完成登录");
-            setSucaiState("error");
+            setSucaiState("ready");
             return;
         }
 
@@ -172,7 +177,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         const checkAccountTransition = () => {
             const nextToken = localStorage.getItem(SUCAI_TOKEN_KEY) || "";
             const currentToken = useUserStore.getState().connection?.token || "";
-            if (!nextToken || !currentToken || nextToken === currentToken || handling) return;
+            if (nextToken === currentToken || handling) return;
             handling = true;
             setSucaiState("loading");
             void stopSucaiCanvasSync().catch(() => undefined).finally(() => {

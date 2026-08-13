@@ -8,6 +8,7 @@ import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
 import { useUserStore } from '@/stores/use-user-store'
+import { canvasBillingApi } from './canvas-billing'
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -293,9 +294,13 @@ function waitForImageTaskPoll(delay: number, signal?: AbortSignal) {
 
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return "请求已取消";
-    if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number }>(error)) {
+    if (axios.isAxiosError<{ error?: { message?: string }; message?: string | string[]; msg?: string; code?: string | number }>(error)) {
         const responseData = error.response?.data;
-        return responseData?.msg || responseData?.error?.message || readStatusError(error.response?.status, fallback);
+        const message = Array.isArray(responseData?.message) ? responseData.message.join("；") : responseData?.message;
+        if (responseData?.code === "CANVAS_MONEY_BILLING_DISABLED") return "画布计费服务未启用";
+        if (responseData?.code === "WALLET_INSUFFICIENT") return "钱包余额不足";
+        if (String(responseData?.code || "").includes("MODEL_PRICE")) return "当前模型尚未配置价格";
+        return responseData?.msg || message || responseData?.error?.message || readStatusError(error.response?.status, fallback);
     }
     if (error instanceof DOMException && error.name === "AbortError") return "请求已取消";
     return error instanceof Error ? error.message : fallback;
@@ -732,6 +737,14 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     try {
+        const connection = useUserStore.getState().connection;
+        const usesCanvasBilling = !!connection && requestConfig.baseUrl.replace(/\/+$/, "") === connection.canvasBaseUrl.replace(/\/+$/, "");
+        const requestId = nanoid();
+        const quote = usesCanvasBilling ? await canvasBillingApi.quote(connection, {
+            feature: "canvas.image.generate", requestId, model: requestConfig.model,
+            prompt: withSystemPrompt(requestConfig, prompt), count: n, ...(quality ? { quality } : {}),
+            ...(requestSize ? { size: requestSize } : {}), outputFormat: IMAGE_OUTPUT_FORMAT,
+        }, options?.signal) : null;
         const response = await axios.post<ImageApiResponse>(
             aiApiUrl(requestConfig, "/images/generations"),
             {
@@ -742,6 +755,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 ...(requestSize ? { size: requestSize } : {}),
                 response_format: "b64_json",
                 output_format: IMAGE_OUTPUT_FORMAT,
+                ...(quote ? { requestId, quoteToken: quote.quoteToken } : {}),
             },
             {
                 headers: aiHeaders(requestConfig, "application/json"),
@@ -807,6 +821,19 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
     try {
+        const connection = useUserStore.getState().connection;
+        const usesCanvasBilling = !!connection && requestConfig.baseUrl.replace(/\/+$/, "") === connection.canvasBaseUrl.replace(/\/+$/, "");
+        if (usesCanvasBilling) {
+            const requestId = nanoid();
+            const referenceCount = files.length + (mask ? 1 : 0);
+            const quote = await canvasBillingApi.quote(connection, {
+                feature: "canvas.image.edit", requestId, model: requestConfig.model,
+                prompt: withSystemPrompt(requestConfig, requestPrompt), count: n, ...(quality ? { quality } : {}),
+                ...(requestSize ? { size: requestSize } : {}), outputFormat: IMAGE_OUTPUT_FORMAT, referenceCount,
+            }, options?.signal);
+            formData.set("requestId", requestId);
+            formData.set("quoteToken", quote.quoteToken);
+        }
         const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
         const payload = await resolveAsyncImagePayload(requestConfig, response.data, options?.signal);
         const images = parseImagePayload(payload);
@@ -842,15 +869,13 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
             if (answer === "没有返回内容") onDelta(answer);
             return answer;
         }
-        const assetConnection = useUserStore.getState().connection;
-        const usesCanvasBilling = !!assetConnection
-            && requestConfig.baseUrl.replace(/\/+$/, "") === assetConnection.canvasBaseUrl.replace(/\/+$/, "");
+        const requestId = nanoid();
+        const input = toResponseInput(withSystemMessage(requestConfig, messages));
         const answer = (await requestStreamingResponse(requestConfig, {
             model: requestConfig.model,
-            input: toResponseInput(withSystemMessage(requestConfig, messages)),
-            ...(usesCanvasBilling ? { request_id: nanoid() } : {}),
+            input,
+            request_id: requestId,
         }, onDelta, options)).content || "没有返回内容";
-        if (usesCanvasBilling) void useUserStore.getState().loadAssets()
         if (answer === "没有返回内容") onDelta(answer);
         return answer;
     } catch (error) {

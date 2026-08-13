@@ -4,6 +4,15 @@ const storage = vi.hoisted(() => new Map<string, Blob>());
 
 vi.mock("localforage", () => ({
     default: {
+        config: () => undefined,
+        getItem: async (key: string) => storage.get(key) ?? null,
+        setItem: async (key: string, value: Blob) => {
+            storage.set(key, value);
+            return value;
+        },
+        removeItem: async (key: string) => {
+            storage.delete(key);
+        },
         createInstance: () => ({
             getItem: async (key: string) => storage.get(key) ?? null,
             setItem: async (key: string, value: Blob) => {
@@ -37,26 +46,26 @@ describe("media storage lifecycle", () => {
     it("revokes the old URL when replacing a blob and makes deletion idempotent", async () => {
         createObjectURL.mockReturnValueOnce("blob:first").mockReturnValueOnce("blob:second");
 
-        await setMediaBlob("file:replace", new Blob(["first"]));
-        await setMediaBlob("file:replace", new Blob(["second"]));
+        await setMediaBlob("file:uguest:replace", new Blob(["first"]));
+        await setMediaBlob("file:uguest:replace", new Blob(["second"]));
         expect(revokeObjectURL).toHaveBeenCalledWith("blob:first");
 
-        await deleteStoredMedia(["file:replace"]);
-        await deleteStoredMedia(["file:replace"]);
-        expect(storage.has("file:replace")).toBe(false);
+        await deleteStoredMedia(["file:uguest:replace"]);
+        await deleteStoredMedia(["file:uguest:replace"]);
+        expect(storage.has("file:uguest:replace")).toBe(false);
         expect(revokeObjectURL.mock.calls.map(([url]) => url)).toEqual(["blob:first", "blob:second"]);
     });
 
     it("cleans unused blobs while preserving referenced media across repeated calls", async () => {
         createObjectURL.mockReturnValueOnce("blob:used").mockReturnValueOnce("blob:unused");
-        await setMediaBlob("file:used", new Blob(["used"]));
-        await setMediaBlob("file:unused", new Blob(["unused"]));
+        await setMediaBlob("file:uguest:used", new Blob(["used"]));
+        await setMediaBlob("file:uguest:unused", new Blob(["unused"]));
 
-        await cleanupUnusedMedia({ currentProject: { storageKey: "file:used" } });
-        await cleanupUnusedMedia({ currentProject: { storageKey: "file:used" } });
+        await cleanupUnusedMedia({ currentProject: { storageKey: "file:uguest:used" } });
+        await cleanupUnusedMedia({ currentProject: { storageKey: "file:uguest:used" } });
 
-        expect(storage.has("file:used")).toBe(true);
-        expect(storage.has("file:unused")).toBe(false);
+        expect(storage.has("file:uguest:used")).toBe(true);
+        expect(storage.has("file:uguest:unused")).toBe(false);
         expect(revokeObjectURL).toHaveBeenCalledTimes(1);
         expect(revokeObjectURL).toHaveBeenCalledWith("blob:unused");
     });

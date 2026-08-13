@@ -1,15 +1,19 @@
-import type { CSSProperties } from "react";
-import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Square, Video } from "lucide-react";
-import { Button, Segmented } from "antd";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { ArrowUp, Image as ImageIcon, MessageSquare, Music2, Settings2, Square, Video } from "lucide-react";
+import { Button, Segmented, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
-import { defaultConfig, modelMatchesCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { defaultConfig, modelMatchesCapability, modelOptionName, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
+import { useUserStore } from "@/stores/use-user-store";
+import { canvasBillingApi, canvasCompactQuoteLabel, type CanvasBillingQuote } from "@/services/api/canvas-billing";
+import { isCanvasVideoModel } from "@/services/api/canvas-video";
+import { CanvasQuoteDisplay } from "./canvas-quote-display";
 
 type CanvasConfigNodePanelProps = {
     node: CanvasNodeData;
@@ -31,11 +35,43 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
     const canGenerate = hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput);
+    const connection = useUserStore((state) => state.connection);
+    const quotePayload = buildQuotePayload(config, mode, node, inputSummary);
+    const quoteKey = JSON.stringify(quotePayload);
+    const stableQuotePayload = useMemo(() => quotePayload, [quoteKey]);
+    const official = useMemo(() => {
+        if (!connection) return false;
+        if (mode === "video") return isCanvasVideoModel(config);
+        return resolveModelRequestConfig(config, config.model).baseUrl.replace(/\/+$/, "") === connection.canvasBaseUrl.replace(/\/+$/, "");
+    }, [config, connection, mode]);
+    const [quote, setQuote] = useState<CanvasBillingQuote | null>(null);
+    const [quoteState, setQuoteState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+    const [quoteError, setQuoteError] = useState("");
+    const quoteEligible = mode === "image" || mode === "video" || (mode === "audio" && canGenerate);
+
+    useEffect(() => {
+        if (mode === "text" || !official || !connection || !quoteEligible) { setQuote(null); setQuoteState("idle"); setQuoteError(""); return; }
+        const controller = new AbortController();
+        setQuoteState("loading"); setQuoteError("");
+        const timer = window.setTimeout(() => {
+            void canvasBillingApi.quote(connection, stableQuotePayload, controller.signal).then((value) => {
+                setQuote(value); setQuoteState("ready");
+            }).catch((error) => {
+                if (controller.signal.aborted) return;
+                const payload = error?.response?.data;
+                setQuote(null); setQuoteState("error"); setQuoteError(String(payload?.message || error?.message || "报价失败"));
+            });
+        }, 300);
+        return () => { window.clearTimeout(timer); controller.abort(); };
+    }, [connection, mode, official, quoteEligible, stableQuotePayload]);
+
+    const quoteBlocked = mode !== "text" && official && quoteEligible && (quoteState !== "ready" || !quote?.canSubmit);
+    const quoteLabel = mode === "text" ? "免费" : !official ? "自有渠道" : !quoteEligible ? "输入后计算" : quoteState === "loading" || quoteState === "idle" ? "报价中..." : quoteState === "error" ? (quoteError.includes("MODEL_PRICE") ? "模型暂未开放" : quoteError || "报价失败") : quote ? (quote.canSubmit ? canvasCompactQuoteLabel(quote) : "余额不足") : "等待报价";
 
     return (
-        <div className="flex h-full w-full cursor-move flex-col px-2.5 pb-2.5 pt-6 text-xs" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
+        <div className="flex h-full w-full cursor-move flex-col px-2 pb-2 pt-5 text-[11px]" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
             <div className="mb-1.5 flex items-center justify-between gap-2">
-                <div className="shrink-0 text-xs font-semibold">生成配置</div>
+                <div className="shrink-0 text-[11px] font-semibold">生成配置</div>
                 <div className="cursor-default" onMouseDown={(event) => event.stopPropagation()}>
                     <Segmented
                         size="small"
@@ -95,42 +131,45 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 </button>
             </div>
 
-            <div className={`mb-1.5 grid min-w-0 cursor-default items-center gap-1.5 ${mode === "image" || mode === "video" || mode === "audio" ? "grid-cols-[minmax(0,1fr)_132px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
-                <ModelPicker className="canvas-compact-control h-8" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={() => openConfigDialog(true)} fullWidth />
+            <div className={`mb-1 grid min-w-0 cursor-default items-center gap-1.5 ${mode === "image" || mode === "video" || mode === "audio" ? "grid-cols-[minmax(0,1fr)_120px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
+                <ModelPicker className="canvas-compact-control !h-7 !px-1.5 !text-[11px]" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={() => openConfigDialog(true)} fullWidth />
                 {mode === "video" ? (
-                    <CanvasVideoSettingsPopover config={config} hasReferenceVideo={inputSummary.videoCount > 0} placement="topRight" buttonClassName="canvas-compact-control !h-8 !w-full !justify-start !rounded-md !px-2 !text-xs" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                    <CanvasVideoSettingsPopover config={config} hasReferenceVideo={inputSummary.videoCount > 0} placement="topRight" buttonClassName="canvas-compact-control !h-7 !w-full !justify-start !rounded-md !px-1.5 !text-[11px]" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                 ) : mode === "image" ? (
-                    <CanvasImageSettingsPopover config={config} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-8 !w-full !justify-start !rounded-md !px-2 !text-xs" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
+                    <CanvasImageSettingsPopover config={config} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-7 !w-full !justify-start !rounded-md !px-1.5 !text-[11px]" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
                 ) : mode === "audio" ? (
-                    <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-8 !w-full !justify-start !rounded-md !px-2 !text-xs" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                    <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-7 !w-full !justify-start !rounded-md !px-1.5 !text-[11px]" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                 ) : null}
             </div>
 
-            <Button
-                type="primary"
-                className="mt-auto !h-8 !w-full !cursor-pointer !rounded-md !text-xs"
-                danger={isRunning}
-                disabled={!isRunning && !canGenerate}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={() => (isRunning ? onStop(node.id) : onGenerate(node.id))}
-            >
-                <span className="inline-flex items-center gap-1.5">
-                    {isRunning ? (
-                        <>
-                            <LoaderCircle className="size-4 animate-spin" />
-                            <Square className="size-3.5 fill-current" />
-                            <span>停止</span>
-                        </>
-                    ) : (
-                        <>
-                            <Play className="size-4" />
-                            <span>开始生成</span>
-                        </>
-                    )}
-                </span>
-            </Button>
+            <div className="mt-auto flex items-center gap-1.5">
+                <div className="flex min-w-0 flex-1 justify-end">
+                    <CanvasQuoteDisplay quote={quote} state={quoteState} label={quoteLabel} error={quoteError} />
+                </div>
+                <Tooltip title={isRunning ? "停止生成" : "开始生成"}>
+                    <Button type="primary" className="!h-7 !w-7 !min-w-7 !cursor-pointer !rounded-md !p-0" danger={isRunning} disabled={!isRunning && (!canGenerate || quoteBlocked)} onMouseDown={(event) => event.stopPropagation()} onClick={() => (isRunning ? onStop(node.id) : onGenerate(node.id))} aria-label={isRunning ? "停止生成" : "开始生成"} icon={isRunning ? <Square className="size-3 fill-current" /> : <ArrowUp className="size-3.5" />} />
+                </Tooltip>
+            </div>
         </div>
     );
+}
+
+function buildQuotePayload(config: AiConfig, mode: CanvasGenerationMode, node: CanvasNodeData, inputSummary: CanvasConfigNodePanelProps["inputSummary"]) {
+    const requestId = `preview-${node.id}`;
+    const prompt = String(node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim();
+    if (mode === "text") {
+        const request = resolveModelRequestConfig(config, config.model);
+        return { feature: "canvas.text.generate", requestId, model: request.model, input: [{ role: "user", content: prompt }] };
+    }
+    if (mode === "image") {
+        const request = resolveModelRequestConfig(config, config.model);
+        return { feature: "canvas.image.generate", requestId, model: request.model, prompt: "", count: Number(config.count || 1), size: config.size, quality: config.quality, outputFormat: "png", referenceCount: inputSummary.imageCount };
+    }
+    if (mode === "audio") {
+        const request = resolveModelRequestConfig(config, config.model);
+        return { feature: "canvas.audio.speech", requestId, model: request.model, input: prompt, voiceId: Number(config.audioVoice || 0), format: config.audioFormat, speed: Number(config.audioSpeed || 1) };
+    }
+    return { feature: "canvas.video.generate", requestId, modelId: modelOptionName(config.model), prompt: "", aspectRatio: config.size, quality: config.vquality, duration: Number(config.videoSeconds || 0), mode: config.videoMode, imageAssetIds: Array(inputSummary.imageCount).fill("preview"), videoAssetIds: Array(inputSummary.videoCount).fill("preview"), audioAssetIds: Array(inputSummary.audioCount).fill("preview") };
 }
 
 function InputChip({ label, value, style }: { label: string; value: string; style: CSSProperties }) {
