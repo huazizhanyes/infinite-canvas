@@ -342,7 +342,7 @@ export default function VideoPage() {
                 };
                 setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
                 await saveLog({ ...log, canvasTask: { ...log.canvasTask, status: "completed", chargedCredits: stored.chargedCredits }, status: "成功", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
-                message.success(`视频已生成${stored.chargedCredits != null ? `，实际消费 ${stored.chargedCredits} 积分` : ""}`);
+                message.success("视频已生成，已按确认的人民币报价结算");
                 return;
             }
             for (let attempt = 0; attempt < 120; attempt += 1) {

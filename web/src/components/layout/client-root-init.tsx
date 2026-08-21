@@ -92,6 +92,10 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 inputImagesMax: Number(item.input_images_max || 0),
                 inputVideosMax: Number(item.input_videos_max || 0),
                 inputAudiosMax: Number(item.input_audios_max || 0),
+                parameters: Array.isArray(item.parameters || item.parameter_schema) ? (item.parameters || item.parameter_schema) : [],
+                modeRules: Array.isArray(item.modeRules || item.mode_rules) ? (item.modeRules || item.mode_rules) : [],
+                faceFriendly: Boolean(item.faceFriendly || item.face_friendly || item.channel === "59" && item.upstream_model === "minimax-h3"),
+                displayNotice: item.displayNotice || item.display_notice || "不卡人脸；不代表换脸、口型驱动或强身份一致性。",
             },
         });
         const refreshVideoPricing = () => {
@@ -128,7 +132,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     models: [
                         ...models
                             .filter((item: { id?: string; capability?: string }) => item.id && ["image", "text", "audio"].includes(item.capability || ""))
-                            .map((item: { id: string; capability: "image" | "text" | "audio" }) => ({ name: item.id, capability: item.capability })),
+                            .map((item: { id: string; display_name?: string; capability: "image" | "text" | "audio" }) => ({ name: item.id, displayName: item.display_name || item.id, capability: item.capability })),
                         ...videoModels.map(mapVideoModel),
                     ],
                 });
@@ -150,6 +154,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     updateConfig("size", videoModel.aspect_ratios?.[0] || "16:9");
                     updateConfig("vquality", videoModel.qualities?.[0]?.quality || "720p");
                     updateConfig("videoSeconds", String(videoModel.duration?.options?.[0] || videoModel.duration?.min || 5));
+                    updateConfig("videoParameters", Object.fromEntries((videoModel.parameters || []).map((parameter: any) => [parameter.key, parameter.defaultValue] as [string, unknown]).filter(([, value]: [string, unknown]) => value !== undefined)));
                 }
                 if (audioModelValue) {
                     updateConfig("audioModel", audioModelValue);

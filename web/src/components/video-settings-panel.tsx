@@ -1,10 +1,10 @@
 import { type ReactNode } from "react";
-import { Switch } from "antd";
+import { Input, InputNumber, Select, Slider, Switch } from "antd";
 
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
-import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceDurationOptions, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
+import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { modelOptionName, videoCapabilitiesOf, type AiConfig, type VideoModelCapabilities } from "@/stores/use-config-store";
+import { modelOptionName, videoCapabilitiesOf, type AiConfig, type VideoModelCapabilities, type VideoParameterDefinition } from "@/stores/use-config-store";
 
 const resolutionOptions = [
     { value: "720", label: "720p" },
@@ -28,14 +28,14 @@ export const videoSecondOptions = secondOptions.map((value) => String(value));
 
 type VideoSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode", value: string) => void;
+    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode" | "videoParameters", value: string) => void;
     theme: CanvasTheme;
     hasReferenceVideo?: boolean;
     showTitle?: boolean;
     className?: string;
 };
 
-export function VideoSettingsPanel({ config, onConfigChange, theme, hasReferenceVideo = false, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: VideoSettingsPanelProps) {
+export function VideoSettingsPanel({ config, onConfigChange, theme, hasReferenceVideo = false, showTitle = true, className = "w-[400px] space-y-4 px-1 py-0.5" }: VideoSettingsPanelProps) {
     const backendCapabilities = videoCapabilitiesOf(config, config.model) || videoCapabilitiesOf(config, config.videoModel);
     if (backendCapabilities) {
         return <BackendVideoSettingsPanel config={config} capabilities={backendCapabilities} onConfigChange={onConfigChange} theme={theme} hasReferenceVideo={hasReferenceVideo} showTitle={showTitle} className={className} />;
@@ -95,14 +95,7 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, hasReference
                     </div>
                 </SettingGroup>
                 <SettingGroup title="秒数" color={theme.node.muted}>
-                    <div className="grid grid-cols-3 gap-2.5">
-                        {secondOptions.map((value) => (
-                            <OptionPill key={value} selected={seconds === String(value)} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
-                                {value}s
-                            </OptionPill>
-                        ))}
-                        <NumberInput value={seconds} min={1} max={20} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
-                    </div>
+                    <DurationSlider value={Number(seconds) || 6} min={1} max={20} theme={theme} onChange={(value) => onConfigChange("videoSeconds", String(value))} />
                 </SettingGroup>
             </div>
         </ImageSettingsTheme>
@@ -113,43 +106,47 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
     const quality = capabilities.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities.qualities[0]?.quality || "";
     const ratio = capabilities.aspectRatios.includes(config.size) ? config.size : capabilities.aspectRatios[0] || "";
     const mode = capabilities.modes.includes(config.videoMode) ? config.videoMode : capabilities.modes[0] || "";
-    const durationOptions = capabilities.duration.options || [];
+    const modeRule = capabilities.modeRules?.find((rule) => rule.mode === mode);
+    const durationOptions = [...(capabilities.duration.options || [])].sort((left, right) => left - right);
     const requestedDuration = Math.floor(Number(config.videoSeconds));
     const duration = durationOptions.length
         ? (durationOptions.includes(requestedDuration) ? requestedDuration : durationOptions[0])
         : Math.max(capabilities.duration.min ?? 1, Math.min(capabilities.duration.max ?? 60, Number.isFinite(requestedDuration) ? requestedDuration : capabilities.duration.min ?? 5));
     const selectedQuality = capabilities.qualities.find((item) => item.quality === quality) || capabilities.qualities[0];
-    const unit = selectedQuality?.pricing.type === "per_second" ? "积分/秒" : "积分/条";
-    const referenceMultiplier = hasReferenceVideo ? Number(selectedQuality?.pricing.inputVideoMultiplier || 1) : 1;
-    const estimatedCredits = Math.ceil((selectedQuality?.pricing.type === "per_second" ? Number(selectedQuality?.pricing.credits || 0) * duration : Number(selectedQuality?.pricing.credits || 0)) * referenceMultiplier);
+    const normalUnitPrice = Number(selectedQuality?.pricing.normalPriceMicros || selectedQuality?.pricing.unitPriceMicros || 0) / 1_000_000;
+    const parameters = capabilities.parameters || [];
+    const parameterValues = { ...(config.videoParameters || {}) };
+    for (const parameter of parameters) if (parameterValues[parameter.key] === undefined && parameter.defaultValue !== undefined) parameterValues[parameter.key] = parameter.defaultValue;
+    const updateParameter = (parameter: VideoParameterDefinition, value: unknown) => onConfigChange("videoParameters", JSON.stringify({ ...parameterValues, [parameter.key]: value }));
 
     return (
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
-                {showTitle ? <div className="text-lg font-semibold">视频设置</div> : null}
+                {showTitle ? <div className="flex items-center justify-between gap-3 text-lg font-semibold"><span>{capabilities.displayName}</span>{capabilities.faceFriendly ? <span className="rounded bg-emerald-500/15 px-2 py-1 text-[11px] font-semibold text-emerald-500" title={capabilities.displayNotice || undefined}>不卡人脸</span> : null}</div> : null}
                 <SettingGroup title="生成模式" color={theme.node.muted}>
-                    <div className="grid grid-cols-3 gap-2.5">
+                    <div className="grid grid-cols-2 gap-2.5">
                         {capabilities.modes.map((value) => (
                             <OptionPill key={value} selected={mode === value} theme={theme} onClick={() => onConfigChange("videoMode", value)}>
                                 {videoModeLabel(value)}
                             </OptionPill>
                         ))}
                     </div>
+                    {modeRule ? <div className="text-[11px] leading-4 opacity-60">参考图片 {modeRule.inputImagesMin ?? 0}-{modeRule.inputImagesMax ?? capabilities.inputImagesMax} 张；参考音频 {modeRule.inputAudiosMin ?? 0}-{modeRule.inputAudiosMax ?? capabilities.inputAudiosMax} 个{(modeRule.inputVideosMax ?? capabilities.inputVideosMax) > 0 ? `；参考视频最多 ${modeRule.inputVideosMax} 个` : ""}</div> : null}
                 </SettingGroup>
                 <SettingGroup title="清晰度" color={theme.node.muted}>
-                    <div className="grid grid-cols-3 gap-2.5">
+                    <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(${Math.min(4, Math.max(1, capabilities.qualities.length))}, minmax(0, 1fr))` }}>
                         {capabilities.qualities.map((item) => (
                             <OptionPill key={item.quality} selected={quality === item.quality} theme={theme} onClick={() => onConfigChange("vquality", item.quality)}>
                                 <span className="flex flex-col items-center leading-tight">
                                     <span>{item.quality}</span>
-                                    <span className="text-[10px] opacity-60">{item.pricing.credits}{item.pricing.type === "per_second" ? "积分/秒" : "积分/条"}</span>
+                                    <span className="text-[10px] opacity-60">¥{(Number(item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0) / 1_000_000).toFixed(2)}/秒起</span>
                                 </span>
                             </OptionPill>
                         ))}
                     </div>
                 </SettingGroup>
                 <SettingGroup title="画幅比例" color={theme.node.muted}>
-                    <div className="grid grid-cols-3 gap-2.5">
+                    <div className="grid grid-cols-2 gap-2.5">
                         {capabilities.aspectRatios.map((value) => {
                             const preview = ratioPreview(value);
                             return (
@@ -162,30 +159,49 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
                     </div>
                 </SettingGroup>
                 <SettingGroup title="时长" color={theme.node.muted}>
-                    {durationOptions.length ? (
-                        <div className="grid grid-cols-4 gap-2.5">
-                            {durationOptions.map((value) => (
-                                <OptionPill key={value} selected={duration === value} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
-                                    {value}s
-                                </OptionPill>
-                            ))}
-                        </div>
-                    ) : (
-                        <NumberInput value={String(duration)} min={capabilities.duration.min ?? 1} max={capabilities.duration.max ?? 60} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
-                    )}
+                    <DurationSlider
+                        value={duration}
+                        min={durationOptions[0] ?? capabilities.duration.min ?? 1}
+                        max={durationOptions[durationOptions.length - 1] ?? capabilities.duration.max ?? 60}
+                        options={durationOptions.length ? durationOptions : undefined}
+                        theme={theme}
+                        onChange={(value) => onConfigChange("videoSeconds", String(value))}
+                    />
                 </SettingGroup>
+                {parameters.filter((parameter) => isParameterVisible(parameter, parameterValues)).length ? <SettingGroup title="模型参数" color={theme.node.muted}>
+                    <div className="space-y-2 rounded-md border p-2" style={{ borderColor: theme.node.stroke }}>
+                        {parameters.filter((parameter) => isParameterVisible(parameter, parameterValues)).map((parameter) => <DynamicVideoParameter key={parameter.key} parameter={parameter} value={parameterValues[parameter.key]} theme={theme} onChange={(value) => updateParameter(parameter, value)} />)}
+                    </div>
+                </SettingGroup> : null}
                 <div className="rounded-md border px-3 py-2 text-sm" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
-                    <div className="flex items-center justify-between gap-3"><span style={{ color: theme.node.muted }}>预计消费</span><strong>{estimatedCredits} 积分</strong></div>
-                    <div className="mt-1 text-[11px] opacity-60">{selectedQuality?.pricing.credits || 0} {unit}{selectedQuality?.pricing.type === "per_second" ? ` × ${duration} 秒` : ""}{hasReferenceVideo && referenceMultiplier > 1 ? ` × ${referenceMultiplier} 参考视频倍率` : ""}</div>
+                    <div className="flex items-center justify-between gap-3"><span style={{ color: theme.node.muted }}>普通用户参考价</span><strong>¥{(normalUnitPrice * duration).toFixed(2)}</strong></div>
+                    <div className="mt-1 text-[11px] opacity-60">¥{normalUnitPrice.toFixed(2)}/秒 × {duration} 秒；你的等级实付价以右侧实时报价为准</div>
                 </div>
             </div>
         </ImageSettingsTheme>
     );
 }
 
+function isParameterVisible(parameter: VideoParameterDefinition, values: Record<string, unknown>) {
+    return !parameter.visibleWhen?.length || parameter.visibleWhen.every((condition) => {
+        const current = values[condition.key];
+        return condition.operator === "eq" ? current === condition.value : condition.operator === "neq" ? current !== condition.value : Array.isArray(condition.value) && condition.value.includes(current);
+    });
+}
+
+function DynamicVideoParameter({ parameter, value, theme, onChange }: { parameter: VideoParameterDefinition; value: unknown; theme: CanvasTheme; onChange: (value: unknown) => void }) {
+    const options = (parameter.options || []).map((option) => ({ value: option.value, label: option.label || String(option.value) }));
+    return <div className="flex items-center justify-between gap-3">
+        <span className="min-w-0 text-xs" style={{ color: theme.node.muted }}>{parameter.label}{parameter.unit ? ` (${parameter.unit})` : ""}</span>
+        <div className="min-w-0">
+            {parameter.type === "toggle" ? <Switch size="small" checked={Boolean(value)} onChange={onChange} /> : parameter.type === "number" || parameter.type === "range" ? <InputNumber size="small" value={value as number} min={parameter.min} max={parameter.max} step={parameter.step || 1} onChange={(next) => onChange(next ?? undefined)} /> : parameter.type === "text" ? <Input size="small" value={value as string | undefined} onChange={(event) => onChange(event.target.value)} /> : <Select size="small" value={value} options={options} onChange={onChange} />}
+        </div>
+    </div>;
+}
+
 function videoModeLabel(mode: string) {
     if (mode === "text2video") return "文生视频";
-    if (mode === "image2video") return "参考生成";
+    if (mode === "image2video") return "全能参考";
     if (mode === "frames2video") return "首尾帧";
     return mode;
 }
@@ -234,14 +250,7 @@ function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, 
                     </div>
                 </SettingGroup>
                 <SettingGroup title="时长" color={theme.node.muted}>
-                    <div className="grid grid-cols-4 gap-2.5">
-                        {seedanceDurationOptions.map((value) => (
-                            <OptionPill key={value} selected={duration === value} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
-                                {value === -1 ? "智能" : `${value}s`}
-                            </OptionPill>
-                        ))}
-                    </div>
-                    <NumberInput value={String(duration)} min={-1} max={15} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                    <DurationSlider value={duration} min={-1} max={15} options={[-1, ...Array.from({ length: 12 }, (_, index) => index + 4)]} theme={theme} onChange={(value) => onConfigChange("videoSeconds", String(value))} />
                 </SettingGroup>
                 <SettingGroup title="输出" color={theme.node.muted}>
                     <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
@@ -285,7 +294,7 @@ export function normalizeVideoResolutionValue(value: string) {
 
 function OptionPill({ selected, disabled = false, theme, onClick, children }: { selected: boolean; disabled?: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {
     return (
-        <button type="button" disabled={disabled} className="h-9 cursor-pointer rounded-full border px-2 text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-35" style={{ background: "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={onClick}>
+        <button type="button" disabled={disabled} className="h-9 cursor-pointer rounded-md border px-2 text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-35" style={{ background: selected ? theme.toolbar.activeBg : "transparent", borderColor: selected ? theme.toolbar.activeText : theme.node.stroke, color: selected ? theme.toolbar.activeText : theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={onClick}>
             {children}
         </button>
     );
@@ -324,8 +333,15 @@ function DimensionInput({ prefix, value, disabled, theme, onChange }: { prefix: 
     );
 }
 
-function NumberInput({ value, min, max, theme, onChange }: { value: string; min: number; max: number; theme: CanvasTheme; onChange: (value: string) => void }) {
-    return <input type="number" min={min} max={max} className="h-9 rounded-full border bg-transparent px-3 text-center text-sm outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" style={{ borderColor: theme.node.stroke, color: theme.node.text, WebkitTextFillColor: theme.node.text }} value={value} onChange={(event) => onChange(event.target.value)} onMouseDown={(event) => event.stopPropagation()} />;
+function DurationSlider({ value, min, max, options, theme, onChange }: { value: number; min: number; max: number; options?: number[]; theme: CanvasTheme; onChange: (value: number) => void }) {
+    const values = options?.length ? [...options].sort((left, right) => left - right) : undefined;
+    const marks = values ? Object.fromEntries(values.map((item, index) => [item, index === 0 || index === values.length - 1 ? item === -1 ? "智能" : `${item}s` : ""])) : { [min]: `${min}s`, [max]: `${max}s` };
+    return (
+        <div className="rounded-md px-3 pb-4 pt-2" style={{ background: theme.node.fill }}>
+            <div className="mb-1 flex items-center justify-between text-xs" style={{ color: theme.node.muted }}><span>拖动选择</span><strong className="text-sm" style={{ color: theme.node.text }}>{value === -1 ? "智能" : `${value} 秒`}</strong></div>
+            <Slider min={min} max={max} step={values ? null : 1} marks={marks} value={value} tooltip={{ formatter: (current) => current === -1 ? "智能" : `${current} 秒` }} onChange={onChange} />
+        </div>
+    );
 }
 
 function SizePreview({ width, height, color }: { width: number; height: number; color: string }) {

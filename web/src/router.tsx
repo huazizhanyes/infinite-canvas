@@ -8,6 +8,7 @@ const CanvasPage = lazy(() => import("@/pages/canvas"));
 const CanvasProjectPage = lazy(() => import("@/pages/canvas/project"));
 const ConfigPage = lazy(() => import("@/pages/config"));
 const ImagePage = lazy(() => import("@/pages/image"));
+const MembershipPage = lazy(() => import("@/pages/membership"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const PromptsPage = lazy(() => import("@/pages/prompts"));
 const VideoPage = lazy(() => import("@/pages/video"));
@@ -32,6 +33,7 @@ const routes = [
             { path: "/canvas", element: routeElement(<CanvasPage />) },
             { path: "/canvas/:id", element: routeElement(<CanvasProjectPage />) },
             { path: "/config", element: routeElement(<ConfigPage />) },
+            { path: "/membership", element: routeElement(<MembershipPage />) },
         ],
     },
     { path: "*", element: routeElement(<NotFound />) },

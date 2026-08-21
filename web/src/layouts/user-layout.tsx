@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from "react";
 
 import { AppTopNav } from "@/components/layout/app-top-nav";
+import { AiMembershipModal } from "@/components/layout/ai-membership-modal";
 import { SHOW_AGENT_UI } from "@/constant/env";
 
 const AgentPanel = lazy(() => import("@/components/agent/agent-panel").then((module) => ({ default: module.AgentPanel })));
@@ -17,6 +18,7 @@ export default function UserLayout({ children }: { children: ReactNode }) {
                     <AgentPanel />
                 </Suspense>
             ) : null}
+            <AiMembershipModal />
         </div>
     );
 }

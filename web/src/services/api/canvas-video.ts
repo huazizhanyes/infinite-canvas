@@ -29,6 +29,8 @@ export type CanvasVideoTask = {
     balanceAfter?: number | null;
     billingStatus?: string;
     pricingVersion?: number;
+    parameters?: Record<string, unknown>;
+    capabilitySnapshot?: Record<string, unknown> | null;
     pricingSnapshot?: {
         routeLabel?: string;
         model?: string;
@@ -38,6 +40,8 @@ export type CanvasVideoTask = {
         inputVideoMultiplier?: number;
     } | null;
     archiveStatus?: string | null;
+    canCancel?: boolean;
+    queuePosition?: number | null;
 };
 
 export type CanvasVideoStoredResult = {
@@ -77,19 +81,27 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
     const capabilities = videoCapabilitiesOf(config, config.model || config.videoModel);
     if (!capabilities) throw new Error("视频模型能力配置已失效，请重新打开画布");
 
-    const imageAssetIds = await uploadAssets(requestConfig, "image", input.referenceImages || [], signal);
-    const videoAssetIds = await uploadAssets(requestConfig, "video", input.referenceVideos || [], signal);
-    const audioAssetIds = await uploadAssets(requestConfig, "audio", input.referenceAudios || [], signal);
+    const referenceImages = input.referenceImages || [];
+    const referenceVideos = input.referenceVideos || [];
+    const referenceAudios = input.referenceAudios || [];
+    if (referenceImages.length > capabilities.inputImagesMax) throw new Error(`参考图片最多 ${capabilities.inputImagesMax} 张`);
+    if (referenceVideos.length > capabilities.inputVideosMax) throw new Error(`参考视频最多 ${capabilities.inputVideosMax} 个`);
+    if (referenceAudios.length > capabilities.inputAudiosMax) throw new Error(`参考音频最多 ${capabilities.inputAudiosMax} 个`);
+
+    let mode = capabilities.modes.includes(config.videoMode) ? config.videoMode : capabilities.modes[0];
+    const modeRule = capabilities.modeRules?.find((rule) => rule.mode === mode);
+    assertReferenceCount(referenceImages.length, modeRule?.inputImagesMin, modeRule?.inputImagesMax, "参考图片");
+    assertReferenceCount(referenceVideos.length, modeRule?.inputVideosMin, modeRule?.inputVideosMax, "参考视频");
+    assertReferenceCount(referenceAudios.length, modeRule?.inputAudiosMin, modeRule?.inputAudiosMax, "参考音频");
+
+    const imageAssetIds = await uploadAssets(requestConfig, "image", referenceImages, signal);
+    const videoAssetIds = await uploadAssets(requestConfig, "video", referenceVideos, signal);
+    const audioAssetIds = await uploadAssets(requestConfig, "audio", referenceAudios, signal);
     const aspectRatio = capabilities.aspectRatios.includes(config.size) ? config.size : capabilities.aspectRatios[0];
     const quality = capabilities.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities.qualities[0]?.quality;
     const duration = normalizeDuration(config.videoSeconds, capabilities.duration);
     const selectedQuality = capabilities.qualities.find((item) => item.quality === quality) || capabilities.qualities[0];
-    const multiplier = videoAssetIds.length ? Number(selectedQuality?.pricing.inputVideoMultiplier || 1) : 1;
-    const basePrice = Number(selectedQuality?.pricing.credits || 0);
-    const expectedCostCredits = Math.ceil((selectedQuality?.pricing.type === "per_second" ? basePrice * duration : basePrice) * multiplier);
     const pricingVersion = Number(selectedQuality?.pricingVersion || capabilities.pricingVersion || 0);
-    let mode = capabilities.modes.includes(config.videoMode) ? config.videoMode : capabilities.modes[0];
-    if (imageAssetIds.length && mode === "text2video" && capabilities.modes.includes("image2video")) mode = "image2video";
     if (!aspectRatio || !quality || !mode) throw new Error("视频模型能力配置不完整，请稍后重试");
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const connection = useUserStore.getState().connection;
@@ -98,6 +110,7 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
         feature: "canvas.video.generate", requestId: input.clientRequestId,
         modelId: modelOptionName(config.model || config.videoModel), prompt: input.prompt,
         aspectRatio, quality, duration, mode, imageAssetIds, videoAssetIds, audioAssetIds,
+        parameters: config.videoParameters || {},
     };
     const quote = await canvasBillingApi.quote(connection, quotePayload, signal);
 
@@ -115,8 +128,8 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
             imageAssetIds,
             videoAssetIds,
             audioAssetIds,
+            parameters: config.videoParameters || {},
             pricingVersion,
-            expectedCostCredits,
             quoteToken: quote.quoteToken,
         }, { headers: canvasVideoHeaders(requestConfig) });
         window.dispatchEvent(new CustomEvent("canvas-video-balance-changed"));
@@ -125,12 +138,12 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
         if (axios.isAxiosError(error) && error.response?.status === 409 && (error.response.data as any)?.code === "PRICE_CHANGED") {
             const payload = error.response.data as any;
             window.dispatchEvent(new CustomEvent("canvas-video-pricing-changed", { detail: payload }));
-            throw new CanvasVideoApiError("PRICE_CHANGED", `视频价格已更新为 ${payload.estimatedCostCredits} 积分，请刷新模型价格后重新确认生成`, payload);
+            throw new CanvasVideoApiError("PRICE_CHANGED", "视频价格已更新，请重新确认人民币报价", payload);
         }
-        if (axios.isAxiosError(error) && (error.response?.data as any)?.code === "VIDEO_CREDIT_INSUFFICIENT") {
+        if (axios.isAxiosError(error) && ["VIDEO_CREDIT_INSUFFICIENT", "WALLET_INSUFFICIENT"].includes((error.response?.data as any)?.code)) {
             const payload = error.response?.data as any;
             window.dispatchEvent(new CustomEvent("canvas-video-recharge-required", { detail: payload }));
-            throw new CanvasVideoApiError("VIDEO_CREDIT_INSUFFICIENT", `视频积分不足，当前 ${payload.balance || 0}，本次需要 ${payload.requiredCredits || expectedCostCredits} 积分`, payload);
+            throw new CanvasVideoApiError("WALLET_INSUFFICIENT", "AI 钱包余额不足，请充值后重试", payload);
         }
         throw new Error(readCanvasVideoError(error, "视频任务创建失败"));
     }
@@ -146,6 +159,19 @@ export async function getCanvasVideoTask(config: AiConfig, taskId: string, signa
     } catch (error) {
         throw new Error(readCanvasVideoError(error, "视频任务查询失败"));
     }
+}
+
+export async function getCanvasVideoConcurrency(config: AiConfig, signal?: AbortSignal) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
+    const response = await axios.get<{ tier: "NORMAL" | "SILVER" | "GOLD" | "DIAMOND"; concurrentLimit: number; currentExecuting: number; queueLimit: number; currentQueued: number; routeLimit: number }>(canvasVideoUrl(requestConfig, "/concurrency"), { headers: canvasVideoHeaders(requestConfig), signal });
+    return response.data;
+}
+
+export async function cancelQueuedCanvasVideoTask(config: AiConfig, taskId: string) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
+    const response = await axios.post<CanvasVideoTask>(canvasVideoUrl(requestConfig, `/tasks/${encodeURIComponent(taskId)}/cancel`), {}, { headers: canvasVideoHeaders(requestConfig) });
+    window.dispatchEvent(new CustomEvent("canvas-video-balance-changed"));
+    return response.data;
 }
 
 export async function waitForCanvasVideoTask(
@@ -249,6 +275,11 @@ function normalizeDuration(value: string, range: { min?: number | null; max?: nu
     const min = range.min ?? 1;
     const max = range.max ?? Math.max(min, 60);
     return Math.max(min, Math.min(max, Number.isFinite(requested) ? requested : min));
+}
+
+function assertReferenceCount(value: number, min: number | undefined, max: number | undefined, label: string) {
+    if (min != null && value < min) throw new Error(`${label}至少需要 ${min} 个`);
+    if (max != null && value > max) throw new Error(`${label}最多 ${max} 个`);
 }
 
 function canvasVideoUrl(config: AiConfig, path: string) {

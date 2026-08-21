@@ -29,6 +29,21 @@ function QuoteDetails({ quote, state, label, error }: CanvasQuoteDisplayProps) {
     const requested = Math.max(0, Number(quote.breakdown?.requestUnits || 0));
     const deducted = (quote.benefitAllocation || []).reduce((sum, item) => sum + Math.max(0, Number(item.units || 0)), 0);
     const tier = quote.canvasMembershipTier === "super" ? "超级会员" : quote.canvasMembershipTier === "member" ? "普通会员" : "免费用户";
+    const videoTier = quote.breakdown?.tierCode;
+    if (videoTier) {
+        const tierLabels = { NORMAL: "普通用户", SILVER: "白银", GOLD: "黄金", DIAMOND: "钻石" } as const;
+        const yuan = (micros?: string) => `¥${(Number(micros || 0) / 1_000_000).toFixed(2)}`;
+        return (
+            <div className="min-w-56 space-y-1 py-0.5 text-[11px] leading-4">
+                <div className="font-semibold">MiniMax H3 · {tierLabels[videoTier]}</div>
+                <div>专属单价：{yuan(quote.breakdown.tierUnitPriceMicros)}/秒</div>
+                <div>请求时长：{quote.breakdown.requestedSeconds || 0} 秒</div>
+                <div>普通原价：{yuan(quote.breakdown.originalAmountMicros)}</div>
+                <div>优惠节省：{yuan(quote.breakdown.savingsMicros)}</div>
+                <div className="pt-1 font-semibold">预计扣款：{yuan(quote.breakdown.payableAmountMicros)}</div>
+            </div>
+        );
+    }
     if (!image || !deducted) return <span>本次预计：{label}</span>;
     return (
         <div className="min-w-48 space-y-1 py-0.5 text-[11px] leading-4">

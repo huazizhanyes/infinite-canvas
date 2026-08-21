@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Empty, Input, Select, Tag } from "antd";
-import { BookOpenText, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Images, ListTree, Music2, Search, Settings2, Square, Type, Video } from "lucide-react";
+import { BookOpenText, Boxes, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Images, ListTree, Music2, ScanText, Search, Square, Type, Video } from "lucide-react";
 
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { readCanvasHostMessage } from "@/lib/canvas-host-bridge";
@@ -30,9 +30,10 @@ const NODE_TYPE_ICON: Record<string, typeof Square> = {
     [CanvasNodeType.Video]: Video,
     [CanvasNodeType.Audio]: Music2,
     [CanvasNodeType.Text]: Type,
-    [CanvasNodeType.Config]: Settings2,
     [CanvasNodeType.Group]: Square,
     [CanvasNodeType.ScriptSet]: BookOpenText,
+    [CanvasNodeType.AssetExtraction]: ScanText,
+    [CanvasNodeType.ScriptAsset]: Boxes,
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -118,9 +119,10 @@ const NODE_FILTER_OPTIONS = [
     { label: "视频", value: CanvasNodeType.Video },
     { label: "文本", value: CanvasNodeType.Text },
     { label: "音频", value: CanvasNodeType.Audio },
-    { label: "配置", value: CanvasNodeType.Config },
     { label: "分组", value: CanvasNodeType.Group },
     { label: "剧本集", value: CanvasNodeType.ScriptSet },
+    { label: "资产提取", value: CanvasNodeType.AssetExtraction },
+    { label: "资产", value: CanvasNodeType.ScriptAsset },
 ];
 
 function nodePreviewText(node: CanvasNodeData) {

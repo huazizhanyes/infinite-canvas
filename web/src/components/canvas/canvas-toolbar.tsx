@@ -13,14 +13,13 @@ import {
     Hand,
     Image as ImageIcon,
     Info,
-    LayoutGrid,
     LoaderCircle,
     Mic2,
     Moon,
     Palette,
     Puzzle,
     Redo2,
-    Settings2,
+    ScanText,
     Square,
     Sun,
     Trash2,
@@ -61,11 +60,10 @@ const TOOL_ACCENT_BY_ID: Record<string, ToolbarAccent> = {
     "tool-image": "emerald",
     "tool-video": "cyan",
     "tool-audio": "rose",
-    "tool-config": "amber",
     "tool-group": "violet",
     "tool-script-set": "amber",
+    "tool-asset-extraction": "sky",
     "tool-storyboard": "rose",
-    "tool-storyboard-grid": "cyan",
     "tool-extensions": "violet",
     "tool-upload": "sky",
     "tool-style": "fuchsia",
@@ -81,11 +79,10 @@ export function CanvasToolbar({
     onAddVideo,
     onAddAudio,
     onAddText,
-    onAddConfig,
     onAddGroup,
     onAddScriptSet,
+    onAddAssetExtraction,
     onAddStoryboard,
-    onAddStoryboardGrid,
     onAddExtensionNode,
     onUndo,
     onRedo,
@@ -105,11 +102,10 @@ export function CanvasToolbar({
     onAddVideo: () => void;
     onAddAudio: () => void;
     onAddText: () => void;
-    onAddConfig: () => void;
     onAddGroup: () => void;
     onAddScriptSet: () => void;
+    onAddAssetExtraction: () => void;
     onAddStoryboard: () => void;
-    onAddStoryboardGrid: () => void;
     onAddExtensionNode: (type: string) => void;
     onUndo: () => void;
     onRedo: () => void;
@@ -194,20 +190,17 @@ export function CanvasToolbar({
                 <ToolbarButton id="tool-audio" label="配音" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddAudio}>
                     <Mic2 className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-config" label="生成配置" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddConfig}>
-                    <Settings2 className="size-4.5" />
-                </ToolbarButton>
                 <ToolbarButton id="tool-group" label="组" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddGroup}>
                     <Group className="size-4.5" />
                 </ToolbarButton>
                 <ToolbarButton id="tool-script-set" label="剧本集" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddScriptSet}>
                     <BookOpenText className="size-4.5" />
                 </ToolbarButton>
+                <ToolbarButton id="tool-asset-extraction" label="资产提取" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddAssetExtraction}>
+                    <ScanText className="size-4.5" />
+                </ToolbarButton>
                 <ToolbarButton id="tool-storyboard" label="分镜脚本" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddStoryboard}>
                     <Clapperboard className="size-4.5" />
-                </ToolbarButton>
-                <ToolbarButton id="tool-storyboard-grid" label="九宫格分镜" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddStoryboardGrid}>
-                    <LayoutGrid className="size-4.5" />
                 </ToolbarButton>
                 {extensionDefs.length ? (
                     <ToolbarButton
@@ -451,11 +444,10 @@ function toolLabel(id: string) {
     if (id === "tool-image") return "图片";
     if (id === "tool-video") return "视频";
     if (id === "tool-audio") return "配音";
-    if (id === "tool-config") return "生成配置";
     if (id === "tool-group") return "组";
     if (id === "tool-script-set") return "剧本集";
+    if (id === "tool-asset-extraction") return "资产提取";
     if (id === "tool-storyboard") return "分镜脚本";
-    if (id === "tool-storyboard-grid") return "九宫格分镜";
     if (id === "tool-extensions") return "扩展节点";
     if (id === "tool-upload") return "上传资产";
     if (id === "tool-style") return "画布外观";

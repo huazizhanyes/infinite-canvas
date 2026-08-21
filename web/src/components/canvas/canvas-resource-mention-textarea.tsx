@@ -1,7 +1,8 @@
-import { forwardRef, useMemo, useRef, useState } from "react";
+import { forwardRef, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent, PointerEvent, TextareaHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
-import { FileText, Image as ImageIcon, Music2, Video } from "lucide-react";
+import { Button, Modal } from "antd";
+import { FileText, Image as ImageIcon, Maximize2, Music2, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { isImeComposing, isPlainEnterKey } from "@/lib/keyboard-event";
@@ -10,6 +11,7 @@ import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-refer
 
 type MentionState = {
     start: number;
+    end: number;
     query: string;
 };
 
@@ -20,15 +22,19 @@ type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "onChange" | "val
     onSubmit?: () => void;
     containerClassName?: string;
     highlightLabels?: boolean;
+    expandable?: boolean;
+    expandTitle?: string;
 };
 
-export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea({ value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, ...props }, forwardedRef) {
+export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea({ value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, expandable = true, expandTitle = "编辑内容", ...props }, forwardedRef) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const overlayRef = useRef<HTMLDivElement | null>(null);
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [hasSelection, setHasSelection] = useState(false);
+    const [expanded, setExpanded] = useState(false);
+    const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
     const candidates = useMemo(() => {
         if (!mention) return [];
         const query = mention.query.trim().toLowerCase();
@@ -39,13 +45,18 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
     const activeLabels = useMemo(() => (highlightLabels ? Array.from(new Set(references.filter((item) => item.active).map((item) => item.label))).sort((a, b) => b.length - a.length) : []), [highlightLabels, references]);
 
     const updateValue = (next: string, selectionStart?: number) => {
+        if (typeof selectionStart === "number") pendingSelectionRef.current = { start: selectionStart, end: selectionStart };
         onChange(next);
-        if (typeof selectionStart !== "number") return;
-        requestAnimationFrame(() => {
-            textareaRef.current?.focus();
-            textareaRef.current?.setSelectionRange(selectionStart, selectionStart);
-        });
     };
+
+    useLayoutEffect(() => {
+        const selection = pendingSelectionRef.current;
+        const textarea = textareaRef.current;
+        if (!selection || !textarea) return;
+        pendingSelectionRef.current = null;
+        textarea.focus();
+        textarea.setSelectionRange(Math.min(selection.start, value.length), Math.min(selection.end, value.length));
+    }, [value]);
 
     const closeMention = () => {
         setMention(null);
@@ -59,16 +70,14 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
             closeMention();
             return;
         }
-        setMention({ start: cursor - match[2].length - 1, query: match[2] });
+        setMention({ start: cursor - match[2].length - 1, end: cursor, query: match[2] });
         setActiveIndex(0);
     };
 
     const insertReference = (reference: CanvasResourceReference) => {
         if (!mention) return;
-        const textarea = textareaRef.current;
-        const end = textarea?.selectionStart ?? value.length;
         const insertText = `${reference.label} `;
-        const next = `${value.slice(0, mention.start)}${insertText}${value.slice(end)}`;
+        const next = `${value.slice(0, mention.start)}${insertText}${value.slice(mention.end)}`;
         closeMention();
         updateValue(next, mention.start + insertText.length);
     };
@@ -93,7 +102,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
     } as CSSProperties;
     const menu = mention && candidates.length && textareaRef.current ? <MentionMenu textarea={textareaRef.current} references={candidates} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} /> : null;
 
-    return (
+    const content = (
         <div className={`relative h-full w-full ${containerClassName || ""}`}>
             {showOverlay ? (
                 <div ref={overlayRef} className={`${className || ""} pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words`} style={{ ...style, color: theme.node.text }}>
@@ -112,6 +121,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                 style={mergedStyle}
                 onChange={(event) => {
                     const next = event.target.value;
+                    pendingSelectionRef.current = { start: event.target.selectionStart, end: event.target.selectionEnd };
                     onChange(next);
                     syncMention(next, event.target.selectionStart);
                     requestAnimationFrame(() => {
@@ -176,7 +186,43 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                 }}
             />
             {menu}
+            {expandable ? (
+                <Button
+                    type="text"
+                    size="small"
+                    aria-label={`放大${expandTitle}`}
+                    title={`放大${expandTitle}`}
+                    icon={<Maximize2 className="size-3.5" />}
+                    className="!absolute right-1 top-1 z-10 !grid !size-7 !min-w-7 !place-items-center !p-0 opacity-70 hover:!opacity-100"
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={() => setExpanded(true)}
+                />
+            ) : null}
         </div>
+    );
+
+    return (
+        <>
+            {content}
+            {expandable ? (
+                <Modal title={expandTitle} open={expanded} footer={null} centered width="min(92vw, 900px)" onCancel={() => setExpanded(false)}>
+                    <CanvasResourceMentionTextarea
+                        {...props}
+                        value={value}
+                        references={references}
+                        onChange={onChange}
+                        onSubmit={onSubmit}
+                        onKeyDown={onKeyDown}
+                        className="!h-[min(68vh,560px)] !w-full resize-none"
+                        style={style}
+                        highlightLabels={highlightLabels}
+                        expandable={false}
+                        expandTitle={expandTitle}
+                    />
+                </Modal>
+            ) : null}
+        </>
     );
 });
 

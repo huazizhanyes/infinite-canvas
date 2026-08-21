@@ -4,6 +4,8 @@ import { Boxes, ImagePlus, LoaderCircle, Plus, Save, Sparkles, Trash2, UsersRoun
 import { nanoid } from "nanoid";
 
 import { canvasScriptApi, notifyScriptSetUpdated, type ScriptAnalysisRun, type ScriptAsset, type ScriptAssetType, type ScriptGenerationImage, type ScriptGenerationBatch, type ScriptPendingMention, type ScriptSet } from "@/services/api/canvas-script";
+import { canvasBillingApi } from "@/services/api/canvas-billing";
+import { CanvasExpandableTextarea } from "@/components/canvas/canvas-expandable-textarea";
 import { useUserStore } from "@/stores/use-user-store";
 
 const TYPE_LABEL: Record<ScriptAssetType, string> = { character: "人物", scene: "场景", prop: "道具" };
@@ -196,13 +198,23 @@ export function CanvasScriptWorkspace({
         });
         modal.confirm({
             title: "生成资产图片",
-            content: `本次将为 ${targets.length} 个已选资产/变体各创建 1 个图片任务，预计消耗 ${targets.length} 张图片额度。当前可用 ${imageBalance} 张。任务开始后会立即在画布中显示占位节点，完成后原位更新为结果图片。`,
+            content: `本次将为 ${targets.length} 个已选资产/变体各创建 1 个图片任务，提交前按单张图片报价预扣，失败自动退回。当前可用图片额度 ${imageBalance} 张仅作参考。任务开始后会立即在画布中显示占位节点，完成后原位更新为结果图片。`,
             okText: "开始生成",
             cancelText: "取消",
             onOk: async () => {
                 setGenerating(true);
                 try {
-                    const batch = await canvasScriptApi.generateAssets(connection, scriptSet.id, targets, nanoid());
+                    const requestId = nanoid();
+                    const quote = await canvasBillingApi.quote(connection, {
+                        feature: "canvas.asset.image.generate",
+                        requestId,
+                        count: 1,
+                        size: imageSizeForAspect(scriptSet.aspectRatio),
+                        quality: scriptSet.imageQuality,
+                        outputFormat: "png",
+                    });
+                    if (!quote.canSubmit) throw new Error("图片余额不足，请先充值或调整账户权益");
+                    const batch = await canvasScriptApi.generateAssets(connection, scriptSet.id, targets, requestId, undefined, quote.quoteToken);
                     setGenerationBatch(batch);
                     onImagesReady(batch.images);
                     message.info("已在画布创建生成占位节点，正在生成图片...");
@@ -357,7 +369,7 @@ function EpisodesTab(props: {
                 {props.activeEpisodeId ? (
                     <>
                         <Input value={props.episodeTitle} maxLength={120} onChange={(event) => props.onEpisodeTitle(event.target.value)} placeholder="本集标题" />
-                        <Input.TextArea value={props.episodeContent} maxLength={30000} showCount onChange={(event) => props.onEpisodeContent(event.target.value)} placeholder="粘贴当前一集的小说或剧本文案" className="min-h-[300px] flex-1 resize-none" />
+                        <CanvasExpandableTextarea value={props.episodeContent} maxLength={30000} title="本集小说或剧本文案" onChange={props.onEpisodeContent} placeholder="粘贴当前一集的小说或剧本文案" wrapperClassName="min-h-[300px] flex-1" className="min-h-[300px] h-full w-full resize-none rounded-md border p-3" />
                         <div className="flex flex-wrap items-center gap-2">
                             <Button icon={<Save className="size-4" />} loading={props.saving} onClick={props.onSave}>
                                 保存
@@ -590,8 +602,8 @@ function AssetEditModal({ asset, connectionReady, onClose, onSave }: { asset: Sc
                         }
                         placeholder="别名，用顿号分隔"
                     />
-                    <Input.TextArea rows={4} value={draft.visualDescription} onChange={(event) => setDraft({ ...draft, visualDescription: event.target.value })} placeholder="稳定视觉描述" />
-                    <Input.TextArea rows={4} value={draft.imagePrompt} onChange={(event) => setDraft({ ...draft, imagePrompt: event.target.value })} placeholder="生图提示词" />
+                    <CanvasExpandableTextarea value={draft.visualDescription} title="稳定视觉描述" onChange={(value) => setDraft({ ...draft, visualDescription: value })} placeholder="稳定视觉描述" wrapperClassName="h-28" className="h-full w-full resize-none rounded-md border p-2" />
+                    <CanvasExpandableTextarea value={draft.imagePrompt} title="生图提示词" onChange={(value) => setDraft({ ...draft, imagePrompt: value })} placeholder="生图提示词" wrapperClassName="h-28" className="h-full w-full resize-none rounded-md border p-2" />
                 </div>
             ) : null}
         </Modal>
@@ -611,4 +623,8 @@ function AssetThumb({ imageUrl, type }: { imageUrl?: string; type: ScriptAssetTy
 function readError(error: unknown) {
     const value = error as { response?: { data?: { message?: string } }; message?: string };
     return value.response?.data?.message || value.message || "请求失败";
+}
+
+function imageSizeForAspect(aspectRatio: string) {
+    return ({ "1:1": "1024x1024", "3:4": "768x1024", "4:3": "1024x768", "9:16": "576x1024", "16:9": "1024x576" } as Record<string, string>)[aspectRatio] || "1024x576";
 }

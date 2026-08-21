@@ -3,7 +3,7 @@ import { ArrowUp, LoaderCircle, Square } from "lucide-react";
 import { Button, Segmented, Select, Tag, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
-import { defaultConfig, modelMatchesCapability, modelOptionName, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { defaultConfig, modelMatchesCapability, modelOptionName, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, videoCapabilitiesOf, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -49,6 +49,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = defaultMode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
+    const videoCapabilities = mode === "video" ? videoCapabilitiesOf(config, config.model) : undefined;
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
@@ -148,7 +149,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 references={mentionReferences}
                 onChange={updatePrompt}
                 onSubmit={submit}
-                className="thin-scrollbar h-16 w-full resize-none rounded-md border-0 px-2.5 py-1.5 text-[11px] leading-[18px] outline-none"
+                className={`thin-scrollbar w-full resize-none rounded-md border-0 px-3 py-2 text-[12px] leading-5 outline-none ${mode === "video" ? "h-28 min-h-28" : "h-16"}`}
                 style={{ background: theme.node.fill, color: theme.node.text }}
                 placeholder={mode === "text" && isEditingExistingContent ? textAction === "custom" ? "输入自定义处理要求" : "可选：补充处理要求" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
@@ -176,7 +177,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </>
                     ) : mode === "video" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" className="!h-7 !min-w-0 !max-w-[184px] flex-1 !px-1.5 !text-[11px]" onMissingConfig={() => openConfigDialog(true)} />
+                            <Tooltip title="不卡人脸不代表换脸、口型驱动或强身份一致性">
+                                <span className="inline-flex h-7 min-w-0 max-w-[184px] flex-1 items-center justify-between gap-2 rounded-md border px-2 text-[11px]" style={{ borderColor: theme.node.stroke }}>
+                                    <strong className="truncate">{videoCapabilities?.displayName || "视频模型"}</strong>{videoCapabilities?.faceFriendly ? <span className="shrink-0 text-emerald-500">不卡人脸</span> : null}
+                                </span>
+                            </Tooltip>
                             <CanvasVideoSettingsPopover config={config} hasReferenceVideo={mentionReferences.some((reference) => reference.active && reference.kind === "video")} buttonClassName="!h-7 !max-w-[126px] !justify-start !rounded-md !px-1.5 !text-[11px]" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                         </>
                     ) : mode === "audio" ? (
@@ -233,6 +238,7 @@ function buildQuotePayload(config: AiConfig, mode: CanvasNodeGenerationMode, nod
         imageAssetIds: activeReferences.filter((reference) => reference.kind === "image").map((reference) => reference.id),
         videoAssetIds: activeReferences.filter((reference) => reference.kind === "video").map((reference) => reference.id),
         audioAssetIds: activeReferences.filter((reference) => reference.kind === "audio").map((reference) => reference.id),
+        parameters: config.videoParameters || {},
     };
 }
 
@@ -258,6 +264,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         vquality: node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality,
         videoGenerateAudio: node.metadata?.generateAudio || globalConfig.videoGenerateAudio || defaultConfig.videoGenerateAudio,
         videoWatermark: node.metadata?.watermark || globalConfig.videoWatermark || defaultConfig.videoWatermark,
+        videoParameters: node.metadata?.videoParameters && typeof node.metadata.videoParameters === "object" ? node.metadata.videoParameters : globalConfig.videoParameters || defaultConfig.videoParameters,
         audioVoice: node.metadata?.audioVoice || globalConfig.audioVoice || defaultConfig.audioVoice,
         audioVoiceName: node.metadata?.audioVoiceName || globalConfig.audioVoiceName || defaultConfig.audioVoiceName,
         audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat,
@@ -278,6 +285,13 @@ function videoConfigPatch(key: keyof AiConfig, value: string) {
     if (key === "videoSeconds") return { seconds: value };
     if (key === "videoGenerateAudio") return { generateAudio: value };
     if (key === "videoWatermark") return { watermark: value };
+    if (key === "videoParameters") {
+        try {
+            return { videoParameters: JSON.parse(value) };
+        } catch {
+            return {};
+        }
+    }
     return { [key]: value };
 }
 

@@ -6,6 +6,7 @@ import "streamdown/styles.css";
 
 import { isPlainEnterKey } from "@/lib/keyboard-event";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { CanvasExpandableTextarea } from "@/components/canvas/canvas-expandable-textarea";
 import type { LocalUser } from "@/stores/use-user-store";
 
 export type CanvasAgentChatAttachment = { id: string; name: string; url: string };
@@ -197,9 +198,9 @@ export function AgentChatComposer({
                         ))}
                     </div>
                 ) : null}
-                <textarea
+                <CanvasExpandableTextarea
                     value={prompt}
-                    onChange={(event) => onPromptChange(event.target.value)}
+                    onChange={onPromptChange}
                     onPaste={(event) => {
                         if (!onAddFiles) return;
                         const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
@@ -215,6 +216,7 @@ export function AgentChatComposer({
                     className="thin-scrollbar max-h-32 min-h-20 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:opacity-45"
                     style={{ color: theme.node.text }}
                     placeholder={placeholder}
+                    title="智能体输入"
                 />
                 <div className="mt-2 flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-1">

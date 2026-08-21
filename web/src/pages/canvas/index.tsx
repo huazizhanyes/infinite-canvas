@@ -92,7 +92,7 @@ export default function CanvasPage() {
                             <span className="canvas-library-title-icon grid size-10 shrink-0 place-items-center rounded-lg">
                                 <LayoutDashboard className="size-5" />
                             </span>
-                            <h1 className="text-3xl font-semibold">无限画布</h1>
+                            <h1 className="text-3xl font-semibold">闪帧无限画布</h1>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">

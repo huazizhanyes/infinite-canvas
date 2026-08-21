@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { App, Avatar, Button, Drawer, Empty, Grid, Modal, Popover, Spin, Tooltip } from "antd";
 import { AudioLines, Image, RefreshCw, UserRound, WalletCards } from "lucide-react";
 
-import { canvasBillingApi, formatCnyMicros, type CanvasWalletPlan } from "@/services/api/canvas-billing";
+import { canvasBillingApi, formatCnyMicros, type AiCommerceProfile, type AiCommerceSettings, type AiRechargePackage, type CanvasWalletPlan } from "@/services/api/canvas-billing";
 import { userAssetsApi, type ImageRechargePlan } from "@/services/api/user-assets";
 import { useUserStore } from "@/stores/use-user-store";
 import { requestCanvasLogin } from "@/components/layout/canvas-login-modal";
@@ -22,14 +22,23 @@ export function UserAssetMenu({ style }: { style?: CSSProperties }) {
     const [walletOpen, setWalletOpen] = useState(false);
     const [imageOpen, setImageOpen] = useState(false);
     const [walletPlans, setWalletPlans] = useState<CanvasWalletPlan[]>([]);
+    const [aiPackages, setAiPackages] = useState<AiRechargePackage[]>([]);
+    const [aiProfile, setAiProfile] = useState<AiCommerceProfile | null>(null);
+    const [aiSettings, setAiSettings] = useState<AiCommerceSettings | null>(null);
+    const [customAmountYuan, setCustomAmountYuan] = useState(10);
     const [imagePlans, setImagePlans] = useState<ImageRechargePlan[]>([]);
     const [ordering, setOrdering] = useState("");
-    const [payment, setPayment] = useState<{ kind: "wallet" | "image"; orderNo: string; qrUrl?: string } | null>(null);
+    const [payment, setPayment] = useState<{ kind: "ai" | "wallet" | "image"; orderNo: string; qrUrl?: string } | null>(null);
 
     const openWallet = async () => {
         if (!connection) return;
         setOpen(false); setWalletOpen(true);
-        try { setWalletPlans(await canvasBillingApi.plans(connection)); } catch (error) { message.error(readError(error, "钱包充值档位读取失败")); }
+        try {
+            const [packages, profile, settings, legacyPlans] = await Promise.all([
+                canvasBillingApi.aiPackages(connection), canvasBillingApi.aiProfile(connection), canvasBillingApi.aiSettings(connection), canvasBillingApi.plans(connection),
+            ]);
+            setAiPackages(packages); setAiProfile(profile); setAiSettings(settings); setWalletPlans(legacyPlans);
+        } catch (error) { message.error(readError(error, "AI 充值套餐读取失败")); }
     };
     const openImage = async () => {
         if (!connection) return;
@@ -46,6 +55,27 @@ export function UserAssetMenu({ style }: { style?: CSSProperties }) {
             setPayment({ kind: "wallet", orderNo, qrUrl: String(order.qr_url || order.code_url || "") || undefined });
         } catch (error) { message.error(readError(error, "创建钱包充值订单失败")); } finally { setOrdering(""); }
     };
+    const buyAiPackage = async (plan: AiRechargePackage) => {
+        if (!connection) return;
+        setOrdering(`ai-${plan.id}`);
+        try {
+            const order = await canvasBillingApi.createAiPackageOrder(connection, plan.id);
+            const orderNo = String(order.out_trade_no || order.orderNo || "");
+            if (!orderNo) throw new Error("创建 AI 套餐订单失败");
+            setPayment({ kind: "ai", orderNo, qrUrl: String(order.qr_url || order.code_url || "") || undefined });
+        } catch (error) { message.error(readError(error, "创建 AI 套餐订单失败")); } finally { setOrdering(""); }
+    };
+    const buyAiCustom = async () => {
+        if (!connection || !aiSettings) return;
+        const amount = Math.max(aiSettings.customRechargeMinimumFen / 100, Number(customAmountYuan) || 0);
+        setOrdering("ai-custom");
+        try {
+            const order = await canvasBillingApi.createAiCustomOrder(connection, Math.round(amount * 100));
+            const orderNo = String(order.out_trade_no || order.orderNo || "");
+            if (!orderNo) throw new Error("创建自定义充值订单失败");
+            setPayment({ kind: "ai", orderNo, qrUrl: String(order.qr_url || order.code_url || "") || undefined });
+        } catch (error) { message.error(readError(error, "创建自定义充值订单失败")); } finally { setOrdering(""); }
+    };
     const buyImage = async (plan: ImageRechargePlan) => {
         if (!connection) return;
         setOrdering(plan.id);
@@ -58,12 +88,14 @@ export function UserAssetMenu({ style }: { style?: CSSProperties }) {
     useEffect(() => {
         if (!payment || !connection) return;
         const timer = window.setInterval(() => {
-            const status = payment.kind === "wallet"
-                ? canvasBillingApi.orderStatus(connection, payment.orderNo).then((value) => String(value.status || "pending"))
-                : userAssetsApi.getOrderStatus(connection, payment.orderNo);
+            const status = payment.kind === "ai"
+                ? canvasBillingApi.aiOrderStatus(connection, payment.orderNo).then((value) => String(value.status || "pending"))
+                : payment.kind === "wallet"
+                    ? canvasBillingApi.orderStatus(connection, payment.orderNo).then((value) => String(value.status || "pending"))
+                    : userAssetsApi.getOrderStatus(connection, payment.orderNo);
             void status.then((value) => {
                 if (value !== "paid") return;
-                window.clearInterval(timer); setPayment(null); message.success(payment.kind === "wallet" ? "钱包余额已到账" : "图片次数已到账"); void loadAssets();
+                window.clearInterval(timer); setPayment(null); message.success(payment.kind === "image" ? "图片次数已到账" : "AI 充值已到账"); void loadAssets();
             }).catch(() => undefined);
         }, 2500);
         return () => window.clearInterval(timer);
@@ -82,10 +114,21 @@ export function UserAssetMenu({ style }: { style?: CSSProperties }) {
     return <>
         {!user && SUCAI_INTEGRATION ? trigger : mobile ? trigger : <Popover trigger="click" placement="bottomRight" open={open} onOpenChange={(value) => { setOpen(value); if (value) void loadAssets(); }} content={panel} styles={{ content: { padding: 0 } }}>{trigger}</Popover>}
         <Drawer title="用户资产" placement="right" open={mobile && open} onClose={() => setOpen(false)}>{panel}</Drawer>
-        <PlanModal title="人民币钱包充值" open={walletOpen} loading={loading} plans={walletPlans.map((plan) => ({ id: plan.id, name: plan.name, amount: Number(plan.amount), detail: plan.description }))} ordering={ordering} onClose={() => setWalletOpen(false)} onBuy={(plan) => void buyWallet(walletPlans.find((item) => item.id === plan.id)!)} />
+        <AiRechargeModal open={walletOpen} loading={loading} packages={aiPackages} profile={aiProfile} settings={aiSettings} customAmountYuan={customAmountYuan} setCustomAmountYuan={setCustomAmountYuan} ordering={ordering} onClose={() => setWalletOpen(false)} onBuyPackage={(plan) => void buyAiPackage(plan)} onCustomRecharge={() => void buyAiCustom()} legacyPlans={walletPlans} onBuyLegacy={(plan) => void buyWallet(plan)} />
         <PlanModal title="购买图片次数" open={imageOpen} loading={loading} plans={imagePlans.map((plan) => ({ id: plan.id, name: plan.name, amount: plan.price, detail: `${plan.credits.toLocaleString("zh-CN")} 张` }))} ordering={ordering} onClose={() => setImageOpen(false)} onBuy={(plan) => void buyImage(imagePlans.find((item) => item.id === plan.id)!)} />
         <Modal title="微信支付" width={360} open={!!payment} onCancel={() => setPayment(null)} footer={null}><div className="flex flex-col items-center py-3 text-center">{payment?.qrUrl ? <img src={payment.qrUrl} alt="微信支付二维码" className="size-64 max-w-full object-contain" /> : <Spin />}<p className="mt-4 text-sm text-stone-500">扫码支付，到账后余额会自动刷新。</p></div></Modal>
     </>;
+}
+
+function AiRechargeModal({ open, loading, packages, profile, settings, customAmountYuan, setCustomAmountYuan, ordering, onClose, onBuyPackage, onCustomRecharge, legacyPlans, onBuyLegacy }: { open: boolean; loading: boolean; packages: AiRechargePackage[]; profile: AiCommerceProfile | null; settings: AiCommerceSettings | null; customAmountYuan: number; setCustomAmountYuan: (value: number) => void; ordering: string; onClose: () => void; onBuyPackage: (plan: AiRechargePackage) => void; onCustomRecharge: () => void; legacyPlans: CanvasWalletPlan[]; onBuyLegacy: (plan: CanvasWalletPlan) => void }) {
+    return <Modal title="AI 充值中心" width={620} open={open} onCancel={onClose} footer={null}>
+        <Spin spinning={loading}>
+            {profile ? <div className="mb-4 rounded-md bg-stone-50 p-3 text-sm dark:bg-stone-900"><div>累计有效充值 ¥{(Number(profile.effective_recharge_fen || 0) / 100).toFixed(2)} · {profile.tier_name_snapshot || "未达累计等级"}</div><div className="mt-1 text-stone-500">{profile.text_free_enabled ? "Canvas 文案模型与创作智能体永久免费使用" : "Canvas 文案模型与创作智能体按实际用量计费"} · 视频 {profile.video_discount_bps >= 10000 ? "原价" : `${(profile.video_discount_bps / 1000).toFixed(1)} 折`}</div></div> : null}
+            {packages.length ? <div className="grid gap-2 sm:grid-cols-2">{packages.map((plan) => <button key={plan.id} type="button" className="min-h-32 rounded-md border border-stone-200 p-4 text-left transition hover:border-stone-500 dark:border-stone-700" disabled={!!ordering} onClick={() => onBuyPackage(plan)}><div className="flex items-center justify-between gap-2"><strong>{plan.name}</strong>{plan.recommended ? <span className="text-xs text-amber-600">推荐</span> : null}</div>{plan.description ? <div className="mt-1 text-sm text-stone-500">{plan.description}</div> : null}<div className="mt-3 font-semibold">{ordering === `ai-${plan.id}` ? "创建订单中..." : `¥${(Number(plan.version.pay_amount_fen) / 100).toFixed(2)}`}</div><div className="mt-1 text-xs text-stone-500">到账 ¥{(Number(plan.version.wallet_amount_micros) / 1_000_000).toFixed(2)} · 图片 {plan.version.image_quota} · 配音 {plan.version.audio_char_quota}</div></button>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无已发布 AI 套餐" />}
+            {settings?.customRechargeEnabled ? <div className="mt-4 flex items-center gap-2 border-t border-stone-100 pt-4 dark:border-stone-800"><input aria-label="自定义充值金额" type="number" min={settings.customRechargeMinimumFen / 100} step="1" value={customAmountYuan} onChange={(event) => setCustomAmountYuan(Number(event.target.value))} className="h-9 w-32 rounded-md border border-stone-200 bg-transparent px-2 dark:border-stone-700" /><span className="text-sm text-stone-500">元起，钱包到账等于支付金额</span><Button type="primary" disabled={!!ordering} loading={ordering === "ai-custom"} onClick={onCustomRecharge}>自定义充值</Button></div> : null}
+            {legacyPlans.length ? <details className="mt-4 border-t border-stone-100 pt-3 text-sm dark:border-stone-800"><summary className="cursor-pointer text-stone-500">旧版钱包充值档位</summary><div className="mt-2 grid gap-2 sm:grid-cols-2">{legacyPlans.map((plan) => <button key={plan.id} type="button" className="rounded-md border border-stone-200 p-3 text-left dark:border-stone-700" disabled={!!ordering} onClick={() => onBuyLegacy(plan)}><strong>{plan.name}</strong><div className="mt-1 text-stone-500">¥{Number(plan.amount || 0).toFixed(2)}</div></button>)}</div></details> : null}
+        </Spin>
+    </Modal>;
 }
 
 function AssetPanel({ summary, loading, onRefresh, onWallet, onImage }: { summary: ReturnType<typeof useUserStore.getState>["assets"]; loading: boolean; onRefresh: () => void; onWallet: () => void; onImage: () => void }) {

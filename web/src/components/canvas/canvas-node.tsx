@@ -38,7 +38,6 @@ type CanvasNodeProps = {
     pluginHost?: CanvasPluginHost;
     registryVersion?: number;
     renderPanel?: (node: CanvasNodeData) => ReactNode;
-    renderNodeContent?: (node: CanvasNodeData) => ReactNode;
     batchCount?: number;
     groupChildCount?: number;
     isGroupDropTarget?: boolean;
@@ -76,7 +75,6 @@ type NodeContentRendererProps = {
     batchExpanded: boolean;
     batchOpening: boolean;
     batchRecovering: boolean;
-    renderNodeContent?: (node: CanvasNodeData) => ReactNode;
     pluginContext?: CanvasNodeContext | null;
     onContentChange: (nodeId: string, content: string) => void;
     onTextSelectionChange?: (nodeId: string, selectedText: string) => void;
@@ -104,7 +102,6 @@ export const CanvasNode = React.memo(function CanvasNode({
     mentionReferences = [],
     pluginHost,
     renderPanel,
-    renderNodeContent,
     batchCount = 0,
     groupChildCount = 0,
     isGroupDropTarget = false,
@@ -142,7 +139,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
     const isGroup = data.type === CanvasNodeType.Group;
-    const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1 && !data.metadata?.storyboardGridNodeId;
+    const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const imageBorderColor = isActive ? selectionWhite : isRelated && !isBatchChild ? theme.node.muted : "transparent";
@@ -442,7 +439,6 @@ export const CanvasNode = React.memo(function CanvasNode({
                         batchExpanded={batchExpanded}
                         batchOpening={batchOpening}
                         batchRecovering={batchRecovering}
-                        renderNodeContent={renderNodeContent}
                         pluginContext={pluginContext}
                         mentionReferences={mentionReferences}
                         onContentChange={onContentChange}
@@ -487,12 +483,12 @@ export const CanvasNode = React.memo(function CanvasNode({
             </div>
 
             {!isGroup ? <ConnectionHandleDot side="left" scale={scale} visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} /> : null}
-            {!isGroup ? <ConnectionHandleDot side="right" scale={scale} visible={(definition?.hasSourceHandle ?? true) && data.type !== CanvasNodeType.Config && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /> : null}
+            {!isGroup ? <ConnectionHandleDot side="right" scale={scale} visible={(definition?.hasSourceHandle ?? true) && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /> : null}
 
             {showPanel && !isGroup && renderPanel ? (
                 <div
                     data-canvas-node-panel={data.id}
-                    className="absolute left-1/2 z-[70] w-[420px]"
+                    className={`absolute left-1/2 z-[70] max-w-[calc(100vw-24px)] ${data.type === CanvasNodeType.Video ? "w-[560px]" : "w-[420px]"}`}
                     style={{
                         top: "calc(100% + 8px)",
                         transform: `translateX(-50%) scale(${screenFixedScale(scale)})`,
@@ -507,7 +503,6 @@ export const CanvasNode = React.memo(function CanvasNode({
 });
 
 function NodeContent(props: NodeContentRendererProps) {
-    if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
@@ -527,7 +522,6 @@ function NodeContent(props: NodeContentRendererProps) {
 const nodeContentRenderers = {
     [CanvasNodeType.Text]: TextContent,
     [CanvasNodeType.Image]: ImageNodeContent,
-    [CanvasNodeType.Config]: EmptyImageContent,
     [CanvasNodeType.Video]: VideoNodeContent,
     [CanvasNodeType.Audio]: AudioNodeContent,
     [CanvasNodeType.Group]: GroupNodeContent,
@@ -731,7 +725,7 @@ function VideoNodeContent({ node, theme, scale }: NodeContentRendererProps) {
     const [reloadKey, setReloadKey] = useState(0);
     if (!node.metadata?.content) {
         if (node.metadata?.status === "loading" && node.metadata?.videoProvider === "canvas-video") {
-            const phase = node.metadata.videoPhase === "archiving" ? "正在归档" : node.metadata.videoPhase === "queued" ? "正在排队" : "正在生成";
+            const phase = node.metadata.videoPhase === "archiving" ? "正在归档" : node.metadata.videoPhase === "queued" ? `正在排队${node.metadata.videoQueuePosition ? ` · 前方 ${Math.max(0, node.metadata.videoQueuePosition - 1)} 条` : ""}` : "正在生成";
             return (
                 <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-center" style={{ color: theme.node.text, transform: `scale(${screenUiScale(scale)})` }}>
                     <RefreshCw className="size-6 animate-spin opacity-55" />

@@ -8,6 +8,32 @@ import { localForageStorage } from "@/lib/localforage-storage";
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 
+export type VideoParameterOption = { value: string | number | boolean; label?: string };
+export type VideoParameterDefinition = {
+    key: string;
+    label: string;
+    type: "select" | "segmented" | "range" | "number" | "toggle" | "text";
+    defaultValue?: unknown;
+    options?: VideoParameterOption[];
+    min?: number;
+    max?: number;
+    step?: number;
+    unit?: string;
+    required?: boolean;
+    upstreamKey?: string;
+    priceAffects?: boolean;
+    visibleWhen?: Array<{ key: string; operator: "eq" | "neq" | "in"; value: unknown }>;
+};
+export type VideoModeRule = {
+    mode: string;
+    inputImagesMin?: number;
+    inputImagesMax?: number;
+    inputVideosMin?: number;
+    inputVideosMax?: number;
+    inputAudiosMin?: number;
+    inputAudiosMax?: number;
+};
+
 export type VideoModelCapabilities = {
     provider: "canvas-video";
     displayName: string;
@@ -15,17 +41,22 @@ export type VideoModelCapabilities = {
     routeLabel?: string;
     upstreamModel: string;
     pricingVersion?: number;
-    qualities: Array<{ quality: string; pricingVersion?: number; pricing: { type: string; credits: number; inputVideoMultiplier?: number } }>;
+    qualities: Array<{ quality: string; pricingVersion?: number; pricing: { type: string; currency?: "CNY"; unitPriceMicros?: number; normalPriceMicros?: number; credits?: number; inputVideoMultiplier?: number } }>;
     aspectRatios: string[];
     duration: { min?: number | null; max?: number | null; options?: number[] | null };
     modes: string[];
     inputImagesMax: number;
     inputVideosMax: number;
     inputAudiosMax: number;
+    parameters?: VideoParameterDefinition[];
+    modeRules?: VideoModeRule[];
+    faceFriendly?: boolean;
+    displayNotice?: string | null;
 };
 
 export type ChannelModel = {
     name: string;
+    displayName?: string;
     capability: ModelCapability;
     script?: string;
     videoCapabilities?: VideoModelCapabilities;
@@ -67,6 +98,7 @@ export type AiConfig = {
     size: string;
     count: string;
     canvasImageCount: string;
+    videoParameters: Record<string, unknown>;
 };
 
 export type WebdavSyncConfig = {
@@ -76,7 +108,7 @@ export type WebdavSyncConfig = {
     directory: string;
     lastSyncedAt: string;
 };
-export type ConfigTabKey = "channels" | "preferences";
+export type ConfigTabKey = "preferences";
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 const CHANNEL_MODEL_SEPARATOR = "::";
@@ -124,6 +156,7 @@ export const defaultConfig: AiConfig = {
     size: "1:1",
     count: "1",
     canvasImageCount: "3",
+    videoParameters: {},
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {
@@ -203,7 +236,7 @@ export const useConfigStore = create<ConfigStore>()(
             config: defaultConfig,
             webdav: defaultWebdavSyncConfig,
             isConfigOpen: false,
-            configTab: "channels",
+            configTab: "preferences",
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
                 set((state) => ({
@@ -220,7 +253,7 @@ export const useConfigStore = create<ConfigStore>()(
                     },
                 })),
             isAiConfigReady: (config, model) => isAiConfigReady(config, model),
-            openConfigDialog: (shouldPromptContinue = false, configTab = "channels") => set({ isConfigOpen: true, shouldPromptContinue, configTab }),
+            openConfigDialog: (shouldPromptContinue = false, configTab = "preferences") => set({ isConfigOpen: true, shouldPromptContinue, configTab }),
             setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
             clearPromptContinue: () => set({ shouldPromptContinue: false }),
         }),
@@ -263,6 +296,7 @@ export const useConfigStore = create<ConfigStore>()(
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
                         videoMode: config.videoMode || "text2video",
+                        videoParameters: config.videoParameters && typeof config.videoParameters === "object" && !Array.isArray(config.videoParameters) ? config.videoParameters : {},
                         canvasImageCount: config.canvasImageCount || "3",
                     },
                 };
@@ -290,9 +324,10 @@ export function normalizeChannelModels(models: Array<string | ChannelModel> | un
         if (!name || seen.has(name)) continue;
         seen.add(name);
         const capability = typeof item === "string" ? guessCapability(name) : item.capability || guessCapability(name);
+        const displayName = typeof item === "string" ? undefined : item.displayName?.trim() || undefined;
         const script = typeof item === "string" ? undefined : item.script?.trim() || undefined;
         const videoCapabilities = typeof item === "string" ? undefined : item.videoCapabilities;
-        result.push({ name, capability, script, videoCapabilities });
+        result.push({ name, displayName, capability, script, videoCapabilities });
     }
     return result;
 }
@@ -332,8 +367,7 @@ export function modelOptionLabel(config: AiConfig, value: string) {
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
     const model = channel?.models.find((item) => item.name === decoded.model);
-    const name = model?.videoCapabilities?.displayName || decoded.model;
-    return channel ? `${name}（${channel.name}）` : name;
+    return model?.videoCapabilities?.displayName || model?.displayName || decoded.model;
 }
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {

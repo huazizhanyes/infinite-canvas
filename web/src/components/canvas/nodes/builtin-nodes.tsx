@@ -1,4 +1,4 @@
-import { BookOpenText, Clapperboard, FileText, Group, Image as ImageIcon, LayoutGrid, Music2, Settings2, Video } from "lucide-react";
+import { BookOpenText, Boxes, Clapperboard, FileText, Group, Image as ImageIcon, Music2, ScanText, Video } from "lucide-react";
 
 import { NODE_SPECS } from "@/constant/canvas";
 import { registerNodeDefinitions } from "@/lib/canvas/node-registry";
@@ -6,7 +6,8 @@ import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import type { CanvasNodeDefinition, CanvasNodeResource } from "@/types/canvas-plugin";
 import { CanvasScriptSetNode } from "@/components/canvas/script-set/canvas-script-set-node";
 import { CanvasStoryboardNode } from "@/components/canvas/storyboard/canvas-storyboard-node";
-import { CanvasStoryboardGridNode } from "@/components/canvas/storyboard-grid/canvas-storyboard-grid-node";
+import { CanvasAssetExtractionNode } from "@/components/canvas/asset-extraction/canvas-asset-extraction-node";
+import { CanvasScriptAssetNode } from "@/components/canvas/asset-extraction/canvas-script-asset-node";
 
 // 内置节点的可扩展元数据(尺寸/初始 metadata 复用 NODE_SPECS)。
 // 渲染仍由 canvas-node 内部渲染器负责,故不提供 Content。
@@ -25,11 +26,11 @@ const BUILTIN_DEFINITIONS: CanvasNodeDefinition[] = [
     { type: CanvasNodeType.Image, title: "图片", icon: <ImageIcon className={iconClass} />, minimapColor: "#10b981", keepAspectRatio: (node: CanvasNodeData) => !node.metadata?.freeResize, resource: builtinResource },
     { type: CanvasNodeType.Video, title: "视频", icon: <Video className={iconClass} />, minimapColor: "#f97316", keepAspectRatio: () => true, resource: builtinResource },
     { type: CanvasNodeType.Audio, title: "音频", icon: <Music2 className={iconClass} />, minimapColor: "#a855f7", resource: builtinResource },
-    { type: CanvasNodeType.Config, title: "生成配置", icon: <Settings2 className={iconClass} />, minimapColor: "#60a5fa", hasSourceHandle: false },
     { type: CanvasNodeType.Group, title: "组", icon: <Group className={iconClass} />, minimapColor: "#94a3b8" },
     { type: CanvasNodeType.ScriptSet, title: "剧本集", icon: <BookOpenText className={iconClass} />, minimapColor: "#eab308", hidePanel: true, Content: CanvasScriptSetNode },
+    { type: CanvasNodeType.AssetExtraction, title: "资产提取", icon: <ScanText className={iconClass} />, minimapColor: "#0ea5e9", hidePanel: true, Content: CanvasAssetExtractionNode },
+    { type: CanvasNodeType.ScriptAsset, title: "资产", icon: <Boxes className={iconClass} />, minimapColor: "#10b981", hidePanel: true, showInCreateMenu: false, Content: CanvasScriptAssetNode, resource: (node: CanvasNodeData) => node.metadata?.content ? { kind: "image", url: node.metadata.content } : null },
     { type: CanvasNodeType.Storyboard, title: "分镜脚本", icon: <Clapperboard className={iconClass} />, minimapColor: "#06b6d4", hidePanel: true, Content: CanvasStoryboardNode },
-    { type: CanvasNodeType.StoryboardGrid, title: "Storyboard Grid", icon: <LayoutGrid className={iconClass} />, minimapColor: "#8b5cf6", hidePanel: true, Content: CanvasStoryboardGridNode },
 ].map((def) => {
     const spec = NODE_SPECS[def.type];
     return { ...def, title: spec.title, defaultSize: { width: spec.width, height: spec.height }, defaultMetadata: spec.metadata };

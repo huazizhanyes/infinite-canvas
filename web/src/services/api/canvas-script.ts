@@ -116,20 +116,20 @@ async function request<T>(connection: UserAssetConnection, method: "get" | "post
 }
 
 export const canvasScriptApi = {
-    createSet: (connection: UserAssetConnection, data: { projectId: string; nodeId: string; title?: string }) => request<ScriptSet>(connection, "post", "/script-sets", data),
+    createSet: (connection: UserAssetConnection, data: { projectId: string; nodeId: string; title?: string; visualStyle?: string }) => request<ScriptSet>(connection, "post", "/script-sets", data),
     getSet: (connection: UserAssetConnection, id: string) => request<ScriptSet>(connection, "get", `/script-sets/${id}`),
     updateSet: (connection: UserAssetConnection, id: string, data: Partial<Pick<ScriptSet, "title" | "visualStyle" | "aspectRatio" | "imageQuality">>) => request<ScriptSet>(connection, "put", `/script-sets/${id}`, data),
     deleteSet: (connection: UserAssetConnection, id: string) => request<{ success: boolean }>(connection, "delete", `/script-sets/${id}`),
     createEpisode: (connection: UserAssetConnection, setId: string) => request<ScriptEpisode>(connection, "post", `/script-sets/${setId}/episodes`, {}),
     updateEpisode: (connection: UserAssetConnection, id: string, data: { title?: string; content?: string }) => request<ScriptEpisode>(connection, "put", `/script-episodes/${id}`, data),
     deleteEpisode: (connection: UserAssetConnection, id: string) => request<{ success: boolean }>(connection, "delete", `/script-episodes/${id}`),
-    analyzeEpisode: (connection: UserAssetConnection, id: string, requestId: string) => request<ScriptAnalysisRun>(connection, "post", `/script-episodes/${id}/analyze`, { requestId }),
+    analyzeEpisode: (connection: UserAssetConnection, id: string, requestId: string, model?: string) => request<ScriptAnalysisRun>(connection, "post", `/script-episodes/${id}/analyze`, { requestId, model }),
     getAnalysis: (connection: UserAssetConnection, id: string) => request<ScriptAnalysisRun>(connection, "get", `/script-analysis/${id}`),
     listAssets: (connection: UserAssetConnection, setId: string, type?: ScriptAssetType) => request<{ assets: ScriptAsset[]; pending: ScriptPendingMention[] }>(connection, "get", `/script-sets/${setId}/assets`, undefined, type ? { type } : undefined),
     updateAsset: (connection: UserAssetConnection, id: string, data: Partial<Pick<ScriptAsset, "name" | "aliases" | "identity" | "visualDescription" | "imagePrompt" | "status">>) => request<ScriptAsset>(connection, "put", `/script-assets/${id}`, data),
     mergeAsset: (connection: UserAssetConnection, id: string, sourceAssetId: string) => request(connection, "post", `/script-assets/${id}/merge`, { sourceAssetId }),
     resolveMention: (connection: UserAssetConnection, id: string, decision: "reuse" | "variant" | "new", assetId?: string) => request<ScriptPendingMention>(connection, "post", `/script-mentions/${id}/resolve`, { decision, assetId }),
-    generateAssets: (connection: UserAssetConnection, scriptSetId: string, targets: Array<{ assetId: string; variantId?: string }>, requestId: string) => request<ScriptGenerationBatch>(connection, "post", "/script-assets/generate", { scriptSetId, targets, requestId }),
+    generateAssets: (connection: UserAssetConnection, scriptSetId: string, targets: Array<{ assetId: string; variantId?: string }>, requestId: string, model?: string, quoteToken?: string) => request<ScriptGenerationBatch>(connection, "post", "/script-assets/generate", { scriptSetId, targets, requestId, model, quoteToken }),
     getGenerationBatch: (connection: UserAssetConnection, id: string) => request<ScriptGenerationBatch>(connection, "get", `/script-assets/generation-batches/${id}`),
 };
 

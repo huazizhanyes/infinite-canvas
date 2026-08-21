@@ -2,7 +2,7 @@ import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
-import { createCanvasGraphIndex, incomingConnections, outgoingConnections, type CanvasGraphIndex } from "@/lib/canvas/canvas-graph-index";
+import { createCanvasGraphIndex, incomingConnections, type CanvasGraphIndex } from "@/lib/canvas/canvas-graph-index";
 
 export type CanvasResourceKind = "image" | "video" | "audio" | "text";
 
@@ -31,8 +31,6 @@ export function buildNodeMentionReferences(node: CanvasNodeData, nodes: CanvasNo
 
 export function getMentionResourceNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], graphIndex?: CanvasGraphIndex) {
     const index = graphIndex || createCanvasGraphIndex(nodes, connections);
-    const configInputs = getConnectedConfigResourceNodes(nodeId, index);
-    if (configInputs.length) return configInputs;
     const ownInputs = getContextResourceNodes(nodeId, index);
     if (ownInputs.length) return ownInputs;
     const node = index.nodeById.get(nodeId);
@@ -41,8 +39,6 @@ export function getMentionResourceNodes(nodeId: string, nodes: CanvasNodeData[],
 
 export function getGenerationResourceNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], graphIndex?: CanvasGraphIndex) {
     const index = graphIndex || createCanvasGraphIndex(nodes, connections);
-    const configInputs = getConnectedConfigResourceNodes(nodeId, index);
-    if (configInputs.length) return configInputs;
     const ownInputs = getContextResourceNodes(nodeId, index);
     if (ownInputs.length) return ownInputs;
     return [];
@@ -52,12 +48,6 @@ function getContextResourceNodes(nodeId: string, graphIndex: CanvasGraphIndex) {
     return incomingConnections(graphIndex, nodeId)
         .map((connection) => graphIndex.nodeById.get(connection.fromNodeId))
         .filter((node): node is CanvasNodeData => Boolean(node && isResourceNode(node)));
-}
-
-function getConnectedConfigResourceNodes(nodeId: string, graphIndex: CanvasGraphIndex) {
-    const configConnection = outgoingConnections(graphIndex, nodeId).find((connection) => graphIndex.nodeById.get(connection.toNodeId)?.type === CanvasNodeType.Config);
-    if (!configConnection) return [];
-    return getContextResourceNodes(configConnection.toNodeId, graphIndex).filter((node) => node.id !== nodeId);
 }
 
 function labelResourceNodes(nodes: CanvasNodeData[], active: boolean) {

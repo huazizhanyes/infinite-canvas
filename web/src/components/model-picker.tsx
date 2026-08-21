@@ -90,16 +90,15 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
 function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
     const video = videoCapabilitiesOf(config, model);
     if (video) {
-        const prices = video.qualities.map((item) => Number(item.pricing.credits || 0));
+        const prices = video.qualities.map((item) => Number(item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0) / 1_000_000);
         const min = Math.min(...prices);
         const max = Math.max(...prices);
-        const units = new Set(video.qualities.map((item) => item.pricing.type === "per_second" ? "积分/秒" : "积分/条"));
         return (
             <span className="flex min-w-0 items-start gap-2 py-1">
                 <ModelIcon model={model} />
                 <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{video.routeLabel || video.channel} · {video.displayName}</span>
-                    <span className="block truncate text-xs opacity-60">{video.qualities.map((item) => item.quality).join(" / ")} · {min === max ? min : `${min}-${max}`} {Array.from(units).join(" / ")}</span>
+                    <span className="block truncate font-medium">MiniMax H3 · 不卡人脸</span>
+                    <span className="block truncate text-xs opacity-60">{video.qualities.map((item) => item.quality).join(" / ")} · ¥{min === max ? min.toFixed(2) : `${min.toFixed(2)}-${max.toFixed(2)}`}/秒起</span>
                 </span>
             </span>
         );

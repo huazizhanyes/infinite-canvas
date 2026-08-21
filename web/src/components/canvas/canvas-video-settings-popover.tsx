@@ -77,7 +77,7 @@ function VideoSettingsPortal({
     hasReferenceVideo: boolean;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
 }) {
-    const width = 320;
+    const width = Math.min(420, window.innerWidth - 24);
     const gap = 8;
     const margin = 12;
     const alignRight = placement?.endsWith("Right");
@@ -94,7 +94,7 @@ function VideoSettingsPortal({
         border: `1px solid ${theme.toolbar.border}`,
         borderRadius: 8,
         boxShadow: "0 16px 40px rgba(0, 0, 0, 0.22)",
-        padding: 12,
+        padding: 16,
         overflowY: "auto",
         color: theme.node.text,
     } as const;
@@ -108,7 +108,7 @@ function VideoSettingsPortal({
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
         >
-            <VideoSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} hasReferenceVideo={hasReferenceVideo} className="space-y-3" />
+            <VideoSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} hasReferenceVideo={hasReferenceVideo} className="space-y-4" />
         </div>,
         document.body,
     );

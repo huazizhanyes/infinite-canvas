@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { Keyboard, LogIn, Puzzle, Settings2 } from "lucide-react";
+import { Gem, Keyboard, LogIn, Puzzle, Settings2 } from "lucide-react";
 
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -9,6 +9,7 @@ import { UserAssetMenu } from "@/components/layout/user-asset-menu";
 import { CanvasLoginModal, requestCanvasLogin } from "@/components/layout/canvas-login-modal";
 import { SUCAI_INTEGRATION } from "@/constant/env";
 import { useUserStore } from "@/stores/use-user-store";
+import { openAiMembershipModal } from "@/components/layout/ai-membership-modal";
 
 type UserStatusActionsProps = {
     showConfig?: boolean;
@@ -28,6 +29,16 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
 
     return (
         <div className="inline-flex shrink-0 items-center gap-1">
+            <button
+                type="button"
+                className="inline-flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md px-1.5 text-[11px] font-semibold text-amber-500 transition hover:-translate-y-px hover:bg-amber-500/10 hover:text-amber-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500 [&_svg]:drop-shadow-[0_2px_4px_rgba(180,120,18,.3)]"
+                onClick={openAiMembershipModal}
+                aria-label="AI 会员中心"
+                title="AI 会员中心"
+            >
+                <Gem className="size-4" />
+                <span>会员中心</span>
+            </button>
             {onOpenPlugins ? (
                 <button type="button" className={naturalIconClass} style={iconStyle} onClick={onOpenPlugins} aria-label="节点插件" title="节点插件">
                     <Puzzle className="size-4" />
