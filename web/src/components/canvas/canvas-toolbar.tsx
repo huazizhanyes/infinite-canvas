@@ -2,10 +2,8 @@ import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject
 import { useEffect, useRef, useState } from "react";
 import { Button, Segmented, Switch } from "antd";
 import {
-    BookOpenText,
     Check,
     CircleDot,
-    Clapperboard,
     Clock3,
     Eraser,
     Grid2x2,
@@ -61,9 +59,7 @@ const TOOL_ACCENT_BY_ID: Record<string, ToolbarAccent> = {
     "tool-video": "cyan",
     "tool-audio": "rose",
     "tool-group": "violet",
-    "tool-script-set": "amber",
     "tool-asset-extraction": "sky",
-    "tool-storyboard": "rose",
     "tool-extensions": "violet",
     "tool-upload": "sky",
     "tool-style": "fuchsia",
@@ -80,9 +76,7 @@ export function CanvasToolbar({
     onAddAudio,
     onAddText,
     onAddGroup,
-    onAddScriptSet,
     onAddAssetExtraction,
-    onAddStoryboard,
     onAddExtensionNode,
     onUndo,
     onRedo,
@@ -103,9 +97,7 @@ export function CanvasToolbar({
     onAddAudio: () => void;
     onAddText: () => void;
     onAddGroup: () => void;
-    onAddScriptSet: () => void;
     onAddAssetExtraction: () => void;
-    onAddStoryboard: () => void;
     onAddExtensionNode: (type: string) => void;
     onUndo: () => void;
     onRedo: () => void;
@@ -193,14 +185,8 @@ export function CanvasToolbar({
                 <ToolbarButton id="tool-group" label="组" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddGroup}>
                     <Group className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-script-set" label="剧本集" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddScriptSet}>
-                    <BookOpenText className="size-4.5" />
-                </ToolbarButton>
                 <ToolbarButton id="tool-asset-extraction" label="资产提取" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddAssetExtraction}>
                     <ScanText className="size-4.5" />
-                </ToolbarButton>
-                <ToolbarButton id="tool-storyboard" label="分镜脚本" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddStoryboard}>
-                    <Clapperboard className="size-4.5" />
                 </ToolbarButton>
                 {extensionDefs.length ? (
                     <ToolbarButton
@@ -445,9 +431,7 @@ function toolLabel(id: string) {
     if (id === "tool-video") return "视频";
     if (id === "tool-audio") return "配音";
     if (id === "tool-group") return "组";
-    if (id === "tool-script-set") return "剧本集";
     if (id === "tool-asset-extraction") return "资产提取";
-    if (id === "tool-storyboard") return "分镜脚本";
     if (id === "tool-extensions") return "扩展节点";
     if (id === "tool-upload") return "上传资产";
     if (id === "tool-style") return "画布外观";

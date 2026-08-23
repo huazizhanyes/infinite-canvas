@@ -36,7 +36,10 @@ export function buildAssetExtractionOps(source: CanvasNodeData, assets: ScriptAs
             x: source.position.x + source.width + ASSET_ROW_OFFSET + column * (ASSET_NODE_WIDTH + ASSET_COLUMN_GAP),
             y: startY + row * (ASSET_NODE_HEIGHT + ASSET_NODE_GAP),
         };
+        const hasNewImage = Boolean(asset.image?.imageUrl && asset.image?.id && asset.image.id !== existing?.metadata?.scriptAssetImageId);
+        const shouldHydrateImage = Boolean(asset.image?.imageUrl && !existing?.metadata?.mediaId && (existing?.metadata?.mediaStatus !== "failed" || hasNewImage));
         const metadata: CanvasNodeMetadata = {
+            ...existing?.metadata,
             assetExtractionNodeId: source.id,
             scriptSetId: source.metadata?.scriptSetId,
             scriptSetNodeId: source.id,
@@ -50,7 +53,7 @@ export function buildAssetExtractionOps(source: CanvasNodeData, assets: ScriptAs
             assetExtractionImageModel: source.metadata?.assetExtractionImageModel,
             assetExtractionAspectRatio: source.metadata?.assetExtractionAspectRatio,
             assetExtractionImageQuality: source.metadata?.assetExtractionImageQuality,
-            ...(asset.image?.imageUrl ? { content: asset.image.imageUrl } : {}),
+            ...(shouldHydrateImage ? { content: asset.image?.imageUrl, mediaStatus: undefined } : {}),
         };
         if (existing) {
             ops.push({ type: "update_node", id, patch: { title: asset.name, position, width: ASSET_NODE_WIDTH, height: ASSET_NODE_HEIGHT }, metadata });

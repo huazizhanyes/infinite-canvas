@@ -151,5 +151,6 @@ export function canvasCompactQuoteLabel(quote: CanvasBillingQuote) {
     if (quote.maximumAmountMicros === "0" && benefits.some((item) => item.type === "ai_text_free")) return "永久免费使用";
     if (quote.maximumAmountMicros === "0" && benefits.some((item) => item.type === "super_text_free")) return "免费";
     if (quote.maximumAmountMicros === "0" && benefits.length) return "本次免费";
+    if (quote.breakdown?.tierCode) return `¥${(Math.max(0, Number(quote.maximumAmountMicros || 0)) / 1_000_000).toFixed(2)}`;
     return formatCnyMicros(quote.maximumAmountMicros, "");
 }

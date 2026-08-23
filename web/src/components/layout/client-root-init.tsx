@@ -5,6 +5,7 @@ import { App, Button, Result, Spin } from "antd";
 import { createModelChannel, encodeChannelModel, modelOptionsFromChannels, useConfigStore, rehydrateConfigForAccount } from "@/stores/use-config-store";
 import { initializeSucaiCanvasSync } from "@/services/sucai-canvas-sync";
 import { stopSucaiCanvasSync } from "@/services/sucai-canvas-sync";
+import { initializeCanvasAssetSync, stopCanvasAssetSync } from "@/services/canvas-asset-sync";
 import { useUserStore } from "@/stores/use-user-store";
 import { setCanvasAccountScope, migrateLegacyCanvasData, clearCanvasAccountScope } from "@/lib/canvas-account-scope";
 import { rehydrateCanvasStoreForAccount, clearCanvasStoreMemory } from "@/stores/canvas/use-canvas-store";
@@ -30,12 +31,14 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
     const handledConfigParams = useRef(false);
     const handledSucaiInit = useRef(false);
+    const sucaiStateRef = useRef<SucaiInitState>(isSucaiModeRequested() ? "loading" : "idle");
     const [sucaiState, setSucaiState] = useState<SucaiInitState>(() => (isSucaiModeRequested() ? "loading" : "idle"));
     const [sucaiError, setSucaiError] = useState("");
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const config = useConfigStore((state) => state.config);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
+    sucaiStateRef.current = sucaiState;
 
     useEffect(() => {
         if (handledSucaiInit.current) return;
@@ -77,7 +80,10 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         };
         const mapVideoModel = (item: any) => ({
             name: item.id,
+            displayName: item.display_name || item.id,
             capability: "video" as const,
+            icon: item.icon,
+            iconUrl: item.icon_url,
             videoCapabilities: {
                 provider: "canvas-video" as const,
                 displayName: item.display_name || item.id,
@@ -132,7 +138,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     models: [
                         ...models
                             .filter((item: { id?: string; capability?: string }) => item.id && ["image", "text", "audio"].includes(item.capability || ""))
-                            .map((item: { id: string; display_name?: string; capability: "image" | "text" | "audio" }) => ({ name: item.id, displayName: item.display_name || item.id, capability: item.capability })),
+                            .map((item: { id: string; display_name?: string; capability: "image" | "text" | "audio"; icon?: string; icon_url?: string }) => ({ name: item.id, displayName: item.display_name || item.id, capability: item.capability, icon: item.icon, iconUrl: item.icon_url })),
                         ...videoModels.map(mapVideoModel),
                     ],
                 });
@@ -180,12 +186,16 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         if (!isSucaiModeRequested()) return;
         let handling = false;
         const checkAccountTransition = () => {
+            // During first bootstrap the connection is intentionally empty until the
+            // model/config sync finishes. Do not mistake that transient state for a
+            // real account switch and reload the page while requests are pending.
+            if (sucaiStateRef.current !== "ready") return;
             const nextToken = localStorage.getItem(SUCAI_TOKEN_KEY) || "";
             const currentToken = useUserStore.getState().connection?.token || "";
             if (nextToken === currentToken || handling) return;
             handling = true;
             setSucaiState("loading");
-            void stopSucaiCanvasSync().catch(() => undefined).finally(() => {
+            void Promise.all([stopSucaiCanvasSync(), stopCanvasAssetSync()]).catch(() => undefined).finally(() => {
                 clearCanvasStoreMemory();
                 clearAssetStoreMemory();
                 clearCanvasHostTaskStoreMemory();
@@ -207,6 +217,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         const currentToken = useUserStore.getState().connection?.token;
         if (currentToken && currentToken !== nextToken) {
             await stopSucaiCanvasSync().catch(() => undefined);
+            await stopCanvasAssetSync().catch(() => undefined);
             clearCanvasStoreMemory();
             clearAssetStoreMemory();
             clearCanvasHostTaskStoreMemory();
@@ -221,6 +232,9 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         const migratedLegacyData = await migrateLegacyCanvasData(userId);
         if (migratedLegacyData) message.warning("检测到旧版未分账号的画布数据，已归属到本次首次登录账号");
         await Promise.all([rehydrateCanvasStoreForAccount(), rehydrateAssetStoreForAccount(), rehydrateCanvasHostTaskStoreForAccount(), rehydrateConfigForAccount()]);
+        void initializeCanvasAssetSync({ baseUrl: SUCAI_API_BASE, token: nextToken }).catch((error) => {
+            console.warn("[CanvasAssetSync] initialization failed", error);
+        });
     }
 
     useEffect(() => {

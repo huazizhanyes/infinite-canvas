@@ -5,6 +5,7 @@ import { readImageMeta } from "@/lib/image-utils";
 import { cacheObjectUrl, revokeCachedObjectUrl } from "@/services/object-url-cache";
 import { getCanvasStorageScopeId, getCanvasSessionEpoch } from "@/lib/canvas-account-scope";
 import { uploadCanvasMedia } from "@/services/canvas-media";
+import { resolveCanvasMediaUrl } from "@/services/canvas-media";
 
 export type UploadedImage = {
     url: string;
@@ -38,11 +39,17 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
     const storageKey = `image:u${getCanvasStorageScopeId()}:${nanoid()}`;
     await store.setItem(storageKey, blob);
-    const url = cacheObjectUrl(objectUrls, storageKey, blob);
-    const meta = await readImageMeta(url);
+    const localUrl = cacheObjectUrl(objectUrls, storageKey, blob);
+    const meta = await readImageMeta(localUrl);
     let remote: Awaited<ReturnType<typeof uploadCanvasMedia>> = null;
-    try { remote = await uploadCanvasMedia(blob, "image"); } catch { remote = { mediaId: "", mediaStatus: "failed" }; }
+    try {
+        remote = await uploadCanvasMedia(blob, "image");
+    } catch {
+        // 本地图片已经保存；媒体同步失败不应阻塞当前生成结果。
+        remote = { mediaId: "", mediaStatus: "failed" };
+    }
     if (epoch !== getCanvasSessionEpoch()) throw new Error("账号已切换，已忽略旧媒体请求");
+    const url = remote?.mediaId ? await resolveCanvasMediaUrl(remote.mediaId, localUrl) : localUrl;
     return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType, ...(remote?.mediaId ? { mediaId: remote.mediaId } : {}), ...(remote?.mediaStatus ? { mediaStatus: remote.mediaStatus } : {}) };
 }
 
@@ -56,6 +63,14 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
     return url;
 }
 
+export async function resolvePersistedImageUrl(mediaId?: string, storageKey?: string, fallback = "") {
+    if (mediaId) {
+        const remote = await resolveCanvasMediaUrl(mediaId, "");
+        if (remote) return remote;
+    }
+    return resolveImageUrl(storageKey, fallback);
+}
+
 export async function getImageBlob(storageKey: string) {
     return store.getItem<Blob>(storageKey);
 }
@@ -66,9 +81,19 @@ export async function setImageBlob(storageKey: string, blob: Blob) {
 }
 
 export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
-    const url = image.dataUrl || (await resolveImageUrl(image.storageKey, image.url || ""));
+    // Persisted canvas nodes commonly keep an expired OSS URL in `dataUrl` and
+    // the durable browser copy in `storageKey`. Prefer the local copy so an
+    // expired remote preview cannot block the edit request indefinitely.
+    const localUrl = image.storageKey ? await resolveImageUrl(image.storageKey, "") : "";
+    const url = localUrl || image.dataUrl || image.url || "";
     if (!url || url.startsWith("data:")) return url;
-    return blobToDataUrl(await (await fetch(url)).blob());
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+        return blobToDataUrl(await (await fetch(url, { signal: controller.signal })).blob());
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
 export async function deleteStoredImages(keys: Iterable<string>) {

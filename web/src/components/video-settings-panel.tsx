@@ -5,6 +5,7 @@ import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { modelOptionName, videoCapabilitiesOf, type AiConfig, type VideoModelCapabilities, type VideoParameterDefinition } from "@/stores/use-config-store";
+import type { CanvasBillingQuote } from "@/services/api/canvas-billing";
 
 const resolutionOptions = [
     { value: "720", label: "720p" },
@@ -33,12 +34,13 @@ type VideoSettingsPanelProps = {
     hasReferenceVideo?: boolean;
     showTitle?: boolean;
     className?: string;
+    quote?: CanvasBillingQuote | null;
 };
 
-export function VideoSettingsPanel({ config, onConfigChange, theme, hasReferenceVideo = false, showTitle = true, className = "w-[400px] space-y-4 px-1 py-0.5" }: VideoSettingsPanelProps) {
+export function VideoSettingsPanel({ config, onConfigChange, theme, hasReferenceVideo = false, showTitle = true, className = "w-[400px] space-y-4 px-1 py-0.5", quote = null }: VideoSettingsPanelProps) {
     const backendCapabilities = videoCapabilitiesOf(config, config.model) || videoCapabilitiesOf(config, config.videoModel);
     if (backendCapabilities) {
-        return <BackendVideoSettingsPanel config={config} capabilities={backendCapabilities} onConfigChange={onConfigChange} theme={theme} hasReferenceVideo={hasReferenceVideo} showTitle={showTitle} className={className} />;
+        return <BackendVideoSettingsPanel config={config} capabilities={backendCapabilities} onConfigChange={onConfigChange} theme={theme} hasReferenceVideo={hasReferenceVideo} showTitle={showTitle} className={className} quote={quote} />;
     }
     if (isSeedanceVideoConfig(config)) {
         return <SeedanceVideoSettingsPanel config={config} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
@@ -102,11 +104,9 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, hasReference
     );
 }
 
-function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme, hasReferenceVideo, showTitle, className }: VideoSettingsPanelProps & { capabilities: VideoModelCapabilities }) {
+function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme, hasReferenceVideo, showTitle, className, quote }: VideoSettingsPanelProps & { capabilities: VideoModelCapabilities }) {
     const quality = capabilities.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities.qualities[0]?.quality || "";
     const ratio = capabilities.aspectRatios.includes(config.size) ? config.size : capabilities.aspectRatios[0] || "";
-    const mode = capabilities.modes.includes(config.videoMode) ? config.videoMode : capabilities.modes[0] || "";
-    const modeRule = capabilities.modeRules?.find((rule) => rule.mode === mode);
     const durationOptions = [...(capabilities.duration.options || [])].sort((left, right) => left - right);
     const requestedDuration = Math.floor(Number(config.videoSeconds));
     const duration = durationOptions.length
@@ -114,6 +114,11 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
         : Math.max(capabilities.duration.min ?? 1, Math.min(capabilities.duration.max ?? 60, Number.isFinite(requestedDuration) ? requestedDuration : capabilities.duration.min ?? 5));
     const selectedQuality = capabilities.qualities.find((item) => item.quality === quality) || capabilities.qualities[0];
     const normalUnitPrice = Number(selectedQuality?.pricing.normalPriceMicros || selectedQuality?.pricing.unitPriceMicros || 0) / 1_000_000;
+    const quoteTier = quote?.breakdown?.tierCode;
+    const tierUnitPrice = Number(quote?.breakdown?.tierUnitPriceMicros || 0) / 1_000_000;
+    const payablePrice = Number(quote?.breakdown?.payableAmountMicros || quote?.maximumAmountMicros || 0) / 1_000_000;
+    const originalPrice = Number(quote?.breakdown?.originalAmountMicros || 0) / 1_000_000;
+    const savings = Number(quote?.breakdown?.savingsMicros || 0) / 1_000_000;
     const parameters = capabilities.parameters || [];
     const parameterValues = { ...(config.videoParameters || {}) };
     for (const parameter of parameters) if (parameterValues[parameter.key] === undefined && parameter.defaultValue !== undefined) parameterValues[parameter.key] = parameter.defaultValue;
@@ -122,37 +127,27 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
     return (
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
-                {showTitle ? <div className="flex items-center justify-between gap-3 text-lg font-semibold"><span>{capabilities.displayName}</span>{capabilities.faceFriendly ? <span className="rounded bg-emerald-500/15 px-2 py-1 text-[11px] font-semibold text-emerald-500" title={capabilities.displayNotice || undefined}>不卡人脸</span> : null}</div> : null}
-                <SettingGroup title="生成模式" color={theme.node.muted}>
-                    <div className="grid grid-cols-2 gap-2.5">
-                        {capabilities.modes.map((value) => (
-                            <OptionPill key={value} selected={mode === value} theme={theme} onClick={() => onConfigChange("videoMode", value)}>
-                                {videoModeLabel(value)}
-                            </OptionPill>
-                        ))}
-                    </div>
-                    {modeRule ? <div className="text-[11px] leading-4 opacity-60">参考图片 {modeRule.inputImagesMin ?? 0}-{modeRule.inputImagesMax ?? capabilities.inputImagesMax} 张；参考音频 {modeRule.inputAudiosMin ?? 0}-{modeRule.inputAudiosMax ?? capabilities.inputAudiosMax} 个{(modeRule.inputVideosMax ?? capabilities.inputVideosMax) > 0 ? `；参考视频最多 ${modeRule.inputVideosMax} 个` : ""}</div> : null}
-                </SettingGroup>
+                {showTitle ? <div className="flex min-h-8 items-center justify-between gap-3"><span className="text-lg font-semibold leading-6">{capabilities.displayName}</span>{capabilities.faceFriendly ? <span className="rounded-md bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold leading-4 text-emerald-500" title={capabilities.displayNotice || undefined}>不卡人脸</span> : null}</div> : null}
                 <SettingGroup title="清晰度" color={theme.node.muted}>
-                    <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(${Math.min(4, Math.max(1, capabilities.qualities.length))}, minmax(0, 1fr))` }}>
+                    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(4, Math.max(1, capabilities.qualities.length))}, minmax(0, 1fr))` }}>
                         {capabilities.qualities.map((item) => (
                             <OptionPill key={item.quality} selected={quality === item.quality} theme={theme} onClick={() => onConfigChange("vquality", item.quality)}>
                                 <span className="flex flex-col items-center leading-tight">
                                     <span>{item.quality}</span>
-                                    <span className="text-[10px] opacity-60">¥{(Number(item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0) / 1_000_000).toFixed(2)}/秒起</span>
+                                    <span className="whitespace-nowrap text-[10px] font-semibold text-amber-400">普通价 ¥{(Number(item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0) / 1_000_000).toFixed(2)}/秒</span>
                                 </span>
                             </OptionPill>
                         ))}
                     </div>
                 </SettingGroup>
                 <SettingGroup title="画幅比例" color={theme.node.muted}>
-                    <div className="grid grid-cols-2 gap-2.5">
+                    <div className="grid grid-cols-2 gap-2">
                         {capabilities.aspectRatios.map((value) => {
                             const preview = ratioPreview(value);
                             return (
-                                <button key={value} type="button" className="flex h-[68px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border bg-transparent px-1 text-sm transition hover:opacity-80" style={{ borderColor: ratio === value ? theme.node.text : theme.node.stroke, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={() => onConfigChange("size", value)}>
-                                    <SizePreview width={preview.width} height={preview.height} color={theme.node.text} />
-                                    <span>{value}</span>
+                                <button key={value} type="button" className="flex h-[68px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border px-1 text-sm transition hover:opacity-90" style={{ borderColor: ratio === value ? theme.node.activeStroke : theme.node.stroke, background: ratio === value ? theme.toolbar.activeBg : "transparent", color: ratio === value ? theme.toolbar.activeText : theme.node.text, boxShadow: ratio === value ? `inset 0 0 0 1px ${theme.node.activeStroke}` : "none" }} onMouseDown={(event) => event.stopPropagation()} onClick={() => onConfigChange("size", value)}>
+                                    <SizePreview width={preview.width} height={preview.height} color={ratio === value ? theme.toolbar.activeText : theme.node.text} />
+                                    <span className="font-medium leading-5">{value}</span>
                                 </button>
                             );
                         })}
@@ -169,16 +164,45 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
                     />
                 </SettingGroup>
                 {parameters.filter((parameter) => isParameterVisible(parameter, parameterValues)).length ? <SettingGroup title="模型参数" color={theme.node.muted}>
-                    <div className="space-y-2 rounded-md border p-2" style={{ borderColor: theme.node.stroke }}>
+                    <div className="space-y-2 rounded-lg border p-2.5" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
                         {parameters.filter((parameter) => isParameterVisible(parameter, parameterValues)).map((parameter) => <DynamicVideoParameter key={parameter.key} parameter={parameter} value={parameterValues[parameter.key]} theme={theme} onChange={(value) => updateParameter(parameter, value)} />)}
                     </div>
                 </SettingGroup> : null}
-                <div className="rounded-md border px-3 py-2 text-sm" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
-                    <div className="flex items-center justify-between gap-3"><span style={{ color: theme.node.muted }}>普通用户参考价</span><strong>¥{(normalUnitPrice * duration).toFixed(2)}</strong></div>
-                    <div className="mt-1 text-[11px] opacity-60">¥{normalUnitPrice.toFixed(2)}/秒 × {duration} 秒；你的等级实付价以右侧实时报价为准</div>
-                </div>
+                <VideoPriceSummary
+                    tier={quoteTier}
+                    tierUnitPrice={tierUnitPrice}
+                    payablePrice={payablePrice}
+                    originalPrice={originalPrice || normalUnitPrice * duration}
+                    savings={savings}
+                    normalUnitPrice={normalUnitPrice}
+                    duration={duration}
+                    theme={theme}
+                />
             </div>
         </ImageSettingsTheme>
+    );
+}
+
+function VideoPriceSummary({ tier, tierUnitPrice, payablePrice, originalPrice, savings, normalUnitPrice, duration, theme }: { tier?: "NORMAL" | "SILVER" | "GOLD" | "DIAMOND"; tierUnitPrice: number; payablePrice: number; originalPrice: number; savings: number; normalUnitPrice: number; duration: number; theme: CanvasTheme }) {
+    const tierLabels = { NORMAL: "普通用户", SILVER: "白银", GOLD: "黄金", DIAMOND: "钻石" } as const;
+    const hasLiveQuote = Boolean(tier && tierUnitPrice > 0);
+    const discounted = hasLiveQuote && savings > 0;
+    return (
+        <div className="rounded-lg border px-3.5 py-2.5" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
+            <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-sm font-medium" style={{ color: theme.node.text }}>{hasLiveQuote ? `${tierLabels[tier!]}实付价` : "价格预览"}</span>
+                        {discounted ? <span className="rounded bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-amber-400">已优惠</span> : null}
+                    </div>
+                    <div className="mt-1 text-[11px] leading-4" style={{ color: theme.node.muted }}>
+                        {hasLiveQuote ? `¥${tierUnitPrice.toFixed(2)}/秒 × ${duration} 秒` : `普通价 ¥${normalUnitPrice.toFixed(2)}/秒 × ${duration} 秒`}
+                    </div>
+                </div>
+                <strong className="shrink-0 text-xl font-bold leading-6 text-amber-400">¥{(hasLiveQuote ? payablePrice : originalPrice).toFixed(2)}</strong>
+            </div>
+            {discounted ? <div className="mt-1.5 flex items-center justify-between border-t pt-1.5 text-[11px]" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}><span>普通原价 <span className="line-through">¥{originalPrice.toFixed(2)}</span></span><strong className="font-semibold text-emerald-500">已省 ¥{savings.toFixed(2)}</strong></div> : <div className="mt-1.5 border-t pt-1.5 text-[11px] leading-4" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>{hasLiveQuote ? "当前账户按普通档位计费" : "实付金额以实时账户报价为准"}</div>}
+        </div>
     );
 }
 
@@ -197,13 +221,6 @@ function DynamicVideoParameter({ parameter, value, theme, onChange }: { paramete
             {parameter.type === "toggle" ? <Switch size="small" checked={Boolean(value)} onChange={onChange} /> : parameter.type === "number" || parameter.type === "range" ? <InputNumber size="small" value={value as number} min={parameter.min} max={parameter.max} step={parameter.step || 1} onChange={(next) => onChange(next ?? undefined)} /> : parameter.type === "text" ? <Input size="small" value={value as string | undefined} onChange={(event) => onChange(event.target.value)} /> : <Select size="small" value={value} options={options} onChange={onChange} />}
         </div>
     </div>;
-}
-
-function videoModeLabel(mode: string) {
-    if (mode === "text2video") return "文生视频";
-    if (mode === "image2video") return "全能参考";
-    if (mode === "frames2video") return "首尾帧";
-    return mode;
 }
 
 function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, className }: VideoSettingsPanelProps) {
@@ -294,7 +311,7 @@ export function normalizeVideoResolutionValue(value: string) {
 
 function OptionPill({ selected, disabled = false, theme, onClick, children }: { selected: boolean; disabled?: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {
     return (
-        <button type="button" disabled={disabled} className="h-9 cursor-pointer rounded-md border px-2 text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-35" style={{ background: selected ? theme.toolbar.activeBg : "transparent", borderColor: selected ? theme.toolbar.activeText : theme.node.stroke, color: selected ? theme.toolbar.activeText : theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={onClick}>
+        <button type="button" disabled={disabled} className="h-9 cursor-pointer rounded-lg border px-2 text-sm font-medium transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35" style={{ background: selected ? theme.toolbar.activeBg : "transparent", borderColor: selected ? theme.node.activeStroke : theme.node.stroke, color: selected ? theme.toolbar.activeText : theme.node.text, boxShadow: selected ? `inset 0 0 0 1px ${theme.node.activeStroke}` : "none" }} onMouseDown={(event) => event.stopPropagation()} onClick={onClick}>
             {children}
         </button>
     );
@@ -302,8 +319,8 @@ function OptionPill({ selected, disabled = false, theme, onClick, children }: { 
 
 function SettingGroup({ title, color, children }: { title: string; color: string; children: ReactNode }) {
     return (
-        <div className="space-y-2.5">
-            <div className="text-xs font-medium" style={{ color }}>
+        <div className="space-y-1.5">
+            <div className="text-xs font-medium leading-5" style={{ color }}>
                 {title}
             </div>
             {children}
@@ -337,8 +354,8 @@ function DurationSlider({ value, min, max, options, theme, onChange }: { value: 
     const values = options?.length ? [...options].sort((left, right) => left - right) : undefined;
     const marks = values ? Object.fromEntries(values.map((item, index) => [item, index === 0 || index === values.length - 1 ? item === -1 ? "智能" : `${item}s` : ""])) : { [min]: `${min}s`, [max]: `${max}s` };
     return (
-        <div className="rounded-md px-3 pb-4 pt-2" style={{ background: theme.node.fill }}>
-            <div className="mb-1 flex items-center justify-between text-xs" style={{ color: theme.node.muted }}><span>拖动选择</span><strong className="text-sm" style={{ color: theme.node.text }}>{value === -1 ? "智能" : `${value} 秒`}</strong></div>
+        <div className="rounded-lg border px-3 pb-3 pt-2" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>
+            <div className="mb-1 flex items-center justify-between text-xs leading-5" style={{ color: theme.node.muted }}><span>拖动选择</span><strong className="text-sm font-semibold" style={{ color: theme.node.text }}>{value === -1 ? "智能" : `${value} 秒`}</strong></div>
             <Slider min={min} max={max} step={values ? null : 1} marks={marks} value={value} tooltip={{ formatter: (current) => current === -1 ? "智能" : `${current} 秒` }} onChange={onChange} />
         </div>
     );

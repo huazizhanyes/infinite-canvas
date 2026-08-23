@@ -3,7 +3,9 @@ import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 import { getGenerationResourceNodes } from "@/lib/canvas/canvas-resource-references";
+import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import type { CanvasGraphIndex } from "@/lib/canvas/canvas-graph-index";
+import { getNodeDefinition } from "@/lib/canvas/node-registry";
 
 export type NodeGenerationContext = {
     prompt: string;
@@ -26,8 +28,11 @@ export type NodeGenerationInput = {
     audio?: ReferenceAudio;
 };
 
-export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string): NodeGenerationContext {
-    const inputs = buildNodeGenerationInputs(nodeId, nodes, connections);
+export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string, mentionReferences: CanvasResourceReference[] = []): NodeGenerationContext {
+    const inputs = [
+        ...buildNodeGenerationInputs(nodeId, nodes, connections),
+        ...buildMentionGenerationInputs(prompt, mentionReferences),
+    ].filter((input, index, all) => all.findIndex((candidate) => candidate.nodeId === input.nodeId) === index);
     const upstreamText = inputs
         .map((input) => input.text)
         .filter(Boolean)
@@ -46,6 +51,46 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
         videoCount: referenceVideos.length,
         audioCount: referenceAudios.length,
     };
+}
+
+function buildMentionGenerationInputs(prompt: string, references: CanvasResourceReference[]): NodeGenerationInput[] {
+    return references
+        .filter((reference) => reference.active && reference.source === "user-asset" && prompt.includes(reference.label))
+        .flatMap((reference): NodeGenerationInput[] => {
+            if (reference.kind === "image") {
+                return [{
+                    nodeId: reference.nodeId,
+                    type: "image",
+                    title: reference.title,
+                    image: {
+                        id: reference.assetId || reference.id,
+                        name: `${reference.title || reference.label}.png`,
+                        type: reference.mimeType || "image/png",
+                        dataUrl: reference.previewUrl || "",
+                        storageKey: reference.storageKey,
+                    },
+                }];
+            }
+            if (reference.kind === "video") {
+                return [{
+                    nodeId: reference.nodeId,
+                    type: "video",
+                    title: reference.title,
+                    video: {
+                        id: reference.assetId || reference.id,
+                        name: `${reference.title || reference.label}.mp4`,
+                        type: reference.mimeType || "video/mp4",
+                        url: reference.previewUrl || "",
+                        storageKey: reference.storageKey,
+                        bytes: reference.bytes,
+                        width: reference.width,
+                        height: reference.height,
+                        durationMs: reference.durationMs,
+                    },
+                }];
+            }
+            return [];
+        });
 }
 
 export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], graphIndex?: CanvasGraphIndex): NodeGenerationInput[] {
@@ -86,7 +131,9 @@ function readNodeTextInput(node: CanvasNodeData) {
 }
 
 function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
-    if (node.type !== CanvasNodeType.Image || !node.metadata?.content) return null;
+    if (!node.metadata?.content) return null;
+    const resourceKind = node.type === CanvasNodeType.Image || node.type === CanvasNodeType.ScriptAsset ? "image" : getNodeDefinition(node.type)?.resource?.(node)?.kind;
+    if (resourceKind !== "image") return null;
     return {
         id: node.id,
         name: `${node.title || node.id}.png`,

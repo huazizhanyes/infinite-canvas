@@ -58,6 +58,8 @@ export type ChannelModel = {
     name: string;
     displayName?: string;
     capability: ModelCapability;
+    icon?: string;
+    iconUrl?: string;
     script?: string;
     videoCapabilities?: VideoModelCapabilities;
 };
@@ -101,13 +103,6 @@ export type AiConfig = {
     videoParameters: Record<string, unknown>;
 };
 
-export type WebdavSyncConfig = {
-    url: string;
-    username: string;
-    password: string;
-    directory: string;
-    lastSyncedAt: string;
-};
 export type ConfigTabKey = "preferences";
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
@@ -159,22 +154,12 @@ export const defaultConfig: AiConfig = {
     videoParameters: {},
 };
 
-export const defaultWebdavSyncConfig: WebdavSyncConfig = {
-    url: "",
-    username: "",
-    password: "",
-    directory: "infinite-canvas",
-    lastSyncedAt: "",
-};
-
 type ConfigStore = {
     config: AiConfig;
-    webdav: WebdavSyncConfig;
     isConfigOpen: boolean;
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
-    updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean, tab?: ConfigTabKey) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
@@ -210,6 +195,11 @@ export function videoCapabilitiesOf(config: AiConfig, value: string) {
     return findChannelModel(config, value)?.model.videoCapabilities;
 }
 
+export function modelIconOf(config: AiConfig, value: string) {
+    const model = findChannelModel(config, value)?.model;
+    return model ? { icon: model.icon, iconUrl: model.iconUrl, capability: model.capability } : undefined;
+}
+
 export function modelMatchesCapability(config: AiConfig, value: string, capability?: ModelCapability) {
     if (!capability) return true;
     return modelCapabilityOf(config, value) === capability;
@@ -234,7 +224,6 @@ export const useConfigStore = create<ConfigStore>()(
     persist(
         (set, get) => ({
             config: defaultConfig,
-            webdav: defaultWebdavSyncConfig,
             isConfigOpen: false,
             configTab: "preferences",
             shouldPromptContinue: false,
@@ -242,13 +231,6 @@ export const useConfigStore = create<ConfigStore>()(
                 set((state) => ({
                     config: {
                         ...state.config,
-                        [key]: value,
-                    },
-                })),
-            updateWebdavConfig: (key, value) =>
-                set((state) => ({
-                    webdav: {
-                        ...state.webdav,
                         [key]: value,
                     },
                 })),
@@ -264,18 +246,16 @@ export const useConfigStore = create<ConfigStore>()(
                 setItem: (name, value) => localForageStorage.setItem(accountScopedKey(name), value),
                 removeItem: (name) => localForageStorage.removeItem(accountScopedKey(name)),
             })),
-            partialize: (state) => ({ config: state.config, webdav: state.webdav }),
+            partialize: (state) => ({ config: state.config }),
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
-                const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
                 const config = { ...defaultConfig, ...persistedConfig };
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
                 const channels = normalizeChannels(config);
                 const models = modelOptionsFromChannels(channels);
                 return {
                     ...current,
-                    webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
                     config: {
                         ...config,
                         channelMode: "local",
@@ -306,7 +286,7 @@ export const useConfigStore = create<ConfigStore>()(
 );
 
 export async function rehydrateConfigForAccount() {
-    useConfigStore.setState({ config: defaultConfig, webdav: defaultWebdavSyncConfig });
+    useConfigStore.setState({ config: defaultConfig });
     await useConfigStore.persist.rehydrate();
 }
 
@@ -325,9 +305,11 @@ export function normalizeChannelModels(models: Array<string | ChannelModel> | un
         seen.add(name);
         const capability = typeof item === "string" ? guessCapability(name) : item.capability || guessCapability(name);
         const displayName = typeof item === "string" ? undefined : item.displayName?.trim() || undefined;
+        const icon = typeof item === "string" ? undefined : item.icon?.trim() || undefined;
+        const iconUrl = typeof item === "string" ? undefined : item.iconUrl?.trim() || undefined;
         const script = typeof item === "string" ? undefined : item.script?.trim() || undefined;
         const videoCapabilities = typeof item === "string" ? undefined : item.videoCapabilities;
-        result.push({ name, displayName, capability, script, videoCapabilities });
+        result.push({ name, displayName, capability, icon, iconUrl, script, videoCapabilities });
     }
     return result;
 }

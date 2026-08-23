@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { ArrowUp, LoaderCircle, Square } from "lucide-react";
-import { Button, Segmented, Select, Tag, Tooltip } from "antd";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, Clapperboard, Square } from "lucide-react";
+import { Button, Dropdown, Segmented, Select, Tag, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, modelMatchesCapability, modelOptionName, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, videoCapabilitiesOf, type AiConfig } from "@/stores/use-config-store";
@@ -50,10 +50,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const mode = defaultMode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
     const videoCapabilities = mode === "video" ? videoCapabilitiesOf(config, config.model) : undefined;
+    const videoMode = mode === "video" ? (videoCapabilities?.modes.includes(config.videoMode) ? config.videoMode : videoCapabilities?.modes[0] || config.videoMode) : "";
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
+    const manualVideoModeRef = useRef(false);
     const [textAction, setTextAction] = useState<CanvasTextOperation>("polish");
     const [textScope, setTextScope] = useState<"full" | "selection">(selectedText.trim() ? "selection" : "full");
     const connection = useUserStore((state) => state.connection);
@@ -78,6 +80,16 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         if (!selectedText.trim()) setTextScope("full");
         else setTextScope((current) => current === "selection" ? current : "full");
     }, [selectedText]);
+
+    useEffect(() => {
+        if (mode !== "video" || !videoCapabilities?.modes.includes("image2video")) return;
+        const hasMedia = hasMentionedMediaReference(prompt, mentionReferences);
+        if (!hasMedia) {
+            manualVideoModeRef.current = false;
+            return;
+        }
+        if (!manualVideoModeRef.current && config.videoMode !== "image2video") onConfigChange(node.id, { videoMode: "image2video" });
+    }, [config.videoMode, mentionReferences, mode, node.id, onConfigChange, prompt, videoCapabilities]);
 
     useEffect(() => {
         if (mode === "text" || !official || !connection || !quoteEligible) {
@@ -115,7 +127,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
           : !quoteEligible
             ? "输入后计算"
             : quoteState === "loading" || quoteState === "idle"
-              ? "报价中..."
+               ? ""
               : quoteState === "error"
                 ? quoteError.includes("MODEL_PRICE") ? "模型暂未开放" : quoteError || "报价失败"
                 : quote
@@ -124,7 +136,15 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
+        if (mode === "video" && videoCapabilities?.modes.includes("image2video") && !manualVideoModeRef.current && hasMentionedMediaReference(value, mentionReferences) && config.videoMode !== "image2video") {
+            onConfigChange(node.id, { videoMode: "image2video" });
+        }
         if (!isEditingExistingContent) onPromptChange(node.id, value);
+    };
+
+    const changeVideoMode = (value: string) => {
+        manualVideoModeRef.current = true;
+        onConfigChange(node.id, { videoMode: value });
     };
 
     const submit = () => {
@@ -149,7 +169,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 references={mentionReferences}
                 onChange={updatePrompt}
                 onSubmit={submit}
-                className={`thin-scrollbar w-full resize-none rounded-md border-0 px-3 py-2 text-[12px] leading-5 outline-none ${mode === "video" ? "h-28 min-h-28" : "h-16"}`}
+                richMentions={mode === "image" || mode === "video"}
+                className={`thin-scrollbar w-full resize-none rounded-md border-0 px-3 py-2 text-[12px] leading-5 outline-none ${mode === "video" ? "h-40 min-h-40" : mode === "image" ? "h-32 min-h-32" : "h-16"}`}
                 style={{ background: theme.node.fill, color: theme.node.text }}
                 placeholder={mode === "text" && isEditingExistingContent ? textAction === "custom" ? "输入自定义处理要求" : "可选：补充处理要求" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
@@ -160,7 +181,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 {selectedText.trim() ? <Tag bordered={false}>已选 {selectedText.length} 字</Tag> : <span className="text-[11px] opacity-60">编辑文字时选中一段即可局部处理</span>}
             </div> : null}
 
-            <div className="mt-1.5 flex min-w-0 items-center gap-1">
+            <div className={`mt-1.5 flex min-w-0 items-center gap-1 ${mode === "video" ? "max-w-[560px]" : mode === "text" ? "max-w-[420px]" : ""}`}>
                 <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
                     {mode !== "audio" ? <CanvasPromptLibrary onSelect={updatePrompt} /> : null}
                     {mode === "image" ? (
@@ -177,12 +198,33 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </>
                     ) : mode === "video" ? (
                         <>
-                            <Tooltip title="不卡人脸不代表换脸、口型驱动或强身份一致性">
-                                <span className="inline-flex h-7 min-w-0 max-w-[184px] flex-1 items-center justify-between gap-2 rounded-md border px-2 text-[11px]" style={{ borderColor: theme.node.stroke }}>
-                                    <strong className="truncate">{videoCapabilities?.displayName || "视频模型"}</strong>{videoCapabilities?.faceFriendly ? <span className="shrink-0 text-emerald-500">不卡人脸</span> : null}
-                                </span>
-                            </Tooltip>
-                            <CanvasVideoSettingsPopover config={config} hasReferenceVideo={mentionReferences.some((reference) => reference.active && reference.kind === "video")} buttonClassName="!h-7 !max-w-[126px] !justify-start !rounded-md !px-1.5 !text-[11px]" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" className="!h-7 !min-w-0 !max-w-[184px] flex-1 !px-1.5 !text-[11px]" onMissingConfig={() => openConfigDialog(true)} />
+                            <Dropdown
+                                trigger={["click"]}
+                                placement="topLeft"
+                                menu={{
+                                    items: (videoCapabilities?.modes || []).map((value) => ({
+                                        key: value,
+                                        label: videoModeLabel(value),
+                                        onClick: () => changeVideoMode(value),
+                                    })),
+                                }}
+                            >
+                                <Button
+                                    type="text"
+                                    size="small"
+                                    className="!h-7 !min-w-0 !max-w-[154px] !justify-start !rounded-md !px-1.5 !text-[11px]"
+                                    style={{ background: theme.node.fill, color: theme.node.text }}
+                                    icon={<Clapperboard className="size-3.5 shrink-0" />}
+                                    title="切换生成模式；输入 @ 素材时会自动切换到全能参考"
+                                    onMouseDown={(event) => event.stopPropagation()}
+                                    onPointerDown={(event) => event.stopPropagation()}
+                                >
+                                    <span className="truncate">{videoModeLabel(videoMode)}</span>
+                                    {mentionedMediaReferenceCount(prompt, mentionReferences) > 0 ? <span className="ml-1 shrink-0 opacity-60">{mentionedMediaReferenceCount(prompt, mentionReferences)}项</span> : null}
+                                </Button>
+                            </Dropdown>
+                            <CanvasVideoSettingsPopover config={config} quote={quoteState === "ready" ? quote : null} hasReferenceVideo={mentionReferences.some((reference) => reference.active && reference.kind === "video" && (reference.source !== "user-asset" || prompt.includes(reference.label)))} buttonClassName="!h-7 !max-w-[126px] !justify-start !rounded-md !px-1.5 !text-[11px]" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                         </>
                     ) : mode === "audio" ? (
                         <>
@@ -212,7 +254,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
 function buildQuotePayload(config: AiConfig, mode: CanvasNodeGenerationMode, node: CanvasNodeData, prompt: string, references: CanvasResourceReference[]) {
     const requestId = `preview-${node.id}`;
-    const activeReferences = references.filter((reference) => reference.active);
+    const activeReferences = references.filter((reference) => reference.active && (reference.source !== "user-asset" || prompt.includes(reference.label)));
     if (mode === "text") {
         const request = resolveModelRequestConfig(config, config.model);
         return { feature: "canvas.text.generate", requestId, model: request.model, input: [{ role: "user", content: prompt.trim() }] };
@@ -226,15 +268,27 @@ function buildQuotePayload(config: AiConfig, mode: CanvasNodeGenerationMode, nod
         const request = resolveModelRequestConfig(config, config.model);
         return { feature: "canvas.audio.speech", requestId, model: request.model, input: prompt.trim(), voiceId: Number(config.audioVoice || 0), format: config.audioFormat, speed: Number(config.audioSpeed || 1) };
     }
+    const capabilities = videoCapabilitiesOf(config, config.model);
+    const quality = capabilities?.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities?.qualities[0]?.quality || config.vquality;
+    const aspectRatio = capabilities?.aspectRatios.includes(config.size) ? config.size : capabilities?.aspectRatios[0] || config.size;
+    const modes = capabilities?.modes || [];
+    const videoMode = modes.includes(config.videoMode) ? config.videoMode : modes[0] || config.videoMode;
+    const requestedDuration = Math.floor(Number(config.videoSeconds));
+    const durationOptions = [...(capabilities?.duration.options || [])].sort((left, right) => left - right);
+    const duration = durationOptions.length
+        ? (durationOptions.includes(requestedDuration) ? requestedDuration : durationOptions[0])
+        : capabilities
+          ? Math.max(capabilities.duration.min ?? 1, Math.min(capabilities.duration.max ?? 60, Number.isFinite(requestedDuration) ? requestedDuration : capabilities.duration.min ?? 5))
+          : Number(config.videoSeconds || 0);
     return {
         feature: "canvas.video.generate",
         requestId,
         modelId: modelOptionName(config.model),
         prompt: "",
-        aspectRatio: config.size,
-        quality: config.vquality,
-        duration: Number(config.videoSeconds || 0),
-        mode: config.videoMode,
+        aspectRatio,
+        quality,
+        duration,
+        mode: videoMode,
         imageAssetIds: activeReferences.filter((reference) => reference.kind === "image").map((reference) => reference.id),
         videoAssetIds: activeReferences.filter((reference) => reference.kind === "video").map((reference) => reference.id),
         audioAssetIds: activeReferences.filter((reference) => reference.kind === "audio").map((reference) => reference.id),
@@ -264,6 +318,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         vquality: node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality,
         videoGenerateAudio: node.metadata?.generateAudio || globalConfig.videoGenerateAudio || defaultConfig.videoGenerateAudio,
         videoWatermark: node.metadata?.watermark || globalConfig.videoWatermark || defaultConfig.videoWatermark,
+        videoMode: node.metadata?.videoMode || globalConfig.videoMode || defaultConfig.videoMode,
         videoParameters: node.metadata?.videoParameters && typeof node.metadata.videoParameters === "object" ? node.metadata.videoParameters : globalConfig.videoParameters || defaultConfig.videoParameters,
         audioVoice: node.metadata?.audioVoice || globalConfig.audioVoice || defaultConfig.audioVoice,
         audioVoiceName: node.metadata?.audioVoiceName || globalConfig.audioVoiceName || defaultConfig.audioVoiceName,
@@ -275,9 +330,9 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
 }
 
 function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: boolean, hasTextContent: boolean) {
-    if (mode === "video") return "描述要生成的视频内容";
+    if (mode === "video") return "上传参考图片、音频等，输入文字或 @ 参考内容，自由组合图、文、音、视频多元素，定义精彩互动。例如：@图片1 模仿 @视频1 的动作，音色参考 @音频1。可将文件拖到此处上传。";
     if (mode === "audio") return "输入需要配音的文本，或连接上游文本节点";
-    if (mode === "image") return hasImageContent ? "请输入你想要把这张图修改成什么" : "描述要生成的图片内容";
+    if (mode === "image") return hasImageContent ? "请输入你想要把这张图修改成什么" : "上传参考图、输入文字或 @ 主体，描述你想生成的图片。";
     return hasTextContent ? "请输入你想要将本段文本修改成什么" : "请输入你想要生成的文本内容";
 }
 
@@ -293,6 +348,21 @@ function videoConfigPatch(key: keyof AiConfig, value: string) {
         }
     }
     return { [key]: value };
+}
+
+function mentionedMediaReferenceCount(prompt: string, references: CanvasResourceReference[]) {
+    return references.filter((reference) => reference.active && reference.kind !== "text" && prompt.includes(reference.label)).length;
+}
+
+function hasMentionedMediaReference(prompt: string, references: CanvasResourceReference[]) {
+    return mentionedMediaReferenceCount(prompt, references) > 0;
+}
+
+function videoModeLabel(mode: string) {
+    if (mode === "text2video") return "文生视频";
+    if (mode === "image2video") return "全能参考";
+    if (mode === "frames2video") return "首尾帧";
+    return mode || "视频模式";
 }
 
 function audioConfigPatch(key: CanvasAudioSettingKey, value: string) {

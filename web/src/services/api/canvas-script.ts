@@ -126,6 +126,11 @@ export const canvasScriptApi = {
     analyzeEpisode: (connection: UserAssetConnection, id: string, requestId: string, model?: string) => request<ScriptAnalysisRun>(connection, "post", `/script-episodes/${id}/analyze`, { requestId, model }),
     getAnalysis: (connection: UserAssetConnection, id: string) => request<ScriptAnalysisRun>(connection, "get", `/script-analysis/${id}`),
     listAssets: (connection: UserAssetConnection, setId: string, type?: ScriptAssetType) => request<{ assets: ScriptAsset[]; pending: ScriptPendingMention[] }>(connection, "get", `/script-sets/${setId}/assets`, undefined, type ? { type } : undefined),
+    archiveAssets: async (connection: UserAssetConnection, setId: string) => {
+        const { assets } = await canvasScriptApi.listAssets(connection, setId);
+        await Promise.all(assets.map((asset) => canvasScriptApi.updateAsset(connection, asset.id, { status: "archived" })));
+        return assets.length;
+    },
     updateAsset: (connection: UserAssetConnection, id: string, data: Partial<Pick<ScriptAsset, "name" | "aliases" | "identity" | "visualDescription" | "imagePrompt" | "status">>) => request<ScriptAsset>(connection, "put", `/script-assets/${id}`, data),
     mergeAsset: (connection: UserAssetConnection, id: string, sourceAssetId: string) => request(connection, "post", `/script-assets/${id}/merge`, { sourceAssetId }),
     resolveMention: (connection: UserAssetConnection, id: string, decision: "reuse" | "variant" | "new", assetId?: string) => request<ScriptPendingMention>(connection, "post", `/script-mentions/${id}/resolve`, { decision, assetId }),

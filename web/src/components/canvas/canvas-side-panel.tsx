@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Empty, Input, Select, Tag } from "antd";
-import { BookOpenText, Boxes, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Images, ListTree, Music2, ScanText, Search, Square, Type, Video } from "lucide-react";
+import { Boxes, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Images, ListTree, Music2, ScanText, Search, Square, Type, Video } from "lucide-react";
 
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { readCanvasHostMessage } from "@/lib/canvas-host-bridge";
@@ -31,7 +31,6 @@ const NODE_TYPE_ICON: Record<string, typeof Square> = {
     [CanvasNodeType.Audio]: Music2,
     [CanvasNodeType.Text]: Type,
     [CanvasNodeType.Group]: Square,
-    [CanvasNodeType.ScriptSet]: BookOpenText,
     [CanvasNodeType.AssetExtraction]: ScanText,
     [CanvasNodeType.ScriptAsset]: Boxes,
 };
@@ -120,7 +119,6 @@ const NODE_FILTER_OPTIONS = [
     { label: "文本", value: CanvasNodeType.Text },
     { label: "音频", value: CanvasNodeType.Audio },
     { label: "分组", value: CanvasNodeType.Group },
-    { label: "剧本集", value: CanvasNodeType.ScriptSet },
     { label: "资产提取", value: CanvasNodeType.AssetExtraction },
     { label: "资产", value: CanvasNodeType.ScriptAsset },
 ];

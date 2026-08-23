@@ -46,6 +46,7 @@ type CanvasNodeProps = {
     batchOpening?: boolean;
     batchRecovering?: boolean;
     batchMotion?: { x: number; y: number; index: number };
+    isBatchPrimary?: boolean;
     onMouseDown: (event: React.MouseEvent, nodeId: string) => void;
     onSelectCapture?: (event: React.MouseEvent, nodeId: string) => void;
     onHoverStart: (nodeId: string) => void;
@@ -84,6 +85,7 @@ type NodeContentRendererProps = {
     onRetry?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
+    isBatchPrimary: boolean;
     groupChildCount: number;
 };
 
@@ -110,6 +112,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     batchOpening = false,
     batchRecovering = false,
     batchMotion,
+    isBatchPrimary = false,
     onMouseDown,
     onSelectCapture,
     onHoverStart,
@@ -448,6 +451,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onRetry={onRetry}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
                         onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
+                        isBatchPrimary={isBatchPrimary}
                         groupChildCount={groupChildCount}
                     />
                 </div>
@@ -488,7 +492,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             {showPanel && !isGroup && renderPanel ? (
                 <div
                     data-canvas-node-panel={data.id}
-                    className={`absolute left-1/2 z-[70] max-w-[calc(100vw-24px)] ${data.type === CanvasNodeType.Video ? "w-[560px]" : "w-[420px]"}`}
+                    className={`absolute left-1/2 z-[70] max-w-[calc(100vw-24px)] ${data.type === CanvasNodeType.Text ? "w-[504px]" : "w-[520px]"}`}
                     style={{
                         top: "calc(100% + 8px)",
                         transform: `translateX(-50%) scale(${screenFixedScale(scale)})`,
@@ -504,6 +508,14 @@ export const CanvasNode = React.memo(function CanvasNode({
 
 function NodeContent(props: NodeContentRendererProps) {
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
+    // Asset storyboard owns its recovery UI and must remain mounted after a refresh.
+    if (props.node.type === CanvasNodeType.AssetStoryboard) {
+        const definition = getNodeDefinition(props.node.type);
+        if (definition?.Content && props.pluginContext) {
+            const PluginContent = definition.Content;
+            return <PluginContent ctx={props.pluginContext} />;
+        }
+    }
     if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
@@ -664,7 +676,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, textContentRe
 
 function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference }) {
     return (
-        <span className={`pointer-events-none absolute right-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "bg-[#2f80ff] text-white shadow-sm" : "bg-black/35 text-white/75"}`}>
+        <span className={`pointer-events-none absolute left-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "bg-[#2f80ff] text-white shadow-sm" : "bg-black/35 text-white/75"}`}>
             {reference.label}
         </span>
     );
@@ -698,6 +710,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
             batchRecovering={props.batchRecovering}
             onToggleBatch={props.onToggleBatch}
             onSetBatchPrimary={props.onSetBatchPrimary}
+            isBatchPrimary={props.isBatchPrimary}
         />
     );
 }
@@ -797,6 +810,7 @@ function ImageContent({
     batchRecovering,
     onToggleBatch,
     onSetBatchPrimary,
+    isBatchPrimary,
 }: {
     node: CanvasNodeData;
     isBatchRoot: boolean;
@@ -806,6 +820,7 @@ function ImageContent({
     batchRecovering: boolean;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
+    isBatchPrimary: boolean;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isBatchChild = Boolean(node.metadata?.batchRootId);
@@ -841,7 +856,7 @@ function ImageContent({
             {isBatchChild ? (
                 <button
                     type="button"
-                    className="absolute right-2 top-2 z-30 flex h-8 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium opacity-0 shadow-[0_8px_20px_rgba(68,64,60,.13)] backdrop-blur-md transition group-hover/batch:opacity-100 hover:bg-white/5"
+                    className={`absolute right-2 top-2 z-30 flex h-8 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium shadow-[0_8px_20px_rgba(68,64,60,.13)] backdrop-blur-md transition hover:bg-white/5 ${isBatchPrimary ? "opacity-100" : "opacity-0 group-hover/batch:opacity-100"}`}
                     style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
                     onClick={(event) => {
                         event.stopPropagation();
@@ -850,8 +865,8 @@ function ImageContent({
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                 >
-                    <Star className="size-3.5 text-[#2f80ff]" />
-                    设为主图
+                    <Star className={`size-3.5 text-[#2f80ff] ${isBatchPrimary ? "fill-[#2f80ff]" : ""}`} />
+                    {isBatchPrimary ? "主图" : "设为主图"}
                 </button>
             ) : null}
         </BatchFrame>

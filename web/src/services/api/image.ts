@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios, { type AxiosResponse } from "axios";
 
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
@@ -708,7 +708,11 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.imageModel || config.model);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    const script = resolveModelScript(config, config.imageModel || config.model);
+    const connection = useUserStore.getState().connection;
+    const usesCanvasBilling = !!connection && requestConfig.baseUrl.replace(/\/+$/, "") === connection.canvasBaseUrl.replace(/\/+$/, "");
+    // The official canvas channel must use the server billing/task route even
+    // when an old persisted model entry still contains a custom script.
+    const script = usesCanvasBilling ? "" : resolveModelScript(config, config.imageModel || config.model);
     if (script) {
         const quality = normalizeQuality(config.quality);
         const requestSize = resolveRequestSize(quality, config.size);
@@ -737,8 +741,6 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     try {
-        const connection = useUserStore.getState().connection;
-        const usesCanvasBilling = !!connection && requestConfig.baseUrl.replace(/\/+$/, "") === connection.canvasBaseUrl.replace(/\/+$/, "");
         const requestId = nanoid();
         const quote = usesCanvasBilling ? await canvasBillingApi.quote(connection, {
             feature: "canvas.image.generate", requestId, model: requestConfig.model,
@@ -774,7 +776,10 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const requestConfig = resolveModelRequestConfig(config, config.imageModel || config.model);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
-    const script = resolveModelScript(config, config.imageModel || config.model);
+    const connection = useUserStore.getState().connection;
+    const usesCanvasBilling = !!connection && requestConfig.baseUrl.replace(/\/+$/, "") === connection.canvasBaseUrl.replace(/\/+$/, "");
+    // Do not let a stale custom script bypass the official canvas edit API.
+    const script = usesCanvasBilling ? "" : resolveModelScript(config, config.imageModel || config.model);
     if (script) {
         const quality = normalizeQuality(config.quality);
         const requestSize = resolveRequestSize(quality, config.size);
@@ -807,34 +812,52 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const formData = new FormData();
     formData.set("model", requestConfig.model);
     formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
-    formData.set("n", String(n));
+    // 使用与报价接口一致的规范字段，避免 multipart 表单的别名字段在后端重建报价参数时产生差异。
+    formData.set("count", String(n));
     formData.set("response_format", "b64_json");
-    formData.set("output_format", IMAGE_OUTPUT_FORMAT);
+    formData.set("outputFormat", IMAGE_OUTPUT_FORMAT);
     if (quality) {
         formData.set("quality", quality);
     }
     if (requestSize) {
         formData.set("size", requestSize);
     }
-    const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
+    const files = await Promise.all(references.map(async (image) => {
+        const dataUrl = await imageToDataUrl(image);
+        if (!dataUrl || !dataUrl.startsWith("data:")) throw new Error("参考图片读取失败，未生成编辑请求");
+        return dataUrlToFile({ ...image, dataUrl });
+    }));
     files.forEach((file) => formData.append("image", file));
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
     try {
-        const connection = useUserStore.getState().connection;
-        const usesCanvasBilling = !!connection && requestConfig.baseUrl.replace(/\/+$/, "") === connection.canvasBaseUrl.replace(/\/+$/, "");
+        let quotePayload: Record<string, unknown> | null = null;
         if (usesCanvasBilling) {
             const requestId = nanoid();
-            const referenceCount = files.length + (mask ? 1 : 0);
-            const quote = await canvasBillingApi.quote(connection, {
+            // 后端的计费输入只统计会进入 `references` 的 image/reference 文件；蒙版字段
+            // 用于编辑处理，不属于参考图数量，否则报价 hash 会与提交阶段必然不一致。
+            const referenceCount = files.length;
+            quotePayload = {
                 feature: "canvas.image.edit", requestId, model: requestConfig.model,
                 prompt: withSystemPrompt(requestConfig, requestPrompt), count: n, ...(quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}), outputFormat: IMAGE_OUTPUT_FORMAT, referenceCount,
-            }, options?.signal);
+            };
+            const quote = await canvasBillingApi.quote(connection, quotePayload, options?.signal);
             formData.set("requestId", requestId);
             formData.set("quoteToken", quote.quoteToken);
+            formData.set("referenceCount", String(referenceCount));
         }
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
+        let response: AxiosResponse<ImageApiResponse>;
+        try {
+            response = await axios.post<ImageApiResponse>(usesCanvasBilling && connection ? `${connection.canvasBaseUrl.replace(/\/+$/, "")}/v1/images/edits` : aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
+        } catch (error) {
+            const code = axios.isAxiosError<{ code?: string }>(error) ? error.response?.data?.code : undefined;
+            if (code !== "QUOTE_PARAMETERS_CHANGED" || !connection || !quotePayload) throw error;
+            // 报价期间模型/价格配置可能刚刚刷新；409 发生在扣费前，重新报价一次即可安全重试。
+            const refreshedQuote = await canvasBillingApi.quote(connection, quotePayload, options?.signal);
+            formData.set("quoteToken", refreshedQuote.quoteToken);
+            response = await axios.post<ImageApiResponse>(usesCanvasBilling && connection ? `${connection.canvasBaseUrl.replace(/\/+$/, "")}/v1/images/edits` : aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
+        }
         const payload = await resolveAsyncImagePayload(requestConfig, response.data, options?.signal);
         const images = parseImagePayload(payload);
         return images;

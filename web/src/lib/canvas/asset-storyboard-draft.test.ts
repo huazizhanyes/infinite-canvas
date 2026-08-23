@@ -1,0 +1,42 @@
+import { describe, expect, it } from "vitest";
+
+import { buildAssetStoryboardDraft } from "@/lib/canvas/asset-storyboard-draft";
+import type { ScriptAsset } from "@/services/api/canvas-script";
+import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+
+const source: CanvasNodeData = {
+    id: "extract-1",
+    type: CanvasNodeType.AssetExtraction,
+    title: "资产提取",
+    position: { x: 0, y: 0 },
+    width: 680,
+    height: 560,
+    metadata: { content: "林夏推开车站的门。" },
+};
+
+function asset(id: string, type: ScriptAsset["type"], name: string, image = false): ScriptAsset {
+    return { id, type, name, aliases: [], identity: {}, visualDescription: `${name}视觉描述`, imagePrompt: `${name}提示词`, manuallyEdited: false, status: "active", mentionCount: 1, image: image ? { id: `${id}-image`, imageUrl: `https://example.test/${id}.png`, status: "success", selected: true } : null, variants: [] };
+}
+
+describe("buildAssetStoryboardDraft", () => {
+    it("creates a reviewable text/video chain and connects asset images", () => {
+        const assets = [asset("c1", "character", "林夏", true), asset("s1", "scene", "车站")];
+        const nodes: CanvasNodeData[] = [source, { id: "script-asset-c1", type: CanvasNodeType.ScriptAsset, title: "林夏", position: { x: 800, y: 0 }, width: 560, height: 320, metadata: { assetExtractionNodeId: source.id, scriptAssetId: "c1", content: "blob:image" } }];
+        const draft = buildAssetStoryboardDraft(source, assets, nodes, []);
+        expect(draft.storyboardContent).toContain("林夏");
+        expect(draft.videoPrompt).toContain("图片1");
+        expect(draft.ops.filter((op) => op.type === "add_node")).toHaveLength(2);
+        expect(draft.ops).toContainEqual(expect.objectContaining({ type: "connect_nodes", fromNodeId: "script-asset-c1", toNodeId: draft.videoNodeId }));
+        expect(draft.ops).toContainEqual({ type: "select_nodes", ids: [draft.videoNodeId] });
+    });
+
+    it("reuses existing drafts instead of creating duplicates", () => {
+        const storyboard: CanvasNodeData = { id: "storyboard-1", type: CanvasNodeType.Text, title: "旧分镜", position: { x: 0, y: 0 }, width: 340, height: 420, metadata: { assetExtractionStoryboardSourceId: source.id } };
+        const video: CanvasNodeData = { id: "video-1", type: CanvasNodeType.Video, title: "旧视频", position: { x: 0, y: 0 }, width: 420, height: 236, metadata: { assetExtractionVideoDraftSourceId: source.id } };
+        const draft = buildAssetStoryboardDraft(source, [asset("c1", "character", "林夏")], [source, storyboard, video], []);
+        expect(draft.storyboardNodeId).toBe("storyboard-1");
+        expect(draft.videoNodeId).toBe("video-1");
+        expect(draft.ops.filter((op) => op.type === "add_node")).toHaveLength(0);
+        expect(draft.ops.filter((op) => op.type === "update_node")).toHaveLength(2);
+    });
+});

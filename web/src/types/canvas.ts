@@ -15,10 +15,9 @@ export enum CanvasNodeType {
     Video = "video",
     Audio = "audio",
     Group = "group",
-    ScriptSet = "script-set",
     AssetExtraction = "asset-extraction",
     ScriptAsset = "script-asset",
-    Storyboard = "storyboard",
+    AssetStoryboard = "asset-storyboard",
 }
 
 // 节点类型放开为字符串,内置类型用 CanvasNodeType,插件类型为 "<pluginId>:<name>"
@@ -28,6 +27,44 @@ export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
 export type CanvasTextOperation = "continue" | "polish" | "expand" | "shorten" | "summarize" | "translate" | "custom";
+
+export type AssetStoryboardShot = {
+    id: string;
+    index: number;
+    durationSec: number;
+    title: string;
+    sourceExcerpt: string;
+    storyPurpose: string;
+    visualDescription: string;
+    shotSize: string;
+    lighting: string;
+    dialogue: string;
+    sound: string;
+    cameraMovement: string;
+    characters: string[];
+    assetIds: string[];
+    previousHandoff: string;
+    startState: string;
+    endState: string;
+    continuity: string;
+    negativeConstraints: string[];
+    finalPrompt?: string;
+    promptStatus: "idle" | "generating" | "success" | "error";
+    promptError?: string;
+    locked?: boolean;
+};
+
+export type AssetStoryboardState = {
+    version: 1;
+    sourceNodeId: string;
+    contentHash: string;
+    status: "queued" | "analyzing" | "ready" | "error";
+    errorDetails?: string;
+    title: string;
+    totalDurationSec: number;
+    continuityBible: string;
+    shots: AssetStoryboardShot[];
+};
 
 export type CanvasNodeMetadata = {
     content?: string;
@@ -93,8 +130,6 @@ export type CanvasNodeMetadata = {
     scriptSetExpanded?: boolean;
     scriptAssetId?: string;
     scriptVariantId?: string;
-    storyboardId?: string;
-    storyboardNodeId?: string;
     scriptAssetImageId?: string;
     scriptAssetImageBatchId?: string;
     scriptAssetImageTaskId?: string;
@@ -112,11 +147,21 @@ export type CanvasNodeMetadata = {
     assetExtractionPendingCount?: number;
     assetExtractionImageBatchIds?: string[];
     assetExtractionUpdatedAt?: number;
+    assetExtractionContentHash?: string;
+    assetExtractionStoryboardNodeId?: string;
+    assetExtractionVideoDraftNodeId?: string;
+    assetExtractionStoryboardSourceId?: string;
+    assetExtractionVideoDraftSourceId?: string;
+    assetStoryboard?: AssetStoryboardState;
+    assetStoryboardSourceId?: string;
+    assetStoryboardShotId?: string;
+    assetStoryboardShotIndex?: number;
     scriptAssetType?: "character" | "scene" | "prop";
     scriptAssetVisualDescription?: string;
     scriptAssetImagePrompt?: string;
     scriptAssetImageStatus?: string;
     scriptAssetStale?: boolean;
+    sourceScriptAssetId?: string;
     sourceNodeId?: string;
     sourceOperation?: CanvasTextOperation;
     sourceScope?: "full" | "selection";

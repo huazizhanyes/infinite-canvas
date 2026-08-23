@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
 import { App, Button, Modal, Select, Tag } from "antd";
-import { Boxes, ImagePlus, LoaderCircle, RectangleHorizontal, RefreshCw, Sparkles } from "lucide-react";
+import { Boxes, Clapperboard, ImagePlus, LoaderCircle, RectangleHorizontal, RefreshCw, Sparkles } from "lucide-react";
 import { nanoid } from "nanoid";
 
 import { waitForAssetAnalysis, waitForAssetImages } from "@/components/canvas/asset-extraction/asset-extraction-tasks";
 import { ModelPicker } from "@/components/model-picker";
 import { CanvasQuoteDisplay } from "@/components/canvas/canvas-quote-display";
 import { buildAssetExtractionOps, generationImageMetadata } from "@/lib/canvas/asset-extraction-layout";
+import { assetExtractionContentHash } from "@/lib/canvas/asset-storyboard-draft";
+import { ASSET_IMAGE_STATE_CHANGED_EVENT, inspectAssetReadiness } from "@/lib/canvas/asset-storyboard";
 import { canvasBillingApi, canvasCompactQuoteLabel, type CanvasBillingQuote } from "@/services/api/canvas-billing";
 import { canvasScriptApi, type ScriptAsset, type ScriptGenerationImage, type ScriptPendingMention } from "@/services/api/canvas-script";
 import { modelOptionName, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -36,6 +38,7 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
     const [quoteState, setQuoteState] = useState<"idle" | "loading" | "ready" | "error">("idle");
     const [quoteError, setQuoteError] = useState("");
     const [quoteRequestId, setQuoteRequestId] = useState(() => nanoid());
+    const [, setReadinessRevision] = useState(0);
     const ctxRef = useRef(ctx);
     const resumedAnalysisRef = useRef<string | undefined>(undefined);
     const resumedImageBatchesRef = useRef(new Set<string>());
@@ -49,6 +52,10 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
         setQuoteRequestId(nanoid());
     }, [quoteKey]);
 
+    useEffect(() => ctx.on(ASSET_IMAGE_STATE_CHANGED_EVENT, (payload) => {
+        if ((payload as { sourceId?: string } | undefined)?.sourceId === ctx.node.id) setReadinessRevision((value) => value + 1);
+    }), [ctx]);
+
     useEffect(() => {
         if (!connection || !assets.length) return;
         const controller = new AbortController();
@@ -58,7 +65,7 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
             feature: "canvas.asset.image.generate",
             requestId: quoteRequestId,
             model: modelOptionName(imageModel),
-            count: 1,
+            count: assets.length,
             size: imageSizeForAspect(aspectRatio),
             quality: imageQuality,
             outputFormat: "png",
@@ -112,14 +119,29 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
             .catch((error) => ctxRef.current.updateMetadata({ assetExtractionStatus: "error", errorDetails: readError(error) }));
     }, [analyzing, connection, ctx.node.metadata?.assetExtractionRunId, loadAssets]);
 
-    const analyze = async () => {
+    const runAnalyze = async (clearExisting: boolean) => {
         if (!connection || !scriptSetId || !episodeId || analyzing) return;
         if (!content.trim()) {
             message.warning("请先输入小说或文案");
             return;
         }
+        if (clearExisting && assets.length) {
+            try {
+                await canvasScriptApi.archiveAssets(connection, scriptSetId);
+                const managedIds = ctxRef.current.getNodes()
+                    .filter((node) => node.type === CanvasNodeType.ScriptAsset && node.metadata?.assetExtractionNodeId === ctx.node.id)
+                    .map((node) => node.id);
+                if (managedIds.length) ctxRef.current.applyOps([{ type: "delete_node", ids: managedIds }]);
+                setAssets([]);
+                setPending([]);
+            } catch (error) {
+                message.error(`清空现有资产失败：${readError(error)}`);
+                return;
+            }
+        }
         ctx.updateMetadata({
             content,
+            assetExtractionContentHash: assetExtractionContentHash(content),
             assetExtractionVisualStyle: visualStyle,
             assetExtractionTextModel: textModel,
             assetExtractionImageModel: imageModel,
@@ -154,12 +176,27 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
         }
     };
 
+    const analyze = () => {
+        if (!assets.length) {
+            void runAnalyze(false);
+            return;
+        }
+        Modal.confirm({
+            title: "确认重新提取资产？",
+            content: `当前已有 ${assets.length} 个资产。继续后会清空现有资产并按最新正文重新提取。`,
+            okText: "清空并提取",
+            cancelText: "取消",
+            centered: true,
+            onOk: () => runAnalyze(true),
+        });
+    };
+
     const applyImages = useCallback(
         (images: ScriptGenerationImage[], _batchId: string) => {
             const nodes = ctx.getNodes();
             const ops = images.flatMap((image) => {
                 const node = nodes.find((item) => item.type === CanvasNodeType.ScriptAsset && item.metadata?.assetExtractionNodeId === ctx.node.id && item.metadata?.scriptAssetId === image.assetId);
-                return node ? [{ type: "update_node" as const, id: node.id, metadata: generationImageMetadata(image) }] : [];
+                return node ? [{ type: "update_node" as const, id: node.id, metadata: generationImageMetadata(image, _batchId) }] : [];
             });
             if (ops.length) ctx.applyOps(ops);
         },
@@ -190,18 +227,16 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
             await canvasScriptApi.updateSet(connection, scriptSetId, { visualStyle, aspectRatio, imageQuality });
             for (let offset = 0; offset < assets.length; offset += 50) {
                 const targets = assets.slice(offset, offset + 50).map((asset) => ({ assetId: asset.id }));
-                const requestId = offset === 0 ? quoteRequestId : nanoid();
-                const batchQuote = offset === 0
-                    ? quote
-                    : await canvasBillingApi.quote(connection, {
-                        feature: "canvas.asset.image.generate",
-                        requestId,
-                        model: modelOptionName(imageModel),
-                        count: 1,
-                        size: imageSizeForAspect(aspectRatio),
-                        quality: imageQuality,
-                        outputFormat: "png",
-                    });
+                const requestId = nanoid();
+                const batchQuote = await canvasBillingApi.quote(connection, {
+                    feature: "canvas.asset.image.generate",
+                    requestId,
+                    model: modelOptionName(imageModel),
+                    count: targets.length,
+                    size: imageSizeForAspect(aspectRatio),
+                    quality: imageQuality,
+                    outputFormat: "png",
+                });
                 if (!batchQuote?.canSubmit) throw new Error("图片余额不足，请先充值或调整账户权益");
                 const batch = await canvasScriptApi.generateAssets(connection, scriptSetId, targets, requestId, modelOptionName(imageModel), batchQuote.quoteToken);
                 resumedImageBatchesRef.current.add(batch.id);
@@ -221,6 +256,32 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
             setQuoteRequestId(nanoid());
         }
     };
+
+    const createStoryboardDraft = () => {
+        const current = ctxRef.current;
+        const source = current.getNode(current.node.id) || current.node;
+        const readiness = inspectAssetReadiness(source, assets, current.getNodes(), pending.length, assetExtractionContentHash(content));
+        if (!readiness.ready) {
+            message.warning(readiness.reason);
+            return;
+        }
+        const existing = current.getNodes().find((node) => node.type === CanvasNodeType.AssetStoryboard && node.metadata?.assetStoryboardSourceId === source.id);
+        if (existing) {
+            current.applyOps([{ type: "select_nodes", ids: [existing.id] }]);
+            message.info("已存在资产专属分镜节点");
+            return;
+        }
+        const id = nanoid();
+        current.applyOps([
+            { type: "add_node", id, nodeType: CanvasNodeType.AssetStoryboard, title: "资产专属分镜", position: { x: source.position.x + source.width + 96, y: source.position.y + source.height + 96 }, width: 300, height: 180, metadata: { assetStoryboardSourceId: source.id, status: "loading" } },
+            { type: "connect_nodes", id: nanoid(), fromNodeId: source.id, toNodeId: id },
+            { type: "select_nodes", ids: [id] },
+        ]);
+        message.success("已创建资产专属分镜节点");
+    };
+
+    const sourceContentChanged = Boolean(content.trim() && ctx.node.metadata?.assetExtractionContentHash && assetExtractionContentHash(content) !== ctx.node.metadata.assetExtractionContentHash);
+    const storyboardReadiness = inspectAssetReadiness(ctx.node, assets, ctx.getNodes(), pending.length, assetExtractionContentHash(content));
 
     const resolvePending = async (item: ScriptPendingMention, decision: "reuse" | "variant" | "new") => {
         if (!connection) return;
@@ -263,6 +324,7 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
                         ctx.updateMetadata({ content: event.target.value });
                     }}
                 />
+                {sourceContentChanged ? <div className="rounded-md border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-[11px] text-amber-300">正文已修改，当前资产来自旧版本；重新提取后再生成分镜。</div> : null}
                 <div className="flex items-center justify-between text-[11px]" style={{ color: ctx.theme.node.faint }}><span>生成设置</span><span>{content.length.toLocaleString()} / 30,000</span></div>
                 <div className="grid grid-cols-2 gap-2">
                     <SettingField label="文本模型" color={ctx.theme.node.faint}>
@@ -290,11 +352,20 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
                     <CanvasQuoteDisplay
                         quote={quote}
                         state={quoteState}
-                        label={quoteState === "ready" && quote ? `单张 ${canvasCompactQuoteLabel(quote)}` : quoteState === "error" ? quoteError || "报价失败" : assets.length ? "报价中..." : "生成图片后报价"}
+                    label={quoteState === "ready" && quote ? `共 ${assets.length} 张 · ${canvasCompactQuoteLabel(quote)}` : quoteState === "error" ? quoteError || "报价失败" : assets.length ? "报价中..." : "生成图片后报价"}
                         error={quoteError}
                     />
                     <Button icon={generating ? <LoaderCircle className="size-4 animate-spin" /> : <ImagePlus className="size-4" />} loading={generating} disabled={!assets.length || quoteState !== "ready" || !quote?.canSubmit} onClick={() => void generateAll()}>
                         生成全部
+                    </Button>
+                    <Button
+                        icon={<Clapperboard className="size-4" />}
+                        className="cursor-not-allowed opacity-45"
+                        aria-disabled="true"
+                        title="内测中，即将开放"
+                        onClick={() => message.info("内测中，即将开放")}
+                    >
+                        生成分镜节点
                     </Button>
                     {pending.length ? <Button onClick={() => setPendingOpen(true)}>待确认 {pending.length}</Button> : null}
                 </div>
