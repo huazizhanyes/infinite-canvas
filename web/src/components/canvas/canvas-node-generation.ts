@@ -33,6 +33,13 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
         ...buildNodeGenerationInputs(nodeId, nodes, connections),
         ...buildMentionGenerationInputs(prompt, mentionReferences),
     ].filter((input, index, all) => all.findIndex((candidate) => candidate.nodeId === input.nodeId) === index);
+    // An uploaded audio node doubles as the reference and the source of the generated child.
+    // It has no connection yet, so include it explicitly without reusing generated TTS output.
+    const targetNode = nodes.find((node) => node.id === nodeId);
+    if (targetNode?.type === CanvasNodeType.Audio && targetNode.metadata?.content && targetNode.metadata.sourceType !== "tts" && !inputs.some((input) => input.type === "audio")) {
+        const audio = readReferenceAudio(targetNode);
+        if (audio) inputs.push({ nodeId: targetNode.id, type: "audio", title: targetNode.title, audio });
+    }
     const upstreamText = inputs
         .map((input) => input.text)
         .filter(Boolean)
@@ -162,10 +169,11 @@ function readReferenceAudio(node: CanvasNodeData): ReferenceAudio | null {
     if (node.type !== CanvasNodeType.Audio || !node.metadata?.content) return null;
     return {
         id: node.id,
-        name: `${node.title || node.id}.mp3`,
+        name: node.title || `${node.id}.mp3`,
         type: node.metadata.mimeType || "audio/mpeg",
         url: node.metadata.content,
         storageKey: node.metadata.storageKey,
+        mediaId: node.metadata.mediaId,
         durationMs: node.metadata.durationMs,
     };
 }

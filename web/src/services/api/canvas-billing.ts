@@ -93,6 +93,10 @@ export const canvasBillingApi = {
         const { data } = await axios.get(`${base(connection)}/billing/summary`, { headers: headers(connection) });
         return data;
     },
+    async videoLedger(connection: UserAssetConnection, params: { page?: number; limit?: number; taskId?: string } = {}) {
+        const { data } = await axios.get(`${base(connection)}/video/billing/ledger`, { headers: headers(connection), params });
+        return data as { total: number; page: number; limit: number; summary: { availableMicros: string; reservedMicros: string; totalSpentMicros: string }; list: Array<Record<string, any>> };
+    },
     async plans(connection: UserAssetConnection) {
         const { data } = await axios.get<{ items?: CanvasWalletPlan[] }>(`${base(connection)}/wallet/plans`, { headers: headers(connection) });
         return data.items || [];

@@ -8,6 +8,7 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
 export type CanvasVideoTask = {
     id: string;
+    clientRequestId?: string;
     status: "queued" | "in_progress" | "completed" | "failed";
     progress: number;
     projectId: string;
@@ -42,6 +43,29 @@ export type CanvasVideoTask = {
     archiveStatus?: string | null;
     canCancel?: boolean;
     queuePosition?: number | null;
+    internalStatus?: string;
+};
+
+export type CanvasVideoTaskEvent = {
+    id: string;
+    eventSeq: number;
+    taskId: string;
+    traceId: string;
+    eventType: string;
+    stage: string;
+    attemptNo: number;
+    durationMs?: number | null;
+    httpStatus?: number | null;
+    providerRequestId?: string | null;
+    upstreamTaskId?: string | null;
+    status?: string | null;
+    billingStatus?: string | null;
+    amountMicros?: string | null;
+    balanceAfterMicros?: string | null;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    metadata?: Record<string, unknown> | null;
+    createdAt: string;
 };
 
 export type CanvasVideoStoredResult = {
@@ -135,6 +159,11 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
         window.dispatchEvent(new CustomEvent("canvas-video-balance-changed"));
         return response.data;
     } catch (error) {
+        if (isRequestTimeout(error)) {
+            const recovered = await listCanvasVideoTasks(config, { clientRequestId: input.clientRequestId }, signal).catch(() => null);
+            const task = recovered?.find((item) => item.clientRequestId === input.clientRequestId);
+            if (task) return task;
+        }
         if (axios.isAxiosError(error) && error.response?.status === 409 && (error.response.data as any)?.code === "PRICE_CHANGED") {
             const payload = error.response.data as any;
             window.dispatchEvent(new CustomEvent("canvas-video-pricing-changed", { detail: payload }));
@@ -149,6 +178,14 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
     }
 }
 
+export async function listCanvasVideoTasks(config: AiConfig, params: Record<string, unknown> = {}, signal?: AbortSignal) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
+    const response = await axios.get<{ object: "list"; data: CanvasVideoTask[] }>(canvasVideoUrl(requestConfig, "/tasks"), {
+        headers: canvasVideoHeaders(requestConfig), params, signal,
+    });
+    return response.data.data || [];
+}
+
 export async function getCanvasVideoTask(config: AiConfig, taskId: string, signal?: AbortSignal) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
     try {
@@ -157,8 +194,28 @@ export async function getCanvasVideoTask(config: AiConfig, taskId: string, signa
             signal,
         })).data;
     } catch (error) {
+        if (signal?.aborted) throw error;
+        if (axios.isAxiosError(error)) {
+            const status = error.response?.status;
+            const retryable = !status || status === 408 || status === 429 || status >= 500 || error.code === "ECONNABORTED" || error.code === "ETIMEDOUT";
+            if (retryable) throw new CanvasVideoApiError("POLL_RETRYABLE", readCanvasVideoError(error, "视频任务查询暂时不可用"), { status });
+        }
         throw new Error(readCanvasVideoError(error, "视频任务查询失败"));
     }
+}
+
+export async function getCanvasVideoTaskEvents(config: AiConfig, taskId: string, signal?: AbortSignal) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
+    const response = await axios.get<{ object: "list"; data: CanvasVideoTaskEvent[] }>(canvasVideoUrl(requestConfig, `/tasks/${encodeURIComponent(taskId)}/events`), {
+        headers: canvasVideoHeaders(requestConfig), signal,
+    });
+    return response.data.data || [];
+}
+
+export async function listCanvasVideoBillingLedger(config: AiConfig, params: { page?: number; limit?: number; taskId?: string } = {}, signal?: AbortSignal) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
+    const response = await axios.get(canvasVideoUrl(requestConfig, "/billing/ledger"), { headers: canvasVideoHeaders(requestConfig), params, signal });
+    return response.data as { total: number; page: number; limit: number; summary: { availableMicros: string; reservedMicros: string; totalSpentMicros: string }; list: Array<Record<string, unknown>> };
 }
 
 export async function getCanvasVideoConcurrency(config: AiConfig, signal?: AbortSignal) {
@@ -180,9 +237,22 @@ export async function waitForCanvasVideoTask(
     signal?: AbortSignal,
     onProgress?: (task: CanvasVideoTask) => void,
 ) {
-    for (let attempt = 0; attempt < 360; attempt += 1) {
+    let retryDelayMs = 10_000;
+    for (let attempt = 0; ; attempt += 1) {
         if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-        const task = await getCanvasVideoTask(config, taskId, signal);
+        let task: CanvasVideoTask;
+        try {
+            task = await getCanvasVideoTask(config, taskId, signal);
+            retryDelayMs = 10_000;
+        } catch (error) {
+            if (signal?.aborted) throw error;
+            if (error instanceof CanvasVideoApiError && error.code === "POLL_RETRYABLE") {
+                await delay(retryDelayMs, signal);
+                retryDelayMs = Math.min(30_000, retryDelayMs * 2);
+                continue;
+            }
+            throw error;
+        }
         onProgress?.(task);
         if (task.status === "completed") {
             window.dispatchEvent(new CustomEvent("canvas-video-balance-changed"));
@@ -194,7 +264,6 @@ export async function waitForCanvasVideoTask(
         }
         await delay(10_000, signal);
     }
-    throw new Error("视频生成仍在后台进行，稍后重新进入画布可继续查看");
 }
 
 export function canvasVideoResult(task: CanvasVideoTask): CanvasVideoStoredResult {
@@ -299,6 +368,10 @@ function readCanvasVideoError(error: unknown, fallback: string) {
         if (message) return String(message);
     }
     return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function isRequestTimeout(error: unknown) {
+    return axios.isAxiosError(error) && (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT" || String(error.message || "").toLowerCase().includes("timeout"));
 }
 
 function kindLabel(kind: "image" | "video" | "audio") {

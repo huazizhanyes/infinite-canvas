@@ -1,6 +1,7 @@
 import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import { normalizeReferenceMentions } from "@/lib/reference-mentions";
 
 export const SEEDANCE_REFERENCE_LIMITS = {
     images: 9,
@@ -139,7 +140,7 @@ export function buildSeedancePromptText(prompt: string, images: ReferenceImage[]
         ...videos.map((_, index) => seedanceReferenceLabel("video", index)),
         ...audios.map((_, index) => seedanceReferenceLabel("audio", index)),
     ];
-    const text = prompt.trim();
+    const text = normalizeReferenceMentions(prompt.trim(), labels);
     if (!labels.length) return text;
     return `参考资产编号：${labels.join("、")}。请按这些编号理解提示词中的图片、视频和音频引用。\n\n${text}`;
 }

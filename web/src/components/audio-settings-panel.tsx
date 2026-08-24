@@ -17,9 +17,10 @@ type AudioSettingsPanelProps = {
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
+    referenceAudioName?: string;
 };
 
-export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: AudioSettingsPanelProps) {
+export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", referenceAudioName }: AudioSettingsPanelProps) {
     const voice = normalizeAudioVoiceValue(config.audioVoice);
     const format = normalizeAudioFormatValue(config.audioFormat);
     const speed = normalizeAudioSpeedValue(config.audioSpeed);
@@ -36,7 +37,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
     useEffect(() => {
-        if (!isCanvasTts) return;
+        if (!isCanvasTts || referenceAudioName) return;
         const controller = new AbortController();
         const timer = window.setTimeout(() => {
             setVoicesLoading(true);
@@ -67,7 +68,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
             window.clearTimeout(timer);
             controller.abort();
         };
-    }, [config.model, config.baseUrl, config.apiKey, isCanvasTts, search, voiceScope]);
+    }, [config.model, config.baseUrl, config.apiKey, isCanvasTts, referenceAudioName, search, voiceScope]);
 
     useEffect(() => {
         if (isVoxCpm2 && format !== "wav") onConfigChange("audioFormat", "wav");
@@ -158,12 +159,20 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <div className="min-w-0">
                             <div className="text-base font-semibold">音频设置</div>
                             <div className="mt-1 truncate text-xs" style={{ color: theme.node.faint }}>
-                                {selectedVoiceName} · {audioFormatLabel(format)} · {audioSpeedLabel(speed)}
+                                {referenceAudioName ? `参考音频：${referenceAudioName}` : selectedVoiceName} · {audioFormatLabel(format)} · {audioSpeedLabel(speed)}
                             </div>
                         </div>
                     </header>
                 ) : null}
-                {isCanvasTts ? (
+                {isCanvasTts && referenceAudioName ? (
+                    <div className="space-y-5">
+                        <div className="rounded-md border px-3 py-2.5" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>
+                            <div className="text-xs font-medium">使用连接的参考音频</div>
+                            <div className="mt-1 truncate text-[11px]" style={{ color: theme.node.faint }} title={referenceAudioName}>{referenceAudioName}</div>
+                        </div>
+                        {outputSettings}
+                    </div>
+                ) : isCanvasTts ? (
                     <div className="grid min-w-0 gap-5 md:grid-cols-[minmax(0,1.2fr)_minmax(230px,0.8fr)]">
                         <section className="min-w-0">
                             <div className="mb-2.5 flex items-center justify-between gap-3">

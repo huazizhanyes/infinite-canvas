@@ -1,11 +1,12 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
-import { Button, Segmented, Switch } from "antd";
+import { Button, Dropdown, Segmented, Switch } from "antd";
 import {
     Check,
     CircleDot,
     Clock3,
     Eraser,
+    FolderOpen,
     Grid2x2,
     Group,
     Hand,
@@ -13,6 +14,7 @@ import {
     Info,
     LoaderCircle,
     Mic2,
+    MousePointer2,
     Moon,
     Palette,
     Puzzle,
@@ -67,6 +69,7 @@ const TOOL_ACCENT_BY_ID: Record<string, ToolbarAccent> = {
 
 export function CanvasToolbar({
     selectedCount,
+    panMode,
     canUndo,
     canRedo,
     backgroundMode,
@@ -81,13 +84,15 @@ export function CanvasToolbar({
     onUndo,
     onRedo,
     onUpload,
+    onOpenAssets,
     onDelete,
     onClear,
-    onDeselect,
+    onPanModeChange,
     onBackgroundModeChange,
     onShowImageInfoChange,
 }: {
     selectedCount: number;
+    panMode: boolean;
     canUndo: boolean;
     canRedo: boolean;
     backgroundMode: CanvasBackgroundMode;
@@ -102,14 +107,16 @@ export function CanvasToolbar({
     onUndo: () => void;
     onRedo: () => void;
     onUpload: () => void;
+    onOpenAssets: () => void;
     onDelete: () => void;
     onClear: () => void;
-    onDeselect: () => void;
+    onPanModeChange: (enabled: boolean) => void;
     onBackgroundModeChange: (mode: CanvasBackgroundMode) => void;
     onShowImageInfoChange: (show: boolean) => void;
 }) {
     const wrapRef = useRef<HTMLDivElement>(null);
     const rootRef = useRef<HTMLDivElement>(null);
+    const uploadTriggerRef = useRef<HTMLSpanElement>(null);
     const colorTheme = useThemeStore((state) => state.theme);
     const setTheme = useThemeStore((state) => state.setTheme);
     const theme = canvasThemes[colorTheme];
@@ -119,6 +126,7 @@ export function CanvasToolbar({
     const [panelX, setPanelX] = useState(0);
     const [extensionsOpen, setExtensionsOpen] = useState(false);
     const [extPanelX, setExtPanelX] = useState(0);
+    const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
     const saveStatus = useCanvasPersistenceStatus((state) => state.status);
     const saveError = useCanvasPersistenceStatus((state) => state.error);
     // 扩展(插件)节点,随注册表变化实时更新
@@ -147,6 +155,19 @@ export function CanvasToolbar({
         return () => document.removeEventListener("pointerdown", handlePointerDown, true);
     }, [extensionsOpen, appearanceOpen]);
 
+    useEffect(() => {
+        if (!uploadMenuOpen) return;
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target;
+            if (!(target instanceof Node)) return;
+            if (uploadTriggerRef.current?.contains(target)) return;
+            if (target instanceof Element && target.closest("[data-canvas-upload-menu]")) return;
+            setUploadMenuOpen(false);
+        };
+        document.addEventListener("pointerdown", handlePointerDown, true);
+        return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+    }, [uploadMenuOpen]);
+
     return (
         <div ref={rootRef} className="pointer-events-none absolute bottom-4 z-50 flex justify-center" style={{ left: 280, right: 16 }}>
             {tip ? <DockTip label={tip} x={tipX} theme={theme} /> : null}
@@ -160,8 +181,8 @@ export function CanvasToolbar({
                     {saveStatus === "saving" ? "保存中" : saveStatus === "pending" ? "待保存" : saveStatus === "error" ? "保存失败" : "已保存"}
                 </span>
                 <Divider theme={theme} />
-                <ToolbarButton id="tool-hand" label="移动/选择" active={!selectedCount} hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onDeselect}>
-                    <Hand className="size-4.5" />
+                <ToolbarButton id="tool-hand" label={panMode ? "移动工具（点击切换选择）" : "选择工具（点击切换移动）"} active={panMode} hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={() => onPanModeChange(!panMode)}>
+                    {panMode ? <Hand className="size-4.5" /> : <MousePointer2 className="size-4.5" />}
                 </ToolbarButton>
                 <ToolbarButton id="tool-undo" label="撤销" disabled={!canUndo} hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onUndo}>
                     <Undo2 className="size-4.5" />
@@ -206,9 +227,30 @@ export function CanvasToolbar({
                         <Puzzle className="size-4.5" />
                     </ToolbarButton>
                 ) : null}
-                <ToolbarButton id="tool-upload" label="上传资产" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onUpload}>
-                    <Upload className="size-4.5" />
-                </ToolbarButton>
+                <Dropdown
+                    trigger={["click"]}
+                    placement="top"
+                    open={uploadMenuOpen}
+                    onOpenChange={setUploadMenuOpen}
+                    popupRender={(menu) => <div data-canvas-upload-menu>{menu}</div>}
+                    menu={{
+                        items: [
+                            { key: "local", icon: <Upload className="size-4" />, label: "本地上传" },
+                            { key: "assets", icon: <FolderOpen className="size-4" />, label: "我的资产" },
+                        ],
+                        onClick: ({ key }) => {
+                            setUploadMenuOpen(false);
+                            if (key === "assets") onOpenAssets();
+                            else onUpload();
+                        },
+                    }}
+                >
+                    <span ref={uploadTriggerRef} className="inline-flex">
+                        <ToolbarButton id="tool-upload" label="导入图片" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered}>
+                            <Upload className="size-4.5" />
+                        </ToolbarButton>
+                    </span>
+                </Dropdown>
                 <Divider theme={theme} />
                 <ToolbarButton
                     id="tool-style"
@@ -423,7 +465,7 @@ function DockTip({ label, x, theme }: { label: string; x: number; theme: CanvasT
 }
 
 function toolLabel(id: string) {
-    if (id === "tool-hand") return "移动/选择";
+    if (id === "tool-hand") return "选择/移动工具";
     if (id === "tool-undo") return "撤销";
     if (id === "tool-redo") return "重做";
     if (id === "tool-text") return "文本";

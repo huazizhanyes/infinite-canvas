@@ -1,9 +1,10 @@
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/lib/seedance-video";
+import { normalizeReferenceMentions } from "@/lib/reference-mentions";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
-import { createCanvasGraphIndex, incomingConnections, type CanvasGraphIndex } from "@/lib/canvas/canvas-graph-index";
-import type { Asset } from "@/stores/use-asset-store";
+import { createCanvasGraphIndex, incomingConnections, outgoingConnections, type CanvasGraphIndex } from "@/lib/canvas/canvas-graph-index";
+import { assetPreviewUrl, type Asset } from "@/stores/use-asset-store";
 
 export type CanvasResourceKind = "image" | "video" | "audio" | "text";
 
@@ -18,6 +19,7 @@ export type CanvasResourceReference = {
     previewUrl?: string;
     text?: string;
     storageKey?: string;
+    mediaId?: string;
     mimeType?: string;
     width?: number;
     height?: number;
@@ -25,6 +27,11 @@ export type CanvasResourceReference = {
     durationMs?: number;
     active: boolean;
 };
+
+/** Restore mention markers for prompts saved by older editor versions. */
+export function normalizeCanvasResourceMentions(prompt: string, references: Pick<CanvasResourceReference, "label" | "active">[]) {
+    return normalizeReferenceMentions(prompt, references.filter((reference) => reference.active).map((reference) => reference.label));
+}
 
 export function buildCanvasResourceReferences(nodes: CanvasNodeData[], connections: CanvasConnection[], contextNodeId?: string | null, graphIndex?: CanvasGraphIndex) {
     const index = graphIndex || createCanvasGraphIndex(nodes, connections);
@@ -54,9 +61,10 @@ export function getGenerationResourceNodes(nodeId: string, nodes: CanvasNodeData
 }
 
 function getContextResourceNodes(nodeId: string, graphIndex: CanvasGraphIndex) {
-    return incomingConnections(graphIndex, nodeId)
-        .map((connection) => graphIndex.nodeById.get(connection.fromNodeId))
-        .filter((node): node is CanvasNodeData => Boolean(node && isResourceNode(node)));
+    return [...incomingConnections(graphIndex, nodeId), ...outgoingConnections(graphIndex, nodeId)]
+        .map((connection) => graphIndex.nodeById.get(connection.fromNodeId === nodeId ? connection.toNodeId : connection.fromNodeId))
+        .filter((node): node is CanvasNodeData => Boolean(node && isResourceNode(node)))
+        .filter((node, index, all) => all.findIndex((candidate) => candidate.id === node.id) === index);
 }
 
 function labelResourceNodes(nodes: CanvasNodeData[], active: boolean) {
@@ -75,6 +83,8 @@ function labelResourceNodes(nodes: CanvasNodeData[], active: boolean) {
                 label,
                 title: node.title || label,
                 previewUrl: node.metadata?.content,
+                storageKey: node.metadata?.storageKey,
+                mediaId: node.metadata?.mediaId,
                 text: resourceText(node),
                 active,
             },
@@ -96,7 +106,7 @@ function labelUserAssets(assets: Asset[]) {
         const titleIndex = (seenTitles.get(asset.title) || 0) + 1;
         seenTitles.set(asset.title, titleIndex);
         const title = asset.title || `${kind === "image" ? "图片" : "视频"}${index + 1}`;
-        const previewUrl = asset.kind === "image" ? asset.coverUrl || asset.data.dataUrl : asset.data.url;
+        const previewUrl = assetPreviewUrl(asset);
         return [{
             id: `asset:${asset.id}`,
             nodeId: `asset:${asset.id}`,

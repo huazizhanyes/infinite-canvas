@@ -8,6 +8,7 @@ type InfiniteCanvasProps = {
     containerRef: React.RefObject<HTMLDivElement | null>;
     viewport: ViewportTransform;
     backgroundMode?: CanvasBackgroundMode;
+    panMode?: boolean;
     onViewportChange: (viewport: ViewportTransform) => void;
     onViewportInteractionStart?: () => void;
     onCanvasMouseDown?: (event: React.PointerEvent<HTMLDivElement>) => void;
@@ -34,7 +35,7 @@ export function calculateWheelViewport(viewport: ViewportTransform, pointerX: nu
     };
 }
 
-export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onViewportInteractionStart, onCanvasMouseDown, onCanvasDeselect, onCanvasDoubleClick, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines", panMode = false, onViewportChange, onViewportInteractionStart, onCanvasMouseDown, onCanvasDeselect, onCanvasDoubleClick, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const panState = useRef({
         isPanning: false,
@@ -110,7 +111,8 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.code !== "Space") return;
-            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return;
+            event.preventDefault();
             setIsSpacePressed(true);
         };
 
@@ -176,7 +178,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             return;
         }
 
-        if (event.button === 1 || (event.button === 0 && (isSpacePressed || isBackgroundClick))) {
+        if (event.button === 1 || (event.button === 0 && (isSpacePressed || panMode))) {
             event.preventDefault();
             event.currentTarget.setPointerCapture(event.pointerId);
             panState.current = {
@@ -191,6 +193,12 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             syncInteractionAttribute();
             document.body.style.cursor = "grabbing";
             return;
+        }
+
+        if (event.button === 0 && isBackgroundClick) {
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            onCanvasMouseDown?.(event);
         }
 
     };
@@ -274,7 +282,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
         <div
             ref={containerRef}
             data-infinite-canvas
-            className="relative h-full w-full touch-none cursor-grab select-none overflow-hidden"
+            className={`relative h-full w-full touch-none select-none overflow-hidden ${isSpacePressed || panMode ? "cursor-grab" : "cursor-default"}`}
             style={{ background: theme.canvas.background }}
             onPointerDown={handlePointerDown}
             onDoubleClick={handleDoubleClick}

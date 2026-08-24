@@ -57,6 +57,7 @@ type CanvasNodeProps = {
     onTextSelectionChange?: (nodeId: string, selectedText: string) => void;
     onOpenPanel?: (nodeId: string) => void;
     onTitleChange: (nodeId: string, title: string) => void;
+    onGroupColorChange: (nodeId: string, color: string) => void;
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
@@ -87,6 +88,7 @@ type NodeContentRendererProps = {
     onSetBatchPrimary?: () => void;
     isBatchPrimary: boolean;
     groupChildCount: number;
+    onGroupColorChange: (color: string) => void;
 };
 
 export const CanvasNode = React.memo(function CanvasNode({
@@ -123,6 +125,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onTextSelectionChange,
     onOpenPanel,
     onTitleChange,
+    onGroupColorChange,
     onToggleBatch,
     onSetBatchPrimary,
     onRetry,
@@ -300,8 +303,9 @@ export const CanvasNode = React.memo(function CanvasNode({
     }, [handleResizeMove, handleResizeUp]);
 
     const uiScale = Math.max(scale, 0.05);
+    const groupColor = data.metadata?.groupColor || "#7c3aed";
     const shellBorderColor = isGroup
-        ? isGroupDropTarget || isActive ? selectionWhite : theme.node.stroke
+        ? isGroupDropTarget || isActive ? selectionWhite : `${groupColor}aa`
         : hasImageContent ? imageBorderColor : isActive ? selectionWhite : isRelated ? theme.node.muted : theme.node.stroke;
     const shellOutlineWidth = isActive ? 1.8 : 1;
     const shellOutline = isGroup ? "" : `inset 0 0 0 ${shellOutlineWidth / uiScale}px ${shellBorderColor}`;
@@ -333,7 +337,10 @@ export const CanvasNode = React.memo(function CanvasNode({
                 setHovered(false);
                 onHoverEnd(data.id);
             }}
-            onMouseDownCapture={(event) => onSelectCapture?.(event, data.id)}
+            onMouseDownCapture={(event) => {
+                if (event.target instanceof Element && event.target.closest("[data-group-color-picker]")) return;
+                onSelectCapture?.(event, data.id);
+            }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
             onWheel={(event) => {
                 if (data.type !== CanvasNodeType.Text) return;
@@ -389,7 +396,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 data-canvas-node-active={isActive ? "true" : undefined}
                 className="relative h-full w-full overflow-visible rounded-[8px] border"
                 style={{
-                    background: isGroup ? `${theme.toolbar.panel}66` : hasImageContent || hasVideoContent ? "transparent" : theme.node.fill,
+                    background: isGroup ? `${data.metadata?.groupColor || "#7c3aed"}20` : hasImageContent || hasVideoContent ? "transparent" : theme.node.fill,
                     borderWidth: isGroup ? `${1 / uiScale}px` : 0,
                     borderRadius: `${8 / uiScale}px`,
                     borderColor: shellBorderColor,
@@ -453,6 +460,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
                         isBatchPrimary={isBatchPrimary}
                         groupChildCount={groupChildCount}
+                        onGroupColorChange={(color) => onGroupColorChange(data.id, color)}
                     />
                 </div>
 
@@ -539,7 +547,8 @@ const nodeContentRenderers = {
     [CanvasNodeType.Group]: GroupNodeContent,
 } satisfies Partial<Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>>;
 
-function GroupNodeContent({ node, theme, groupChildCount }: NodeContentRendererProps) {
+function GroupNodeContent({ node, theme, groupChildCount, onGroupColorChange }: NodeContentRendererProps) {
+    const groupColor = node.metadata?.groupColor || "#7c3aed";
     return (
         <div className="pointer-events-none flex h-full w-full flex-col p-3">
             <div className="flex items-center gap-1.5 text-xs font-medium" style={{ color: theme.node.text }}>
@@ -550,8 +559,25 @@ function GroupNodeContent({ node, theme, groupChildCount }: NodeContentRendererP
                 <span className="ml-auto rounded-md px-1.5 py-0.5 text-[10px] font-medium" style={{ background: theme.node.fill, color: theme.node.muted }}>
                     {groupChildCount} 个节点
                 </span>
+                <label
+                    className="pointer-events-auto relative grid size-6 cursor-pointer place-items-center rounded-md border"
+                    style={{ background: groupColor, borderColor: `${groupColor}aa` }}
+                    title="选择组背景颜色"
+                    aria-label="选择组背景颜色"
+                    data-group-color-picker
+                >
+                    <input
+                        type="color"
+                        value={groupColor}
+                        className="absolute inset-0 size-full cursor-pointer opacity-0"
+                        onChange={(event) => onGroupColorChange(event.target.value)}
+                        onClick={(event) => event.stopPropagation()}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                    />
+                </label>
             </div>
-            <div className="mt-2 flex-1 rounded-md border border-dashed" style={{ borderColor: theme.node.stroke, background: `${theme.node.fill}55` }} />
+            <div className="mt-2 flex-1 rounded-md border border-dashed" style={{ borderColor: `${groupColor}aa`, background: `${groupColor}20` }} />
         </div>
     );
 }

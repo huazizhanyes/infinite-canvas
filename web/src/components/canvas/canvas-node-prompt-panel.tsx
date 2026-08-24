@@ -71,6 +71,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const [quoteState, setQuoteState] = useState<"idle" | "loading" | "ready" | "error">("idle");
     const [quoteError, setQuoteError] = useState("");
     const quoteEligible = mode === "image" || mode === "video" || (mode === "audio" && Boolean(prompt.trim()));
+    const activeReferences = mentionReferences.filter((reference) => reference.active && (reference.source !== "user-asset" || prompt.includes(reference.label)));
 
     useEffect(() => {
         setPrompt(isEditingExistingContent ? "" : node.metadata?.prompt || "");
@@ -133,6 +134,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 : quote
                   ? quote.canSubmit ? canvasCompactQuoteLabel(quote) : "余额不足"
                   : "等待报价";
+    const referenceAudio = mode === "audio" ? activeReferences.find((reference) => reference.kind === "audio") : undefined;
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
@@ -170,7 +172,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 onChange={updatePrompt}
                 onSubmit={submit}
                 richMentions={mode === "image" || mode === "video"}
-                className={`thin-scrollbar w-full resize-none rounded-md border-0 px-3 py-2 text-[12px] leading-5 outline-none ${mode === "video" ? "h-40 min-h-40" : mode === "image" ? "h-32 min-h-32" : "h-16"}`}
+                placeholderClassName={mode === "image" || mode === "video" ? "text-[13px] leading-6" : undefined}
+                className={`thin-scrollbar w-full resize-none rounded-md border-0 px-3 py-2 ${mode === "image" || mode === "video" ? "text-[13px] leading-6" : "text-[12px] leading-5"} outline-none ${mode === "video" ? "h-44 min-h-44" : mode === "image" ? "h-36 min-h-36" : "h-16"}`}
                 style={{ background: theme.node.fill, color: theme.node.text }}
                 placeholder={mode === "text" && isEditingExistingContent ? textAction === "custom" ? "输入自定义处理要求" : "可选：补充处理要求" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
@@ -229,7 +232,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     ) : mode === "audio" ? (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" className="!h-7 !w-[168px] !min-w-0 shrink !px-1.5 !text-[11px]" onMissingConfig={() => openConfigDialog(true)} />
-                            <CanvasAudioSettingsPopover config={config} buttonClassName="!h-7 !w-[122px] !min-w-0 !justify-start !rounded-md !px-1.5 !text-[11px]" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                            <CanvasAudioSettingsPopover config={config} referenceAudioName={official ? referenceAudio?.title || referenceAudio?.label : undefined} buttonClassName="!h-7 !w-[122px] !min-w-0 !justify-start !rounded-md !px-1.5 !text-[11px]" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                         </>
                     ) : (
                         <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" className="!h-7 !min-w-0 !max-w-[240px] flex-1 !px-1.5 !text-[11px]" onMissingConfig={() => openConfigDialog(true)} />
@@ -266,7 +269,8 @@ function buildQuotePayload(config: AiConfig, mode: CanvasNodeGenerationMode, nod
     }
     if (mode === "audio") {
         const request = resolveModelRequestConfig(config, config.model);
-        return { feature: "canvas.audio.speech", requestId, model: request.model, input: prompt.trim(), voiceId: Number(config.audioVoice || 0), format: config.audioFormat, speed: Number(config.audioSpeed || 1) };
+        const referenceAudio = activeReferences.find((reference) => reference.kind === "audio");
+        return { feature: "canvas.audio.speech", requestId, model: request.model, input: prompt.trim(), ...(referenceAudio ? { referenceAudioMediaId: referenceAudio.mediaId || referenceAudio.id } : { voiceId: Number(config.audioVoice || 0) }), format: config.audioFormat, speed: Number(config.audioSpeed || 1) };
     }
     const capabilities = videoCapabilitiesOf(config, config.model);
     const quality = capabilities?.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities?.qualities[0]?.quality || config.vquality;

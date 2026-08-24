@@ -16,9 +16,10 @@ type CanvasAudioSettingsPopoverProps = {
     onConfigChange: (key: CanvasAudioSettingKey, value: string) => void;
     buttonClassName?: string;
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
+    referenceAudioName?: string;
 };
 
-export function CanvasAudioSettingsPopover({ config, onConfigChange, buttonClassName, placement = "topLeft" }: CanvasAudioSettingsPopoverProps) {
+export function CanvasAudioSettingsPopover({ config, onConfigChange, buttonClassName, placement = "topLeft", referenceAudioName }: CanvasAudioSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -46,7 +47,7 @@ export function CanvasAudioSettingsPopover({ config, onConfigChange, buttonClass
         };
     }, [open]);
 
-    const panel = open && buttonRect ? <AudioSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} /> : null;
+    const panel = open && buttonRect ? <AudioSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} referenceAudioName={referenceAudioName} onConfigChange={onConfigChange} /> : null;
 
     return (
         <>
@@ -60,7 +61,7 @@ export function CanvasAudioSettingsPopover({ config, onConfigChange, buttonClass
                     onClick={() => setOpen((current) => !current)}
                 >
                     <span className="truncate">
-                        {config.audioVoiceName || audioVoiceLabel(config.audioVoice)} · {audioFormatLabel(config.audioFormat)} · {audioSpeedLabel(config.audioSpeed)}
+                        {referenceAudioName ? "参考音频" : config.audioVoiceName || audioVoiceLabel(config.audioVoice)} · {audioFormatLabel(config.audioFormat)} · {audioSpeedLabel(config.audioSpeed)}
                     </span>
                 </Button>
             </span>
@@ -75,6 +76,7 @@ function AudioSettingsPortal({
     placement,
     theme,
     config,
+    referenceAudioName,
     onConfigChange,
 }: {
     buttonRect: DOMRect;
@@ -82,10 +84,11 @@ function AudioSettingsPortal({
     placement: CanvasAudioSettingsPopoverProps["placement"];
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     config: AiConfig;
+    referenceAudioName?: string;
     onConfigChange: (key: CanvasAudioSettingKey, value: string) => void;
 }) {
     const margin = 12;
-    const width = Math.min(decodeChannelModel(config.model)?.channelId === "sucai-canvas" ? 660 : 380, window.innerWidth - margin * 2);
+    const width = Math.min(decodeChannelModel(config.model)?.channelId === "sucai-canvas" && !referenceAudioName ? 660 : 380, window.innerWidth - margin * 2);
     const gap = 8;
     const alignRight = placement?.endsWith("Right");
     const alignCenter = placement === "top" || placement === "bottom";
@@ -110,7 +113,7 @@ function AudioSettingsPortal({
 
     return createPortal(
         <div ref={panelRef} className="canvas-image-settings-popover" style={style} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-            <AudioSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="min-w-0" />
+            <AudioSettingsPanel config={config} referenceAudioName={referenceAudioName} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="min-w-0" />
         </div>,
         document.body,
     );

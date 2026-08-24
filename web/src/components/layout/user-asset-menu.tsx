@@ -29,6 +29,8 @@ export function UserAssetMenu({ style }: { style?: CSSProperties }) {
     const [imagePlans, setImagePlans] = useState<ImageRechargePlan[]>([]);
     const [ordering, setOrdering] = useState("");
     const [payment, setPayment] = useState<{ kind: "ai" | "wallet" | "image"; orderNo: string; qrUrl?: string } | null>(null);
+    const [ledgerOpen, setLedgerOpen] = useState(false);
+    const [ledger, setLedger] = useState<{ summary?: { availableMicros: string; reservedMicros: string; totalSpentMicros: string }; list?: Array<Record<string, any>> } | null>(null);
 
     const openWallet = async () => {
         if (!connection) return;
@@ -44,6 +46,11 @@ export function UserAssetMenu({ style }: { style?: CSSProperties }) {
         if (!connection) return;
         setOpen(false); setImageOpen(true);
         try { setImagePlans(await userAssetsApi.getImagePlans(connection)); } catch (error) { message.error(readError(error, "图片次数套餐读取失败")); }
+    };
+    const openLedger = async () => {
+        if (!connection) return;
+        setOpen(false); setLedgerOpen(true);
+        try { setLedger(await canvasBillingApi.videoLedger(connection, { page: 1, limit: 50 })); } catch (error) { message.error(readError(error, "视频额度明细读取失败")); }
     };
     const buyWallet = async (plan: CanvasWalletPlan) => {
         if (!connection) return;
@@ -108,7 +115,7 @@ export function UserAssetMenu({ style }: { style?: CSSProperties }) {
         return () => { window.removeEventListener("canvas-wallet-changed", refresh); window.removeEventListener("canvas-video-balance-changed", refresh); };
     }, [loadAssets]);
 
-    const panel = <AssetPanel summary={summary} loading={loading} onRefresh={() => void loadAssets()} onWallet={() => void openWallet()} onImage={() => void openImage()} />;
+    const panel = <AssetPanel summary={summary} loading={loading} onRefresh={() => void loadAssets()} onWallet={() => void openWallet()} onImage={() => void openImage()} onLedger={() => void openLedger()} />;
     const trigger = <Tooltip title={user ? "用户资产" : "请先登录"}><button type="button" className="inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-background text-stone-600" style={style} aria-label="用户资产" onClick={() => { if (!user) { if (SUCAI_INTEGRATION) requestCanvasLogin(); return; } if (mobile) { setOpen(true); void loadAssets(); } }}><Avatar size={28} src={user?.avatarUrl || undefined} icon={!user ? <UserRound className="size-4" /> : undefined}>{user?.displayName?.slice(0, 1)}</Avatar></button></Tooltip>;
 
     return <>
@@ -116,6 +123,7 @@ export function UserAssetMenu({ style }: { style?: CSSProperties }) {
         <Drawer title="用户资产" placement="right" open={mobile && open} onClose={() => setOpen(false)}>{panel}</Drawer>
         <AiRechargeModal open={walletOpen} loading={loading} packages={aiPackages} profile={aiProfile} settings={aiSettings} customAmountYuan={customAmountYuan} setCustomAmountYuan={setCustomAmountYuan} ordering={ordering} onClose={() => setWalletOpen(false)} onBuyPackage={(plan) => void buyAiPackage(plan)} onCustomRecharge={() => void buyAiCustom()} legacyPlans={walletPlans} onBuyLegacy={(plan) => void buyWallet(plan)} />
         <PlanModal title="购买图片次数" open={imageOpen} loading={loading} plans={imagePlans.map((plan) => ({ id: plan.id, name: plan.name, amount: plan.price, detail: `${plan.credits.toLocaleString("zh-CN")} 张` }))} ordering={ordering} onClose={() => setImageOpen(false)} onBuy={(plan) => void buyImage(imagePlans.find((item) => item.id === plan.id)!)} />
+        <VideoLedgerModal open={ledgerOpen} ledger={ledger} loading={loading} onClose={() => setLedgerOpen(false)} onRefresh={openLedger} />
         <Modal title="微信支付" width={360} open={!!payment} onCancel={() => setPayment(null)} footer={null}><div className="flex flex-col items-center py-3 text-center">{payment?.qrUrl ? <img src={payment.qrUrl} alt="微信支付二维码" className="size-64 max-w-full object-contain" /> : <Spin />}<p className="mt-4 text-sm text-stone-500">扫码支付，到账后余额会自动刷新。</p></div></Modal>
     </>;
 }
@@ -131,17 +139,21 @@ function AiRechargeModal({ open, loading, packages, profile, settings, customAmo
     </Modal>;
 }
 
-function AssetPanel({ summary, loading, onRefresh, onWallet, onImage }: { summary: ReturnType<typeof useUserStore.getState>["assets"]; loading: boolean; onRefresh: () => void; onWallet: () => void; onImage: () => void }) {
+function AssetPanel({ summary, loading, onRefresh, onWallet, onImage, onLedger }: { summary: ReturnType<typeof useUserStore.getState>["assets"]; loading: boolean; onRefresh: () => void; onWallet: () => void; onImage: () => void; onLedger: () => void }) {
     if (!summary) return <div className="flex h-44 w-[350px] items-center justify-center"><Spin spinning={loading} /></div>;
     const wallet = summary.assets.wallet;
     return <div className="w-[350px] max-w-full">
         <div className="flex items-center gap-3 border-b border-stone-200 p-4 dark:border-stone-800"><Avatar size={42} src={summary.user.avatarUrl || undefined}>{summary.user.displayName.slice(0, 1)}</Avatar><div className="min-w-0 flex-1"><div className="truncate font-semibold">{summary.user.displayName}</div><div className="mt-1 text-xs text-stone-500">{summary.user.levelName} · ID {summary.user.id}</div></div><Button type="text" shape="circle" loading={loading} icon={<RefreshCw className="size-4" />} onClick={onRefresh} /></div>
         <div className="space-y-4 p-4">
-            <div className="border-b border-stone-100 pb-4 dark:border-stone-800"><div className="flex items-center justify-between text-sm text-stone-500"><span className="inline-flex items-center gap-2"><WalletCards className="size-4" />人民币钱包</span><Button type="link" size="small" className="!h-auto !p-0" onClick={onWallet}>充值</Button></div><strong className="mt-2 block text-2xl">{formatCnyMicros(wallet?.availableMicros || "0", "")}</strong><span className="text-xs text-stone-500">冻结 {formatCnyMicros(wallet?.reservedMicros || "0", "")}</span></div>
+            <div className="border-b border-stone-100 pb-4 dark:border-stone-800"><div className="flex items-center justify-between text-sm text-stone-500"><span className="inline-flex items-center gap-2"><WalletCards className="size-4" />人民币钱包</span><span><Button type="link" size="small" className="!h-auto !p-0" onClick={onLedger}>视频明细</Button><Button type="link" size="small" className="!h-auto !p-0" onClick={onWallet}>充值</Button></span></div><strong className="mt-2 block text-2xl">{formatCnyMicros(wallet?.availableMicros || "0", "")}</strong><span className="text-xs text-stone-500">冻结 {formatCnyMicros(wallet?.reservedMicros || "0", "")}</span></div>
             <BenefitRow icon={<Image className="size-4" />} label="图片权益" value={`${Number(summary.assets.image.totalAvailable || 0).toLocaleString("zh-CN")} 张`} detail={`月额度 ${Number(summary.assets.image.monthlyRemaining || 0).toLocaleString("zh-CN")} · 已购买 ${Number(summary.assets.image.purchasedBalance || 0).toLocaleString("zh-CN")}`} action={<Button type="link" size="small" className="!h-auto !p-0" onClick={onImage}>购买次数</Button>} />
             <BenefitRow icon={<AudioLines className="size-4" />} label="配音字符权益" value={`${Number(summary.assets.audio.totalAvailable || 0).toLocaleString("zh-CN")} 字符`} detail={`订阅 ${Number(summary.assets.audio.monthlyRemaining || 0).toLocaleString("zh-CN")} · 永久 ${Number(summary.assets.audio.purchasedBalance || 0).toLocaleString("zh-CN")}`} action={<Button type="link" size="small" className="!h-auto !p-0" onClick={() => window.open(AUDIO_RECHARGE_URL, "_blank", "noopener,noreferrer")}>获取额度</Button>} />
         </div>
     </div>;
+}
+
+function VideoLedgerModal({ open, ledger, loading, onClose, onRefresh }: { open: boolean; ledger: { summary?: { availableMicros: string; reservedMicros: string; totalSpentMicros: string }; list?: Array<Record<string, any>> } | null; loading: boolean; onClose: () => void; onRefresh: () => void }) {
+    return <Modal title="视频额度与消费明细" width={760} open={open} onCancel={onClose} footer={null}><Spin spinning={loading}><div className="mb-4 grid grid-cols-3 gap-2 text-sm"><div className="rounded-md bg-stone-50 p-3 dark:bg-stone-900"><div className="text-stone-500">可用余额</div><strong>{formatCnyMicros(ledger?.summary?.availableMicros || "0", "")}</strong></div><div className="rounded-md bg-stone-50 p-3 dark:bg-stone-900"><div className="text-stone-500">视频冻结</div><strong>{formatCnyMicros(ledger?.summary?.reservedMicros || "0", "")}</strong></div><div className="rounded-md bg-stone-50 p-3 dark:bg-stone-900"><div className="text-stone-500">视频累计实扣</div><strong>{formatCnyMicros(ledger?.summary?.totalSpentMicros || "0", "")}</strong></div></div><div className="mb-2 flex justify-end"><Button icon={<RefreshCw className="size-4" />} onClick={onRefresh}>刷新</Button></div><div className="max-h-[420px] overflow-auto">{ledger?.list?.length ? ledger.list.map((row) => <div key={String(row.taskId)} className="border-b border-stone-100 py-3 text-sm dark:border-stone-800"><div className="flex items-center justify-between"><strong>{String(row.taskId).slice(0, 12)}</strong><span>{String(row.billingStatus || "unknown")}</span></div><div className="mt-1 text-xs text-stone-500">报价 {formatCnyMicros(row.quotedAmountMicros || "0", "")} · 实扣 {formatCnyMicros(row.chargedAmountMicros || "0", "")} · 余额 {row.balanceAfterMicros ? formatCnyMicros(row.balanceAfterMicros, "") : "待结算"}</div><div className="mt-1 text-xs text-stone-500">{row.status === "submission_unknown" ? "提交结果未知，金额已冻结，等待核查" : row.status === "completed" ? "已完成并结算" : row.status === "failed" ? "失败，冻结金额已释放" : "处理中，金额已冻结，尚未最终扣除"}</div></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无视频消费记录" />}</div></Spin></Modal>;
 }
 
 function BenefitRow({ icon, label, value, detail, action }: { icon: ReactNode; label: string; value: string; detail: string; action: ReactNode }) { return <div><div className="flex items-center justify-between text-sm text-stone-500"><span className="inline-flex items-center gap-2">{icon}{label}</span>{action}</div><strong className="mt-1 block">{value}</strong><span className="text-xs text-stone-500">{detail}</span></div>; }

@@ -125,6 +125,7 @@ export type CanvasNodeMetadata = {
     voiceId?: number;
     characterCount?: number;
     groupId?: string;
+    groupColor?: string;
     scriptSetId?: string;
     scriptSetNodeId?: string;
     scriptSetExpanded?: boolean;

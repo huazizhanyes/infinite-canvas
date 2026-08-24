@@ -2,15 +2,19 @@ import axios from "axios";
 
 import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { getMediaBlob } from "@/services/file-storage";
+import { uploadCanvasMedia } from "@/services/canvas-media";
 import { buildApiUrl, decodeChannelModel, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
 import { canvasBillingApi } from "./canvas-billing";
 import { nanoid } from "nanoid";
 import { useUserStore } from "@/stores/use-user-store";
+import type { ReferenceAudio } from "@/types/media";
 
 type RequestOptions = {
     signal?: AbortSignal;
-    onTaskCreated?: (task: { taskId: string; engine: "speech" | "voxcpm2"; voiceId: number; characterCount: number }) => void;
+    referenceAudio?: ReferenceAudio;
+    onTaskCreated?: (task: { taskId: string; engine: "speech" | "voxcpm2"; voiceId?: number; characterCount: number }) => void;
 };
 
 export type CanvasAudioVoice = {
@@ -156,13 +160,14 @@ export async function listCanvasAudioVoices(config: AiConfig, query: { search?: 
 
 async function requestCanvasAudioGeneration(config: AiConfig, prompt: string, format: string, options?: RequestOptions): Promise<GeneratedAudioResult> {
     const voiceId = Number(config.audioVoice);
-    if (!Number.isInteger(voiceId) || voiceId <= 0) throw new Error("请先从音色库选择音色");
+    const referenceAudioMediaId = options?.referenceAudio ? await ensureReferenceAudioMediaId(options.referenceAudio) : "";
+    if (!referenceAudioMediaId && (!Number.isInteger(voiceId) || voiceId <= 0)) throw new Error("请连接参考音频或从音色库选择音色");
     const engine = config.model === "voxcpm2" ? "voxcpm2" : "speech";
     const connection = useUserStore.getState().connection;
     if (!connection) throw new Error("请先登录后生成配音");
     const requestId = nanoid();
     const quote = await canvasBillingApi.quote(connection, {
-        feature: "canvas.audio.speech", requestId, model: config.model, engine, input: prompt, voiceId, format,
+        feature: "canvas.audio.speech", requestId, model: config.model, engine, input: prompt, ...(referenceAudioMediaId ? { referenceAudioMediaId } : { voiceId }), format,
         speed: Number(normalizeAudioSpeedValue(config.audioSpeed)),
     }, options?.signal);
     const response = await axios.post<{ task_id?: string; status?: string }>(
@@ -171,7 +176,9 @@ async function requestCanvasAudioGeneration(config: AiConfig, prompt: string, fo
             model: config.model,
             engine,
             input: prompt,
-            voiceId,
+            ...(referenceAudioMediaId
+                ? { referenceAudioMediaId, referenceAudioName: options?.referenceAudio?.name || "参考音频" }
+                : { voiceId }),
             format,
             speed: Number(normalizeAudioSpeedValue(config.audioSpeed)),
             emotion: config.audioInstructions.trim(),
@@ -183,8 +190,18 @@ async function requestCanvasAudioGeneration(config: AiConfig, prompt: string, fo
     );
     const taskId = response.data?.task_id;
     if (!taskId) throw new Error("画布配音接口未返回任务 ID");
-    options?.onTaskCreated?.({ taskId, engine, voiceId, characterCount: prompt.length });
+    options?.onTaskCreated?.({ taskId, engine, ...(referenceAudioMediaId ? {} : { voiceId }), characterCount: prompt.length });
     return pollCanvasAudioTask(config, taskId, options?.signal);
+}
+
+async function ensureReferenceAudioMediaId(reference: ReferenceAudio) {
+    if (reference.mediaId) return reference.mediaId;
+    if (!reference.storageKey) throw new Error("参考音频未同步到云端，请重新上传后再试");
+    const blob = await getMediaBlob(reference.storageKey);
+    if (!blob?.size) throw new Error("参考音频的本地文件已丢失，请重新上传后再试");
+    const uploaded = await uploadCanvasMedia(blob, "audio");
+    if (!uploaded?.mediaId) throw new Error("参考音频同步失败，请稍后重试");
+    return uploaded.mediaId;
 }
 
 export async function pollCanvasAudioTask(config: AiConfig, taskId: string, signal?: AbortSignal): Promise<GeneratedAudioResult> {

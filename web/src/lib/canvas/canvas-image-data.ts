@@ -166,9 +166,13 @@ function drawResizeCanvas(source: CanvasImageSource, sourceWidth: number, source
 }
 
 function loadImage(dataUrl: string) {
-    return new Promise<HTMLImageElement>((resolve) => {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
         const image = new Image();
         image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("图片无法读取，可能是远程地址已失效或未允许跨域访问"));
+        // Required for remote images that explicitly allow anonymous CORS.
+        // Local data/blob URLs are unaffected by this setting.
+        image.crossOrigin = "anonymous";
         image.src = dataUrl;
     });
 }

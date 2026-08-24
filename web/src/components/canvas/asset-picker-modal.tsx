@@ -3,28 +3,32 @@ import { Empty, Input, Modal, Pagination, Tag } from "antd";
 import { Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { useAssetStore, type Asset } from "@/stores/use-asset-store";
+import { resolveImageUrl } from "@/services/image-storage";
+import { resolveMediaUrl } from "@/services/file-storage";
+import { assetPreviewUrl, useAssetStore, type Asset, type AssetKind } from "@/stores/use-asset-store";
 
 export type InsertAssetPayload = { kind: "text"; content: string; title: string } | { kind: "image"; dataUrl: string; title: string; storageKey?: string } | { kind: "video"; url: string; title: string; storageKey?: string; width?: number; height?: number };
 
 type Props = {
     open: boolean;
+    defaultKind?: AssetKind | "all";
     defaultTab?: string;
     onInsert: (payload: InsertAssetPayload) => void;
     onClose: () => void;
 };
 
-export function AssetPickerModal({ open, onInsert, onClose }: Props) {
+export function AssetPickerModal({ open, defaultKind, defaultTab, onInsert, onClose }: Props) {
+    const initialKind = defaultKind || (defaultTab === "text" || defaultTab === "image" || defaultTab === "video" ? defaultTab : "all");
     return (
         <Modal title="选择资产" open={open} onCancel={onClose} footer={null} width={860} destroyOnHidden styles={{ body: { padding: "0 24px 24px", minHeight: 480 } }}>
-            <MyAssetsTab onInsert={onInsert} />
+            <MyAssetsTab defaultKind={initialKind} onInsert={onInsert} />
         </Modal>
     );
 }
 
 const PAGE_SIZE = 8;
 
-const kindOptions = [
+const kindOptions: Array<{ label: string; value: AssetKind | "all" }> = [
     { label: "全部", value: "all" },
     { label: "文本", value: "text" },
     { label: "图片", value: "image" },
@@ -54,10 +58,10 @@ function PickerCard({ title, kind, cover, onClick }: { title: string; kind: stri
     );
 }
 
-function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => void }) {
+function MyAssetsTab({ defaultKind, onInsert }: { defaultKind: AssetKind | "all"; onInsert: (payload: InsertAssetPayload) => void }) {
     const assets = useAssetStore((state) => state.assets);
     const [keyword, setKeyword] = useState("");
-    const [kindFilter, setKindFilter] = useState("all");
+    const [kindFilter, setKindFilter] = useState(defaultKind);
     const [page, setPage] = useState(1);
 
     const filtered = useMemo(() => {
@@ -75,11 +79,15 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
         setPage((v) => Math.min(v, maxPage));
     }, [filtered.length]);
 
-    const handleInsert = (asset: Asset) => {
+    const handleInsert = async (asset: Asset) => {
         if (asset.kind === "text") {
             onInsert({ kind: "text", content: asset.data.content, title: asset.title });
+        } else if (asset.kind === "video") {
+            const url = await resolveMediaUrl(asset.data.storageKey, asset.data.url);
+            onInsert({ kind: "video", url, storageKey: asset.data.storageKey, title: asset.title, width: asset.data.width, height: asset.data.height });
         } else {
-            onInsert(asset.kind === "video" ? { kind: "video", url: asset.data.url, storageKey: asset.data.storageKey, title: asset.title, width: asset.data.width, height: asset.data.height } : { kind: "image", dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey, title: asset.title });
+            const dataUrl = await resolveImageUrl(asset.data.storageKey, asset.data.dataUrl || asset.coverUrl);
+            onInsert({ kind: "image", dataUrl, storageKey: asset.data.storageKey, title: asset.title });
         }
     };
 
@@ -118,7 +126,7 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
             {visible.length ? (
                 <div className="grid grid-cols-4 gap-3">
                     {visible.map((asset) => (
-                        <PickerCard key={asset.id} title={asset.title} kind={asset.kind} cover={asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "")} onClick={() => handleInsert(asset)} />
+                        <PickerCard key={asset.id} title={asset.title} kind={asset.kind} cover={assetPreviewUrl(asset)} onClick={() => void handleInsert(asset)} />
                     ))}
                 </div>
             ) : (

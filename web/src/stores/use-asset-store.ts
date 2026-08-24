@@ -47,12 +47,14 @@ const assetStorage: PersistStorage<AssetStore> = {
             parsed.state.assets.map(async (asset) => {
                 if (asset.kind === "video" && asset.data.storageKey) return { ...asset, data: { ...asset.data, url: await resolveMediaUrl(asset.data.storageKey, asset.data.url) } };
                 if (asset.kind !== "image") return asset;
-                if (asset.data.storageKey)
+                if (asset.data.storageKey) {
+                    const localUrl = await resolveImageUrl(asset.data.storageKey, "");
                     return {
                         ...asset,
-                        coverUrl: asset.coverUrl.startsWith("blob:") ? await resolveImageUrl(asset.data.storageKey, asset.coverUrl) : asset.coverUrl,
-                        data: { ...asset.data, dataUrl: await resolveImageUrl(asset.data.storageKey, asset.data.dataUrl) },
+                        coverUrl: localUrl || asset.coverUrl,
+                        data: { ...asset.data, dataUrl: localUrl || asset.data.dataUrl },
                     };
+                }
                 if (!asset.data.dataUrl.startsWith("data:image/")) return asset;
                 const image = await uploadImage(asset.data.dataUrl);
                 return { ...asset, coverUrl: asset.coverUrl.startsWith("data:image/") ? image.url : asset.coverUrl, data: { ...asset.data, dataUrl: image.url, storageKey: image.storageKey, bytes: image.bytes, mimeType: image.mimeType } };
@@ -112,4 +114,15 @@ export async function rehydrateAssetStoreForAccount() {
 
 export function clearAssetStoreMemory() {
     useAssetStore.setState({ hydrated: false, assets: [] });
+}
+
+export function assetPreviewUrl(asset: Asset) {
+    if (asset.kind === "image") {
+        // A saved canvas image can retain an expiring OSS cover URL while its
+        // durable local Blob has already been restored into dataUrl.
+        if (asset.data.storageKey && asset.data.dataUrl) return asset.data.dataUrl;
+        return asset.coverUrl || asset.data.dataUrl;
+    }
+    if (asset.kind === "video") return asset.coverUrl || asset.data.url;
+    return asset.coverUrl;
 }

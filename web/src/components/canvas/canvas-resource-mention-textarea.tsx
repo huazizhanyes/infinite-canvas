@@ -25,6 +25,7 @@ type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "onChange" | "val
     expandable?: boolean;
     expandTitle?: string;
     richMentions?: boolean;
+    placeholderClassName?: string;
 };
 
 export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea(props, forwardedRef) {
@@ -82,7 +83,7 @@ function CanvasTextareaMentionEditor({ value, references, onChange, onSubmit, on
 
     const insertReference = (reference: CanvasResourceReference) => {
         if (!mention) return;
-        const insertText = `${reference.label} `;
+        const insertText = `@${reference.label} `;
         const next = `${value.slice(0, mention.start)}${insertText}${value.slice(mention.end)}`;
         closeMention();
         updateValue(next, mention.start + insertText.length);
@@ -257,7 +258,7 @@ function MentionHighlightText({ value, labels }: { value: string; labels: string
     );
 }
 
-function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyDown, onFocus, onBlur, className, containerClassName, style, placeholder, expandable = true, expandTitle = "编辑内容" }: Props) {
+function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyDown, onFocus, onBlur, className, containerClassName, style, placeholder, placeholderClassName, expandable = true, expandTitle = "编辑内容" }: Props) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement | null>(null);
     const [mention, setMention] = useState<MentionState | null>(null);
@@ -314,7 +315,9 @@ function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyD
         label.textContent = reference.label;
         token.append(label);
         range.insertNode(token);
-        range.setStartAfter(token);
+        const spacer = document.createTextNode(" ");
+        token.after(spacer);
+        range.setStartAfter(spacer);
         range.collapse(true);
         selection.removeAllRanges();
         selection.addRange(range);
@@ -324,7 +327,7 @@ function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyD
     const menu = mention && candidates.length && editorRef.current ? <MentionMenu anchor={editorRef.current} references={candidates} activeIndex={activeIndex} theme={theme} onSelect={insertReference} /> : null;
     return (
         <div className={`relative h-full w-full ${containerClassName || ""}`} data-canvas-no-zoom onWheel={(event) => event.stopPropagation()}>
-            {!value.trim() && !focused && placeholder ? <div className="pointer-events-none absolute inset-x-3 top-2 z-[2] whitespace-pre-wrap text-[12px] leading-5" style={{ color: theme.node.muted }}><MentionPlaceholderText value={placeholder} /></div> : null}
+            {!value.trim() && !focused && placeholder ? <div className={`pointer-events-none absolute inset-x-3 top-2 z-[2] whitespace-pre-wrap text-[12px] leading-5 ${placeholderClassName || ""}`} style={{ color: theme.node.muted }}><MentionPlaceholderText value={placeholder} /></div> : null}
             <div
                 ref={editorRef}
                 contentEditable
@@ -350,7 +353,7 @@ function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyD
             />
             {menu}
             {expandable ? <Button type="text" size="small" aria-label={`放大${expandTitle}`} title={`放大${expandTitle}`} icon={<Maximize2 className="size-3.5" />} className="!absolute right-1 top-1 z-10 !grid !size-7 !min-w-7 !place-items-center !p-0 opacity-70 hover:!opacity-100" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={() => setExpanded(true)} /> : null}
-            {expandable ? <Modal title={expandTitle} open={expanded} footer={null} centered width="min(92vw, 900px)" onCancel={() => setExpanded(false)}><CanvasRichMentionEditor value={value} references={references} onChange={onChange} onSubmit={onSubmit} onKeyDown={onKeyDown} placeholder={placeholder} className="!h-[min(68vh,560px)] !w-full resize-none" style={style} expandable={false} expandTitle={expandTitle} /></Modal> : null}
+            {expandable ? <Modal title={expandTitle} open={expanded} footer={null} centered width="min(92vw, 900px)" onCancel={() => setExpanded(false)}><CanvasRichMentionEditor value={value} references={references} onChange={onChange} onSubmit={onSubmit} onKeyDown={onKeyDown} placeholder={placeholder} placeholderClassName={placeholderClassName} className="!h-[min(68vh,560px)] !w-full resize-none" style={style} expandable={false} expandTitle={expandTitle} /></Modal> : null}
         </div>
     );
 }
@@ -359,14 +362,25 @@ function MentionMenu({ anchor, references, activeIndex, theme, onSelect }: { anc
     const selectedRef = useRef(false);
     const assetLeaveTimer = useRef<number | null>(null);
     const [assetRowRect, setAssetRowRect] = useState<DOMRect | null>(null);
+    const [, refreshPosition] = useState(0);
+    useLayoutEffect(() => {
+        const update = () => refreshPosition((value) => value + 1);
+        window.addEventListener("resize", update);
+        window.addEventListener("scroll", update, true);
+        return () => {
+            window.removeEventListener("resize", update);
+            window.removeEventListener("scroll", update, true);
+        };
+    }, [anchor]);
     const rect = anchor.getBoundingClientRect();
     const boundary = anchor.closest(".ant-modal-content")?.getBoundingClientRect() || { left: 8, top: 8, right: window.innerWidth - 8, bottom: window.innerHeight - 8 };
     const menuWidth = 256;
     const maxMenuHeight = 224;
+    const menuHeight = Math.min(maxMenuHeight, Math.max(56, (references.some((reference) => reference.source === "user-asset") ? references.filter((reference) => reference.source !== "user-asset").length + 1 : references.length) * 48 + 8));
     const gap = 6;
     const left = clamp(rect.left, boundary.left + 8, boundary.right - menuWidth - 8);
-    const showAbove = rect.bottom + gap + maxMenuHeight > boundary.bottom && rect.top - gap - maxMenuHeight >= boundary.top;
-    const top = clamp(showAbove ? rect.top - gap - maxMenuHeight : rect.bottom + gap, boundary.top + 8, boundary.bottom - maxMenuHeight - 8);
+    const showAbove = rect.bottom + gap + menuHeight > boundary.bottom && rect.top - gap - menuHeight >= boundary.top;
+    const top = clamp(showAbove ? rect.top - gap - menuHeight : rect.bottom + gap, boundary.top + 8, boundary.bottom - menuHeight - 8);
     const canvasReferences = references.filter((reference) => reference.source !== "user-asset");
     const assetReferences = references.filter((reference) => reference.source === "user-asset");
     const assetMenuTop = assetRowRect ? clamp(assetRowRect.top, boundary.top + 8, boundary.bottom - maxMenuHeight - 8) : top;
@@ -479,9 +493,9 @@ function MentionPlaceholderText({ value }: { value: string }) {
 function richEditorHtml(value: string, references: CanvasResourceReference[]) {
     const labels = references.filter((item) => item.active).map((item) => item.label).sort((left, right) => right.length - left.length);
     if (!labels.length) return escapeHtml(value);
-    const parts = value.split(new RegExp(`(${labels.map(escapeRegExp).join("|")})`, "g"));
+    const parts = value.split(new RegExp(`(@?(?:${labels.map(escapeRegExp).join("|")}))`, "g"));
     return parts.map((part) => {
-        const reference = references.find((item) => item.label === part && item.active);
+        const reference = references.find((item) => item.label === (part.startsWith("@") ? part.slice(1) : part) && item.active);
         if (!reference) return escapeHtml(part);
         return `<span contenteditable="false" data-mention-id="${escapeAttribute(reference.id)}" title="${escapeAttribute(reference.title || reference.label)}" class="${mentionTokenClassName}">${mentionPreviewHtml(reference)}<span class="${mentionTokenLabelClassName}">${escapeHtml(reference.label)}</span></span>`;
     }).join("");
@@ -497,7 +511,7 @@ function serializeEditor(editor: HTMLElement) {
 function serializeEditorNode(node: Node): string {
     if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
     if (!(node instanceof HTMLElement)) return Array.from(node.childNodes).map(serializeEditorNode).join("");
-    if (node.dataset.mentionId) return node.textContent || "";
+    if (node.dataset.mentionId) return `@${node.textContent || ""}`;
     if (node.tagName === "BR") return "\n";
     const content = Array.from(node.childNodes).map(serializeEditorNode).join("");
     return node !== node.ownerDocument?.body && (node.tagName === "DIV" || node.tagName === "P") ? `${content}\n` : content;
