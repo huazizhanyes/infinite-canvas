@@ -38,35 +38,6 @@ import { useCanvasPersistenceStatus } from "@/stores/canvas/use-canvas-store";
 
 const SHOW_PLUGIN_UI = import.meta.env.VITE_SHOW_CANVAS_PLUGIN_UI !== "false";
 
-const TOOL_ACCENTS = {
-    stone: { light: "#57534e", dark: "#d6d3d1", rgb: "120,113,108" },
-    sky: { light: "#0284c7", dark: "#38bdf8", rgb: "14,165,233" },
-    violet: { light: "#7c3aed", dark: "#a78bfa", rgb: "139,92,246" },
-    emerald: { light: "#059669", dark: "#34d399", rgb: "16,185,129" },
-    cyan: { light: "#0891b2", dark: "#22d3ee", rgb: "6,182,212" },
-    rose: { light: "#e11d48", dark: "#fb7185", rgb: "244,63,94" },
-    amber: { light: "#d97706", dark: "#fbbf24", rgb: "245,158,11" },
-    indigo: { light: "#4f46e5", dark: "#818cf8", rgb: "99,102,241" },
-    fuchsia: { light: "#c026d3", dark: "#e879f9", rgb: "217,70,239" },
-} as const;
-
-type ToolbarAccent = keyof typeof TOOL_ACCENTS;
-
-const TOOL_ACCENT_BY_ID: Record<string, ToolbarAccent> = {
-    "tool-hand": "sky",
-    "tool-undo": "violet",
-    "tool-redo": "violet",
-    "tool-text": "indigo",
-    "tool-image": "emerald",
-    "tool-video": "cyan",
-    "tool-audio": "rose",
-    "tool-group": "violet",
-    "tool-asset-extraction": "sky",
-    "tool-extensions": "violet",
-    "tool-upload": "sky",
-    "tool-style": "fuchsia",
-};
-
 export function CanvasToolbar({
     selectedCount,
     panMode,
@@ -133,13 +104,11 @@ export function CanvasToolbar({
     useNodeRegistryVersion();
     const extensionDefs = SHOW_PLUGIN_UI ? listNodeDefinitions().filter((def) => def.showInCreateMenu !== false && getNodePluginId(def.type) !== "builtin") : [];
     const dockStyle = {
-        background: theme.toolbar.panel,
-        borderColor: theme.toolbar.border,
-        color: theme.toolbar.item,
-        boxShadow: colorTheme === "dark" ? "0 20px 52px rgba(0,0,0,.42), 0 0 28px rgba(14,165,233,.06), 0 0 44px rgba(139,92,246,.05)" : "0 18px 46px rgba(28,25,23,.14), 0 0 24px rgba(14,165,233,.05), 0 0 36px rgba(139,92,246,.04)",
+        background: "rgba(8, 12, 22, .88)",
+        borderColor: "rgba(148,163,184,.22)",
+        color: "#ffffff",
+        boxShadow: "0 18px 48px rgba(0,0,0,.34), 0 0 0 1px rgba(255,255,255,.04) inset",
     };
-    const saveAccent = saveStatus === "error" ? TOOL_ACCENTS.rose : saveStatus === "saving" || saveStatus === "pending" ? TOOL_ACCENTS.amber : TOOL_ACCENTS.emerald;
-    const saveColor = colorTheme === "dark" ? saveAccent.dark : saveAccent.light;
     const tip = hovered ? toolLabel(hovered) : "";
 
     // 点击工具栏(含弹出面板)以外的地方,关闭弹出的扩展节点/画布外观面板
@@ -171,10 +140,10 @@ export function CanvasToolbar({
     return (
         <div ref={rootRef} className="pointer-events-none absolute bottom-4 z-50 flex justify-center" style={{ left: 280, right: 16 }}>
             {tip ? <DockTip label={tip} x={tipX} theme={theme} /> : null}
-            <div ref={wrapRef} data-canvas-toolbar-dock className="thin-scrollbar pointer-events-auto flex h-12 max-w-full items-center gap-1 overflow-x-auto rounded-lg border px-1.5 shadow-lg backdrop-blur [&>*]:shrink-0" style={dockStyle}>
+            <div ref={wrapRef} data-canvas-toolbar-dock className="thin-scrollbar pointer-events-auto flex h-14 max-w-full items-center gap-1 overflow-x-auto rounded-2xl border px-2 shadow-lg backdrop-blur [&>*]:shrink-0" style={dockStyle}>
                 <span
-                    className="inline-flex h-8 w-[76px] items-center justify-center gap-1 rounded-lg border text-[11px] font-medium transition-colors"
-                    style={{ color: saveColor, background: `rgba(${saveAccent.rgb},.08)`, borderColor: `rgba(${saveAccent.rgb},.16)` }}
+                    className="inline-flex h-10 w-[84px] items-center justify-center gap-1.5 rounded-lg border text-xs font-medium transition-colors"
+                    style={{ color: "#cbd5e1", background: "rgba(255,255,255,.05)", borderColor: "rgba(255,255,255,.12)" }}
                     title={saveStatus === "error" ? saveError || "画布保存失败" : saveStatus === "saving" ? "正在写入本地画布" : saveStatus === "pending" ? "改动将在停止操作后自动保存" : "画布已保存到本地"}
                 >
                     {saveStatus === "saving" ? <LoaderCircle className="size-3 animate-spin" /> : saveStatus === "pending" ? <Clock3 className="size-3" /> : saveStatus === "error" ? <TriangleAlert className="size-3 text-red-400" /> : <Check className="size-3" />}
@@ -284,8 +253,8 @@ export function CanvasToolbar({
 
             {extensionsOpen && extensionDefs.length ? (
                 <div
-                    className="thin-scrollbar pointer-events-auto absolute bottom-[72px] z-30 max-h-[50vh] w-[240px] -translate-x-1/2 overflow-y-auto rounded-xl border p-2 shadow-xl backdrop-blur"
-                    style={{ left: extPanelX || "50%", background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item }}
+                    className="thin-scrollbar pointer-events-auto absolute bottom-[88px] z-30 max-h-[50vh] w-[270px] -translate-x-1/2 overflow-y-auto rounded-xl border p-2.5 shadow-xl backdrop-blur"
+                    style={{ left: extPanelX || "50%", background: "rgba(15, 23, 42, .97)", borderColor: "rgba(255,255,255,.18)", color: "#ffffff" }}
                 >
                     <div className="px-1.5 pb-1.5 text-[11px] font-medium opacity-50">扩展节点</div>
                     <div className="grid gap-0.5">
@@ -314,8 +283,8 @@ export function CanvasToolbar({
 
             {appearanceOpen ? (
                 <div
-                    className="pointer-events-auto absolute bottom-[72px] z-30 w-[248px] -translate-x-1/2 rounded-xl border p-2.5 shadow-xl backdrop-blur"
-                    style={{ left: panelX || "50%", background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item }}
+                    className="pointer-events-auto absolute bottom-[88px] z-30 w-[280px] -translate-x-1/2 rounded-xl border p-3 shadow-xl backdrop-blur"
+                    style={{ left: panelX || "50%", background: "rgba(15, 23, 42, .97)", borderColor: "rgba(255,255,255,.18)", color: "#ffffff" }}
                 >
                     <div className="px-1 pb-2 text-sm font-medium opacity-65">画布外观</div>
                     <div className="px-1 pb-1.5 text-[11px] font-medium opacity-50">主题模式</div>
@@ -400,16 +369,13 @@ function ToolbarButton({
     danger?: boolean;
     children: ReactNode;
 }) {
-    const colorTheme = useThemeStore((state) => state.theme);
-    const accent = TOOL_ACCENTS[danger ? "rose" : TOOL_ACCENT_BY_ID[id] || "stone"];
-    const accentColor = colorTheme === "dark" ? accent.dark : accent.light;
     const isHovered = hovered === id && !disabled;
     const buttonStyle: CSSProperties = {
-        color: accentColor,
+        color: active ? "#f8fafc" : danger ? "#fda4af" : "#dbeafe",
         opacity: disabled ? 0.28 : 1,
-        background: disabled ? "transparent" : `rgba(${accent.rgb},${active ? 0.22 : isHovered ? 0.17 : 0.07})`,
-        borderColor: disabled ? "transparent" : `rgba(${accent.rgb},${active ? 0.34 : isHovered ? 0.26 : 0.08})`,
-        boxShadow: disabled ? "none" : active ? `0 0 0 1px rgba(${accent.rgb},.12), 0 8px 22px rgba(${accent.rgb},.16)` : isHovered ? `0 7px 18px rgba(${accent.rgb},.14)` : "none",
+        background: disabled ? "transparent" : active ? "rgba(96,165,250,.2)" : isHovered ? "rgba(255,255,255,.1)" : "transparent",
+        borderColor: disabled ? "transparent" : active ? "rgba(125,211,252,.55)" : isHovered ? "rgba(255,255,255,.2)" : "transparent",
+        boxShadow: disabled ? "none" : active ? "0 0 0 1px rgba(125,211,252,.12), 0 8px 22px rgba(0,0,0,.2)" : "none",
         transform: isHovered ? "translateY(-1px)" : "translateY(0)",
     };
 
@@ -418,7 +384,7 @@ function ToolbarButton({
             type="text"
             aria-label={label}
             title={label}
-            className="!h-9 !w-9 !min-w-9 !rounded-lg !border !border-solid !p-0 !transition-all !duration-200"
+            className="!h-10 !w-10 !min-w-10 !rounded-lg !border !border-solid !p-0 !transition-all !duration-200"
             disabled={disabled}
             style={buttonStyle}
             icon={children}
@@ -433,7 +399,7 @@ function ToolbarButton({
 }
 
 function Divider({ theme }: { theme: CanvasTheme }) {
-    return <div className="mx-1 h-6 w-px" style={{ background: theme.toolbar.border }} />;
+    return <div className="mx-1 h-7 w-px" style={{ background: "rgba(148,163,184,.2)" }} />;
 }
 
 function CanvasThemeButton({ colorTheme, targetTheme, onThemeChange, children }: { colorTheme: CanvasColorTheme; targetTheme: CanvasColorTheme; onThemeChange: (theme: CanvasColorTheme) => void; children: ReactNode }) {
@@ -446,7 +412,7 @@ function CanvasThemeButton({ colorTheme, targetTheme, onThemeChange, children }:
             theme={colorTheme}
             targetTheme={targetTheme}
             onThemeChange={onThemeChange}
-            className="inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-sm transition"
+            className="inline-flex h-10 min-w-0 items-center justify-center gap-1.5 rounded-md px-2.5 text-sm transition"
             style={active ? activeStyle : { color: theme.toolbar.item }}
             aria-label={`切换到${targetTheme === "dark" ? "深色" : "浅色"}主题`}
             title={`切换到${targetTheme === "dark" ? "深色" : "浅色"}主题`}

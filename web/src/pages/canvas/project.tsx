@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Bot, Group, Home, ImageIcon, Images, List, Menu, Music2, Plus, Redo2, Trash2, Undo2, Upload, Video, X } from "lucide-react";
+import { ArrowUpRight, Bot, Group, Home, ImageIcon, Images, List, Menu, MousePointer2, Music2, Plus, Redo2, ScanText, Trash2, Type, Undo2, Upload, Video, X } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
@@ -336,6 +336,41 @@ function NodeCreateMenu({ position, scale, onCreate, onClose }: { position: Posi
     );
 }
 
+function EmptyCanvasGuide({ onCreate }: { onCreate: (type: CanvasNodeType) => void }) {
+    const actions = [
+        { type: CanvasNodeType.Text, title: "文字创作", description: "先写下想法或脚本", accent: "#fbbf24", icon: <Type className="size-5" />, art: <Type className="size-16" /> },
+        { type: CanvasNodeType.Image, title: "生成图片", description: "从描述开始构图", accent: "#67e8f9", icon: <ImageIcon className="size-5" />, art: <ImageIcon className="size-16" /> },
+        { type: CanvasNodeType.Video, title: "生成视频", description: "让画面动起来", accent: "#a78bfa", icon: <Video className="size-5" />, art: <Video className="size-16" /> },
+        { type: CanvasNodeType.AssetExtraction, title: "资产提取", description: "从内容中整理资产", accent: "#34d399", icon: <ScanText className="size-5" />, art: <ScanText className="size-16" /> },
+    ];
+    return (
+        <div data-canvas-no-zoom className="pointer-events-auto w-[min(1160px,calc(100vw-64px))] text-white" onPointerDown={(event) => event.stopPropagation()}>
+            <div className="mb-7 flex flex-col items-center text-center">
+                <div className="flex items-center gap-3 text-[22px] font-semibold tracking-tight"><MousePointer2 className="size-5 text-sky-300" />双击画布，自由生成节点</div>
+                <p className="mt-2 text-sm text-slate-300">从一个节点开始，把文字、图片、视频和资产提取串成创作流程</p>
+            </div>
+            <div className="grid grid-cols-4 gap-4">
+                {actions.map((action) => (
+                    <button
+                        key={action.type}
+                        type="button"
+                        className="group relative flex h-[112px] min-w-0 items-center gap-3 overflow-hidden rounded-xl border border-[#33466b] bg-[#111c37] px-4 text-left shadow-[0_12px_30px_rgba(0,0,0,.16)] transition duration-200 hover:-translate-y-0.5 hover:border-sky-300/70 hover:bg-[#172645]"
+                        onClick={() => onCreate(action.type)}
+                    >
+                        <span className="relative z-10 grid size-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[.09] transition group-hover:bg-white/[.16]" style={{ color: action.accent }}>{action.icon}</span>
+                        <span className="relative z-10 min-w-0">
+                            <span className="block truncate text-base font-medium">{action.title}</span>
+                            <span className="mt-1 block truncate text-xs text-slate-300">{action.description}</span>
+                        </span>
+                        <span className="pointer-events-none absolute bottom-2 right-3 opacity-[.1] transition duration-300 group-hover:scale-105 group-hover:opacity-[.18]" style={{ color: action.accent }}>{action.art}</span>
+                        <ArrowUpRight className="absolute right-3 top-3 size-4 text-slate-500 transition group-hover:text-sky-200" />
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 function InfiniteCanvasPage() {
     const { message, modal } = App.useApp();
     // 订阅节点注册表版本,插件动态注册/卸载后驱动画布重渲染
@@ -523,7 +558,7 @@ function InfiniteCanvasPage() {
     const updateVideoHostTask = useCallback((targetNodeId: string, task: CanvasVideoTask) => {
         const request = generationRequestsRef.current.get(targetNodeId);
         if (!request) return;
-        const phase = task.archiveStatus === "archiving" ? "视频归档中" : task.status === "queued" ? "视频排队中" : task.status === "completed" ? "视频已完成" : task.status === "failed" ? "视频生成失败" : "视频生成中";
+        const phase = task.archiveStatus === "archiving" ? "视频归档中" : task.status === "queued" ? "视频排队中" : task.status === "submission_unknown" ? "提交结果未知，请勿重复生成" : task.status === "completed" ? "视频已完成" : task.status === "failed" ? "视频生成失败" : "视频生成中";
         const billing = task.billingStatus === "refunded" ? "已退款" : "";
         useCanvasHostTaskStore.getState().updateTask(request.taskId, { progress: task.progress, stage: [phase, billing].filter(Boolean).join(" · ") });
     }, []);
@@ -3628,6 +3663,12 @@ function InfiniteCanvasPage() {
                     ) : null}
                 </InfiniteCanvas>
 
+                {nodes.length === 0 && !nodeCreatePosition ? (
+                    <div className="pointer-events-none absolute inset-0 z-[40] flex items-center justify-center pb-24">
+                        <EmptyCanvasGuide onCreate={(type) => createNode(type, getCanvasCenter())} />
+                    </div>
+                ) : null}
+
                 <CanvasNodeHoverToolbar
                     node={isNodeDragging || nodeImageSettingsOpen ? null : toolbarNode}
                     viewport={viewport}
@@ -3683,7 +3724,7 @@ function InfiniteCanvasPage() {
 
                 {isMiniMapOpen ? <Minimap nodes={nodes} viewport={viewport} viewportSize={size} onViewportChange={setViewport} /> : null}
 
-                <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)} />
+                <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)} onOpenAssets={() => setAssetPickerOpen(true)} />
 
                 {contextMenu ? (
                     <CanvasNodeContextMenu
@@ -4027,7 +4068,7 @@ function canvasVideoMetadata(video: CanvasVideoStoredResult): CanvasNodeMetadata
 function canvasVideoTaskMetadata(task: CanvasVideoTask): CanvasNodeMetadata {
     return {
         videoProgress: task.progress,
-        videoPhase: task.archiveStatus === "archiving" ? "archiving" : task.status === "queued" ? "queued" : "generating",
+        videoPhase: task.archiveStatus === "archiving" ? "archiving" : task.status === "queued" ? "queued" : task.status === "submission_unknown" ? "submission_unknown" : "generating",
         videoCanCancel: Boolean(task.canCancel),
         videoQueuePosition: task.queuePosition,
         videoBillingStatus: task.billingStatus,

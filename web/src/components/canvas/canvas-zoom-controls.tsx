@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Compass, Focus, HelpCircle } from "lucide-react";
+import { Compass, Focus, FolderOpen, HelpCircle } from "lucide-react";
 import { useState } from "react";
 import { Button, Modal, Tooltip } from "antd";
 
@@ -12,9 +12,10 @@ type CanvasZoomControlsProps = {
     onReset: () => void;
     isMiniMapOpen: boolean;
     onToggleMiniMap: () => void;
+    onOpenAssets: () => void;
 };
 
-export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpen, onToggleMiniMap }: CanvasZoomControlsProps) {
+export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpen, onToggleMiniMap, onOpenAssets }: CanvasZoomControlsProps) {
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
@@ -22,7 +23,7 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
     const activeStyle = { background: theme.toolbar.activeBg, color: theme.toolbar.activeText };
 
     return (
-        <div className="absolute bottom-4 left-4 z-50" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+        <div className="absolute bottom-4 left-4 z-50 flex items-center gap-2" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
             <div className="flex h-12 items-center gap-1 rounded-lg border px-1.5 shadow-lg backdrop-blur" style={dockStyle}>
                 <Tooltip title={isMiniMapOpen ? "关闭小地图" : "打开小地图"}>
                     <Button
@@ -57,6 +58,18 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
                     <Button type="text" className="!h-8 !w-8 !min-w-8 !p-0" style={shortcutsOpen ? activeStyle : { color: theme.toolbar.item }} icon={<HelpCircle className="size-4" />} onClick={() => setShortcutsOpen(true)} aria-label="快捷键" />
                 </Tooltip>
             </div>
+            <Tooltip title="资产库">
+                <Button
+                    type="text"
+                    className="!h-12 !min-w-12 !rounded-lg !border !px-3 !shadow-lg !backdrop-blur"
+                    style={{ ...dockStyle, color: theme.toolbar.item }}
+                    icon={<FolderOpen className="size-4" />}
+                    onClick={onOpenAssets}
+                    aria-label="资产库"
+                >
+                    <span className="ml-1 text-xs">资产库</span>
+                </Button>
+            </Tooltip>
             <Modal title="快捷键" open={shortcutsOpen} onCancel={() => setShortcutsOpen(false)} footer={null} centered>
                 <div className="space-y-3 border-t pt-4 text-sm" style={{ borderColor: theme.node.stroke }}>
                     <Shortcut label="拖动画布" value="平移视图" />

@@ -9,7 +9,7 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 export type CanvasVideoTask = {
     id: string;
     clientRequestId?: string;
-    status: "queued" | "in_progress" | "completed" | "failed";
+    status: "queued" | "in_progress" | "submission_unknown" | "completed" | "failed";
     progress: number;
     projectId: string;
     nodeId: string;
@@ -25,6 +25,7 @@ export type CanvasVideoTask = {
     width?: number | null;
     height?: number | null;
     error?: { code?: string | null; message?: string | null } | null;
+    statusMessage?: string | null;
     estimatedCostCredits?: number;
     chargedCredits?: number;
     balanceAfter?: number | null;

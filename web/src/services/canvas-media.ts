@@ -5,7 +5,7 @@ export type CanvasMediaUpload = { mediaId: string; mediaStatus: "synced" | "fail
 export type CanvasMediaOwner = { projectId?: string; ownerType?: "asset"; ownerId?: string };
 export type CanvasLocation = Pick<Location, "pathname" | "search" | "hash">;
 
-/** Resolve a persisted canvas media record to a short-lived OSS URL. */
+/** Resolve a persisted canvas media record to its public NAS or OSS URL. */
 export async function resolveCanvasMediaUrl(mediaId: string, fallback = "") {
     const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : "";
     if (!token || !mediaId || !API_BASE) return fallback;

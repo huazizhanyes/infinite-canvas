@@ -500,7 +500,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             {showPanel && !isGroup && renderPanel ? (
                 <div
                     data-canvas-node-panel={data.id}
-                    className={`absolute left-1/2 z-[70] max-w-[calc(100vw-24px)] ${data.type === CanvasNodeType.Text ? "w-[504px]" : "w-[520px]"}`}
+                    className={`absolute left-1/2 z-[70] max-w-[calc(100vw-24px)] ${data.type === CanvasNodeType.Text ? "w-[560px]" : "w-[580px]"}`}
                     style={{
                         top: "calc(100% + 8px)",
                         transform: `translateX(-50%) scale(${screenFixedScale(scale)})`,
@@ -764,7 +764,7 @@ function VideoNodeContent({ node, theme, scale }: NodeContentRendererProps) {
     const [reloadKey, setReloadKey] = useState(0);
     if (!node.metadata?.content) {
         if (node.metadata?.status === "loading" && node.metadata?.videoProvider === "canvas-video") {
-            const phase = node.metadata.videoPhase === "archiving" ? "正在归档" : node.metadata.videoPhase === "queued" ? `正在排队${node.metadata.videoQueuePosition ? ` · 前方 ${Math.max(0, node.metadata.videoQueuePosition - 1)} 条` : ""}` : "正在生成";
+            const phase = node.metadata.videoPhase === "archiving" ? "正在归档" : node.metadata.videoPhase === "queued" ? `正在排队${node.metadata.videoQueuePosition ? ` · 前方 ${Math.max(0, node.metadata.videoQueuePosition - 1)} 条` : ""}` : node.metadata.videoPhase === "submission_unknown" ? "提交结果未知，请勿重复生成" : "正在生成";
             return (
                 <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-center" style={{ color: theme.node.text, transform: `scale(${screenUiScale(scale)})` }}>
                     <RefreshCw className="size-6 animate-spin opacity-55" />
