@@ -23,7 +23,7 @@ export type CanvasBillingQuote = {
             cycleMonth: string;
         };
     };
-    breakdown: Record<string, unknown> & { tierCode?: "NORMAL" | "SILVER" | "GOLD" | "DIAMOND"; normalUnitPriceMicros?: string; tierUnitPriceMicros?: string; requestedSeconds?: string; originalAmountMicros?: string; savingsMicros?: string; payableAmountMicros?: string };
+    breakdown: Record<string, unknown> & { billingUnit?: "SECOND" | "TASK"; tierCode?: "NORMAL" | "SILVER" | "GOLD" | "DIAMOND"; normalUnitPriceMicros?: string; tierUnitPriceMicros?: string; requestedSeconds?: string; originalAmountMicros?: string; savingsMicros?: string; payableAmountMicros?: string };
 };
 
 export type CanvasWalletPlan = { id: string; name: string; amount: string | number; pay_amount_fen?: string; wallet_amount_micros?: string; description?: string };

@@ -2,7 +2,7 @@ import axios from "axios";
 
 import { getMediaBlob } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
-import { buildApiUrl, modelOptionName, resolveModelRequestConfig, videoCapabilitiesOf, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, modelOptionName, normalizeVideoDuration, resolveModelRequestConfig, videoCapabilitiesOf, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -124,7 +124,7 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
     const audioAssetIds = await uploadAssets(requestConfig, "audio", referenceAudios, signal);
     const aspectRatio = capabilities.aspectRatios.includes(config.size) ? config.size : capabilities.aspectRatios[0];
     const quality = capabilities.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities.qualities[0]?.quality;
-    const duration = normalizeDuration(config.videoSeconds, capabilities.duration);
+    const duration = normalizeVideoDuration(config.videoSeconds, capabilities.duration);
     const selectedQuality = capabilities.qualities.find((item) => item.quality === quality) || capabilities.qualities[0];
     const pricingVersion = Number(selectedQuality?.pricingVersion || capabilities.pricingVersion || 0);
     if (!aspectRatio || !quality || !mode) throw new Error("视频模型能力配置不完整，请稍后重试");
@@ -336,15 +336,6 @@ async function referenceFile(reference: ReferenceImage | ReferenceVideo | Refere
     if (!blob?.size) throw new Error(`${kindLabel(kind)}读取失败，请重新上传后重试`);
     const fallbackType = kind === "image" ? "image/png" : kind === "video" ? "video/mp4" : "audio/mpeg";
     return new File([blob], reference.name || `reference.${extensionForMime(blob.type || fallbackType)}`, { type: blob.type || fallbackType });
-}
-
-function normalizeDuration(value: string, range: { min?: number | null; max?: number | null; options?: number[] | null }) {
-    const requested = Math.floor(Number(value));
-    const options = range.options || [];
-    if (options.length) return options.includes(requested) ? requested : options[0];
-    const min = range.min ?? 1;
-    const max = range.max ?? Math.max(min, 60);
-    return Math.max(min, Math.min(max, Number.isFinite(requested) ? requested : min));
 }
 
 function assertReferenceCount(value: number, min: number | undefined, max: number | undefined, label: string) {

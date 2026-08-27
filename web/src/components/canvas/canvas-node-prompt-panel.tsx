@@ -3,7 +3,7 @@ import { ArrowUp, Clapperboard, Square } from "lucide-react";
 import { Button, Dropdown, Segmented, Select, Tag, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
-import { defaultConfig, modelMatchesCapability, modelOptionName, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, videoCapabilitiesOf, type AiConfig } from "@/stores/use-config-store";
+import { defaultConfig, MIN_VIDEO_DURATION_SECONDS, modelMatchesCapability, modelOptionName, normalizeVideoDuration, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, videoCapabilitiesOf, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -19,7 +19,7 @@ import { isCanvasVideoModel } from "@/services/api/canvas-video";
 import { CanvasQuoteDisplay } from "./canvas-quote-display";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
-export type CanvasNodeGenerationOptions = { operation?: CanvasTextOperation; sourceScope?: "full" | "selection"; skipConfirmation?: boolean };
+export type CanvasNodeGenerationOptions = { operation?: CanvasTextOperation; sourceScope?: "full" | "selection"; skipConfirmation?: boolean; audioMode?: "synthesis" | "design" };
 
 type CanvasNodePromptPanelProps = {
     node: CanvasNodeData;
@@ -49,6 +49,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = defaultMode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
+    const audioMode = mode === "audio" ? node.metadata?.audioMode || "synthesis" : "synthesis";
+    const isVoiceDesign = mode === "audio" && audioMode === "design";
     const videoCapabilities = mode === "video" ? videoCapabilitiesOf(config, config.model) : undefined;
     const videoMode = mode === "video" ? (videoCapabilities?.modes.includes(config.videoMode) ? config.videoMode : videoCapabilities?.modes[0] || config.videoMode) : "";
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
@@ -70,7 +72,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const [quote, setQuote] = useState<CanvasBillingQuote | null>(null);
     const [quoteState, setQuoteState] = useState<"idle" | "loading" | "ready" | "error">("idle");
     const [quoteError, setQuoteError] = useState("");
-    const quoteEligible = mode === "image" || mode === "video" || (mode === "audio" && Boolean(prompt.trim()));
+    const quoteEligible = mode === "image" || mode === "video" || (mode === "audio" && !isVoiceDesign && Boolean(prompt.trim()));
     const activeReferences = mentionReferences.filter((reference) => reference.active && (reference.source !== "user-asset" || prompt.includes(reference.label)));
 
     useEffect(() => {
@@ -121,7 +123,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     }, [connection, mode, official, quoteEligible, stableQuotePayload]);
 
     const quoteBlocked = mode !== "text" && official && quoteEligible && (quoteState !== "ready" || !quote?.canSubmit);
-    const quoteLabel = mode === "text"
+    const quoteLabel = isVoiceDesign ? "免费" : mode === "text"
         ? "免费"
         : !official
           ? "自有渠道"
@@ -155,7 +157,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             ? [action?.instruction, prompt.trim() ? `补充要求：${prompt.trim()}` : ""].filter(Boolean).join("\n")
             : prompt.trim();
         if (!text || isRunning) return;
-        onGenerate(node.id, mode, text, mode === "text" && isEditingExistingContent ? { operation: textAction, sourceScope: textScope } : undefined);
+        onGenerate(node.id, mode, text, mode === "text" && isEditingExistingContent ? { operation: textAction, sourceScope: textScope } : mode === "audio" ? { audioMode } : undefined);
     };
 
     return (
@@ -175,7 +177,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 placeholderClassName={mode === "image" || mode === "video" ? "text-sm leading-6" : "text-[13px] leading-5"}
                 className={`thin-scrollbar w-full resize-none rounded-md border-0 px-3.5 py-2.5 ${mode === "image" || mode === "video" ? "text-sm leading-6" : "text-[13px] leading-5"} outline-none ${mode === "video" ? "h-48 min-h-48" : mode === "image" ? "h-40 min-h-40" : "h-20 min-h-20"}`}
                 style={{ background: theme.node.fill, color: theme.node.text }}
-                placeholder={mode === "text" && isEditingExistingContent ? textAction === "custom" ? "输入自定义处理要求" : "可选：补充处理要求" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
+                placeholder={isVoiceDesign ? "描述想要的音色，例如：年轻、温柔、略带沙哑的女声" : mode === "text" && isEditingExistingContent ? textAction === "custom" ? "输入自定义处理要求" : "可选：补充处理要求" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
 
             {mode === "text" && isEditingExistingContent ? <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -231,8 +233,22 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </>
                     ) : mode === "audio" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" className="!h-8 !w-[184px] !min-w-0 shrink !px-2 !text-xs" onMissingConfig={() => openConfigDialog(true)} />
-                            <CanvasAudioSettingsPopover config={config} referenceAudioName={official ? referenceAudio?.title || referenceAudio?.label : undefined} buttonClassName="!h-8 !w-[138px] !min-w-0 !justify-start !rounded-md !px-2 !text-xs" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                            <Segmented
+                                size="small"
+                                value={audioMode}
+                                options={[{ value: "synthesis", label: "音频合成" }, { value: "design", label: "音色设计" }]}
+                                onChange={(value) => onConfigChange(node.id, { audioMode: value as "synthesis" | "design", ...(value === "design" ? { audioFormat: "wav" } : {}) })}
+                            />
+                            {isVoiceDesign ? (
+                                <span className="flex h-8 min-w-0 items-center gap-1 rounded-md px-2 text-[11px] opacity-70" style={{ background: theme.node.fill }}>
+                                    VoxCPM <span className="opacity-60">· 免费</span>
+                                </span>
+                            ) : (
+                                <>
+                                    <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" className="!h-8 !w-[184px] !min-w-0 shrink !px-2 !text-xs" onMissingConfig={() => openConfigDialog(true)} />
+                                    <CanvasAudioSettingsPopover config={config} referenceAudioName={official ? referenceAudio?.title || referenceAudio?.label : undefined} buttonClassName="!h-8 !w-[138px] !min-w-0 !justify-start !rounded-md !px-2 !text-xs" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                                </>
+                            )}
                         </>
                     ) : (
                         <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" className="!h-8 !min-w-0 !max-w-[260px] flex-1 !px-2 !text-xs" onMissingConfig={() => openConfigDialog(true)} />
@@ -277,13 +293,11 @@ function buildQuotePayload(config: AiConfig, mode: CanvasNodeGenerationMode, nod
     const aspectRatio = capabilities?.aspectRatios.includes(config.size) ? config.size : capabilities?.aspectRatios[0] || config.size;
     const modes = capabilities?.modes || [];
     const videoMode = modes.includes(config.videoMode) ? config.videoMode : modes[0] || config.videoMode;
-    const requestedDuration = Math.floor(Number(config.videoSeconds));
-    const durationOptions = [...(capabilities?.duration.options || [])].sort((left, right) => left - right);
-    const duration = durationOptions.length
-        ? (durationOptions.includes(requestedDuration) ? requestedDuration : durationOptions[0])
-        : capabilities
-          ? Math.max(capabilities.duration.min ?? 1, Math.min(capabilities.duration.max ?? 60, Number.isFinite(requestedDuration) ? requestedDuration : capabilities.duration.min ?? 5))
-          : Number(config.videoSeconds || 0);
+    const durationMax = Number(capabilities?.duration.max);
+    const durationOptions = [...(capabilities?.duration.options || [])].filter((value) => value >= MIN_VIDEO_DURATION_SECONDS && (!Number.isFinite(durationMax) || value <= durationMax)).sort((left, right) => left - right);
+    const duration = capabilities
+        ? normalizeVideoDuration(config.videoSeconds, { ...capabilities.duration, options: durationOptions })
+        : Math.max(MIN_VIDEO_DURATION_SECONDS, Number(config.videoSeconds || MIN_VIDEO_DURATION_SECONDS));
     return {
         feature: "canvas.video.generate",
         requestId,
@@ -366,6 +380,7 @@ function videoModeLabel(mode: string) {
     if (mode === "text2video") return "文生视频";
     if (mode === "image2video") return "全能参考";
     if (mode === "frames2video") return "首尾帧";
+    if (mode === "first-frame-to-video") return "首帧生视频";
     return mode || "视频模式";
 }
 

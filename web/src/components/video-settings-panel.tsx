@@ -4,7 +4,7 @@ import { Input, InputNumber, Select, Slider, Switch } from "antd";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { modelOptionName, videoCapabilitiesOf, type AiConfig, type VideoModelCapabilities, type VideoParameterDefinition } from "@/stores/use-config-store";
+import { MIN_VIDEO_DURATION_SECONDS, modelOptionName, normalizeVideoDuration, videoCapabilitiesOf, type AiConfig, type VideoModelCapabilities, type VideoParameterDefinition } from "@/stores/use-config-store";
 import type { CanvasBillingQuote } from "@/services/api/canvas-billing";
 
 const resolutionOptions = [
@@ -97,7 +97,7 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, hasReference
                     </div>
                 </SettingGroup>
                 <SettingGroup title="秒数" color={theme.node.muted}>
-                    <DurationSlider value={Number(seconds) || 6} min={1} max={20} theme={theme} onChange={(value) => onConfigChange("videoSeconds", String(value))} />
+                    <DurationSlider value={normalizeVideoDuration(seconds)} min={MIN_VIDEO_DURATION_SECONDS} max={20} theme={theme} onChange={(value) => onConfigChange("videoSeconds", String(value))} />
                 </SettingGroup>
             </div>
         </ImageSettingsTheme>
@@ -107,12 +107,11 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, hasReference
 function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme, hasReferenceVideo, showTitle, className, quote }: VideoSettingsPanelProps & { capabilities: VideoModelCapabilities }) {
     const quality = capabilities.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities.qualities[0]?.quality || "";
     const ratio = capabilities.aspectRatios.includes(config.size) ? config.size : capabilities.aspectRatios[0] || "";
-    const durationOptions = [...(capabilities.duration.options || [])].sort((left, right) => left - right);
-    const requestedDuration = Math.floor(Number(config.videoSeconds));
-    const duration = durationOptions.length
-        ? (durationOptions.includes(requestedDuration) ? requestedDuration : durationOptions[0])
-        : Math.max(capabilities.duration.min ?? 1, Math.min(capabilities.duration.max ?? 60, Number.isFinite(requestedDuration) ? requestedDuration : capabilities.duration.min ?? 5));
+    const durationMax = Number(capabilities.duration.max);
+    const durationOptions = [...(capabilities.duration.options || [])].filter((value) => value >= MIN_VIDEO_DURATION_SECONDS && (!Number.isFinite(durationMax) || value <= durationMax)).sort((left, right) => left - right);
+    const duration = normalizeVideoDuration(config.videoSeconds, { ...capabilities.duration, options: durationOptions });
     const selectedQuality = capabilities.qualities.find((item) => item.quality === quality) || capabilities.qualities[0];
+    const billingType = selectedQuality?.pricing.type === "fixed_total" ? "fixed_total" : "per_second";
     const normalUnitPrice = Number(selectedQuality?.pricing.normalPriceMicros || selectedQuality?.pricing.unitPriceMicros || 0) / 1_000_000;
     const quoteTier = quote?.breakdown?.tierCode;
     const tierUnitPrice = Number(quote?.breakdown?.tierUnitPriceMicros || 0) / 1_000_000;
@@ -134,7 +133,7 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
                             <OptionPill key={item.quality} selected={quality === item.quality} theme={theme} onClick={() => onConfigChange("vquality", item.quality)}>
                                 <span className="flex flex-col items-center leading-tight">
                                     <span>{item.quality}</span>
-                                    <span className="whitespace-nowrap text-[10px] font-semibold text-amber-400">普通价 ¥{(Number(item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0) / 1_000_000).toFixed(2)}/秒</span>
+                                    <span className="whitespace-nowrap text-[10px] font-semibold text-amber-400">普通价 ¥{(Number(item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0) / 1_000_000).toFixed(2)}/{item.pricing.type === "fixed_total" ? "任务" : "秒"}</span>
                                 </span>
                             </OptionPill>
                         ))}
@@ -156,7 +155,7 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
                 <SettingGroup title="时长" color={theme.node.muted}>
                     <DurationSlider
                         value={duration}
-                        min={durationOptions[0] ?? capabilities.duration.min ?? 1}
+                        min={durationOptions[0] ?? Math.max(MIN_VIDEO_DURATION_SECONDS, capabilities.duration.min ?? MIN_VIDEO_DURATION_SECONDS)}
                         max={durationOptions[durationOptions.length - 1] ?? capabilities.duration.max ?? 60}
                         options={durationOptions.length ? durationOptions : undefined}
                         theme={theme}
@@ -172,10 +171,11 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
                     tier={quoteTier}
                     tierUnitPrice={tierUnitPrice}
                     payablePrice={payablePrice}
-                    originalPrice={originalPrice || normalUnitPrice * duration}
+                    originalPrice={originalPrice || normalUnitPrice * (billingType === "fixed_total" ? 1 : duration)}
                     savings={savings}
                     normalUnitPrice={normalUnitPrice}
                     duration={duration}
+                    billingType={billingType}
                     theme={theme}
                 />
             </div>
@@ -183,7 +183,7 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
     );
 }
 
-function VideoPriceSummary({ tier, tierUnitPrice, payablePrice, originalPrice, savings, normalUnitPrice, duration, theme }: { tier?: "NORMAL" | "SILVER" | "GOLD" | "DIAMOND"; tierUnitPrice: number; payablePrice: number; originalPrice: number; savings: number; normalUnitPrice: number; duration: number; theme: CanvasTheme }) {
+function VideoPriceSummary({ tier, tierUnitPrice, payablePrice, originalPrice, savings, normalUnitPrice, duration, billingType, theme }: { tier?: "NORMAL" | "SILVER" | "GOLD" | "DIAMOND"; tierUnitPrice: number; payablePrice: number; originalPrice: number; savings: number; normalUnitPrice: number; duration: number; billingType: "per_second" | "fixed_total"; theme: CanvasTheme }) {
     const tierLabels = { NORMAL: "普通用户", SILVER: "白银", GOLD: "黄金", DIAMOND: "钻石" } as const;
     const hasLiveQuote = Boolean(tier && tierUnitPrice > 0);
     const discounted = hasLiveQuote && savings > 0;
@@ -196,7 +196,7 @@ function VideoPriceSummary({ tier, tierUnitPrice, payablePrice, originalPrice, s
                         {discounted ? <span className="rounded bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-amber-400">已优惠</span> : null}
                     </div>
                     <div className="mt-1 text-[11px] leading-4" style={{ color: theme.node.muted }}>
-                        {hasLiveQuote ? `¥${tierUnitPrice.toFixed(2)}/秒 × ${duration} 秒` : `普通价 ¥${normalUnitPrice.toFixed(2)}/秒 × ${duration} 秒`}
+                        {billingType === "fixed_total" ? `${hasLiveQuote ? `¥${tierUnitPrice.toFixed(2)}` : `普通价 ¥${normalUnitPrice.toFixed(2)}`} / 任务` : hasLiveQuote ? `¥${tierUnitPrice.toFixed(2)}/秒 × ${duration} 秒` : `普通价 ¥${normalUnitPrice.toFixed(2)}/秒 × ${duration} 秒`}
                     </div>
                 </div>
                 <strong className="shrink-0 text-xl font-bold leading-6 text-amber-400">¥{(hasLiveQuote ? payablePrice : originalPrice).toFixed(2)}</strong>
@@ -267,7 +267,7 @@ function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, 
                     </div>
                 </SettingGroup>
                 <SettingGroup title="时长" color={theme.node.muted}>
-                    <DurationSlider value={duration} min={-1} max={15} options={[-1, ...Array.from({ length: 12 }, (_, index) => index + 4)]} theme={theme} onChange={(value) => onConfigChange("videoSeconds", String(value))} />
+                    <DurationSlider value={duration} min={MIN_VIDEO_DURATION_SECONDS} max={15} options={Array.from({ length: 11 }, (_, index) => index + MIN_VIDEO_DURATION_SECONDS)} theme={theme} onChange={(value) => onConfigChange("videoSeconds", String(value))} />
                 </SettingGroup>
                 <SettingGroup title="输出" color={theme.node.muted}>
                     <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
@@ -293,8 +293,7 @@ export function videoSizeLabel(value: string) {
 }
 
 export function videoSecondsLabel(value: string) {
-    if (String(value).trim() === "-1") return "智能";
-    return `${value || "6"}s`;
+    return `${normalizeVideoDuration(value || "6")}s`;
 }
 
 export function normalizeVideoSizeValue(value: string) {

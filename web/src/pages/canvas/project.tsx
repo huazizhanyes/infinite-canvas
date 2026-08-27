@@ -5,7 +5,7 @@ import { ArrowUpRight, Bot, Group, Home, ImageIcon, Images, List, Menu, MousePoi
 import { saveAs } from "file-saver";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
-import { cancelCanvasAudioTask, pollCanvasAudioTask, requestAudioGeneration, storeGeneratedAudio, type StoredGeneratedAudio } from "@/services/api/audio";
+import { cancelCanvasAudioTask, pollCanvasAudioTask, requestAudioGeneration, requestVoiceDesign, storeGeneratedAudio, type StoredGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { cancelQueuedCanvasVideoTask, createCanvasVideoTask, isCanvasVideoModel, waitForCanvasVideoTask, type CanvasVideoStoredResult, type CanvasVideoTask } from "@/services/api/canvas-video";
 import { SHOW_AGENT_UI, SUCAI_INTEGRATION } from "@/constant/env";
@@ -91,8 +91,10 @@ type CanvasClipboard = {
 };
 
 type PendingConnectionCreate = {
-    connection: ConnectionHandle;
+    connections: ConnectionHandle[];
     position: Position;
+    anchorPosition?: Position;
+    menuPosition?: Position;
 };
 
 type ConnectionDropTarget = {
@@ -233,24 +235,26 @@ function ConnectionCreateMenu({
     onClose: () => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const menuPosition = pending.menuPosition || pending.position;
+    const isBatch = pending.connections.length > 1;
     return (
         <div
-            className="absolute z-[120] w-[420px] origin-top-left rounded-[8px] border p-2 shadow-2xl backdrop-blur"
+            className={`absolute z-[120] origin-top-left rounded-[8px] border p-2 shadow-2xl backdrop-blur ${isBatch ? "w-[292px]" : "w-[420px]"}`}
             data-connection-create-menu
             data-canvas-no-zoom
-            style={{ left: pending.position.x, top: pending.position.y, transform: `scale(${1 / Math.max(scale, 0.05)})`, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+            style={{ left: menuPosition.x, top: menuPosition.y, transform: `scale(${1 / Math.max(scale, 0.05)})`, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
         >
             <div className="mb-1.5 flex items-center justify-between px-1">
                 <span className="text-[11px] font-semibold" style={{ color: theme.node.text }}>
-                    选择生成类型
+                    {isBatch ? `引用选中的 ${pending.connections.length} 个节点` : "选择生成类型"}
                 </span>
                 <button type="button" className="grid size-6 place-items-center rounded-md text-sm opacity-55 transition hover:bg-white/10 hover:opacity-100" onClick={onClose} aria-label="关闭">
                     ×
                 </button>
             </div>
-            <div className="grid grid-cols-2 gap-1">
+            <div className={`grid gap-1 ${isBatch ? "grid-cols-1" : "grid-cols-2"}`}>
                 <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title="文本生成" description="脚本、广告词、品牌文案" onClick={() => onCreate(CanvasNodeType.Text)} />
                 <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title="图片生成" onClick={() => onCreate(CanvasNodeType.Image)} />
                 <ConnectionCreateOption theme={theme} icon={<Video className="size-5" />} title="视频生成" onClick={() => onCreate(CanvasNodeType.Video)} />
@@ -442,6 +446,7 @@ function InfiniteCanvasPage() {
     const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
     const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
     const [connectingParams, setConnectingParams] = useState<ConnectionHandle | null>(null);
+    const [batchConnectingParams, setBatchConnectingParams] = useState<ConnectionHandle[] | null>(null);
     const [connectionTargetNodeId, setConnectionTargetNodeId] = useState<string | null>(null);
     const [pendingConnectionCreate, setPendingConnectionCreate] = useState<PendingConnectionCreate | null>(null);
     const [mouseWorld, setMouseWorld] = useState<Position>({ x: 0, y: 0 });
@@ -486,6 +491,10 @@ function InfiniteCanvasPage() {
     const viewportRef = useRef(viewport);
     const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, options?: CanvasNodeGenerationOptions) => Promise<void>) | null>(null);
     const connectingParamsRef = useRef(connectingParams);
+    const batchConnectingRef = useRef<ConnectionHandle[] | null>(batchConnectingParams);
+    const batchPointerStartRef = useRef({ x: 0, y: 0 });
+    const batchDidMoveRef = useRef(false);
+    const suppressBatchConnectClickRef = useRef(false);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
     const selectionBoxRef = useRef(selectionBox);
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
@@ -621,7 +630,8 @@ function InfiniteCanvasPage() {
             return;
         }
 
-        const restore = async () => {
+        let cancelled = false;
+        const restore = () => {
             const obsoleteGridIds = new Set(project.nodes.filter((node) => node.type === "storyboard-grid").map((node) => node.id));
             const obsoleteGridGroupIds = new Set(
                 project.nodes
@@ -637,12 +647,14 @@ function InfiniteCanvasPage() {
                     })
                     .map((node) => node.id),
             );
-            const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes.filter((node) => !removedNodeIds.has(node.id))));
+            // Render the persisted graph immediately. Remote media resolution and
+            // one-time local backfills happen after the canvas is interactive.
+            const baseNodes = resetInterruptedGeneration(project.nodes.filter((node) => !removedNodeIds.has(node.id)));
             const restoredConnections = project.connections.filter((connection) => !removedNodeIds.has(connection.fromNodeId) && !removedNodeIds.has(connection.toNodeId));
-            const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
-            setNodes(restoredNodes);
+            const baseSessions = project.chatSessions || [];
+            setNodes(baseNodes);
             setConnections(restoredConnections);
-            setChatSessions(restoredSessions);
+            setChatSessions(baseSessions);
             setActiveChatId(project.activeChatId || null);
             setBackgroundMode(project.backgroundMode);
             setShowImageInfo(project.showImageInfo || false);
@@ -653,17 +665,41 @@ function InfiniteCanvasPage() {
                 historyCommitTimerRef.current = null;
             }
             lastHistoryRef.current = {
-                nodes: restoredNodes,
+                nodes: baseNodes,
                 connections: restoredConnections,
-                chatSessions: restoredSessions,
+                chatSessions: baseSessions,
                 activeChatId: project.activeChatId || null,
                 backgroundMode: project.backgroundMode,
                 showImageInfo: project.showImageInfo || false,
             };
             setHistoryState({ canUndo: false, canRedo: false });
             setProjectLoaded(true);
+            void hydrateCanvasImages(baseNodes).then((hydratedNodes) => {
+                if (cancelled) return;
+                const hydratedById = new Map(hydratedNodes.map((node) => [node.id, node]));
+                const baseById = new Map(baseNodes.map((node) => [node.id, node]));
+                setNodes((currentNodes) => {
+                    const nextNodes = currentNodes.map((node) => (baseById.get(node.id) === node ? hydratedById.get(node.id) || node : node));
+                    nodesRef.current = nextNodes;
+                    if (lastHistoryRef.current) lastHistoryRef.current = { ...lastHistoryRef.current, nodes: nextNodes };
+                    return nextNodes;
+                });
+            }).catch(() => undefined);
+            void hydrateAssistantImages(baseSessions).then((hydratedSessions) => {
+                if (cancelled) return;
+                const hydratedById = new Map(hydratedSessions.map((session) => [session.id, session]));
+                const baseById = new Map(baseSessions.map((session) => [session.id, session]));
+                setChatSessions((currentSessions) => {
+                    const nextSessions = currentSessions.map((session) => (baseById.get(session.id) === session ? hydratedById.get(session.id) || session : session));
+                    if (lastHistoryRef.current) lastHistoryRef.current = { ...lastHistoryRef.current, chatSessions: nextSessions };
+                    return nextSessions;
+                });
+            }).catch(() => undefined);
         };
-        void restore();
+        restore();
+        return () => {
+            cancelled = true;
+        };
     }, [hydrated, navigate, openProject, projectId]);
 
     useEffect(() => {
@@ -844,9 +880,10 @@ function InfiniteCanvasPage() {
         selectedNodeIdsRef.current = selectedNodeIds;
         viewportRef.current = viewport;
         connectingParamsRef.current = connectingParams;
+        batchConnectingRef.current = batchConnectingParams;
         connectionTargetNodeIdRef.current = connectionTargetNodeId;
         pendingConnectionCreateRef.current = pendingConnectionCreate;
-    }, [nodes, connections, selectedNodeIds, viewport, connectingParams, connectionTargetNodeId, pendingConnectionCreate]);
+    }, [batchConnectingParams, nodes, connections, selectedNodeIds, viewport, connectingParams, connectionTargetNodeId, pendingConnectionCreate]);
 
     useLayoutEffect(() => {
         selectionBoxRef.current = selectionBox;
@@ -946,6 +983,20 @@ function InfiniteCanvasPage() {
         [],
     );
 
+    const connectMultipleNodes = useCallback((handles: ConnectionHandle[], targetNodeId: string) => {
+        const nextConnectionKeys = new Set(connectionsRef.current.map((connection) => `${connection.fromNodeId}:${connection.toNodeId}`));
+        const createdConnections = handles.flatMap((handle) => {
+            const connection = normalizeConnection(handle.nodeId, targetNodeId, nodesRef.current, handle.handleType);
+            if (!connection) return [];
+            const key = `${connection.fromNodeId}:${connection.toNodeId}`;
+            if (nextConnectionKeys.has(key)) return [];
+            nextConnectionKeys.add(key);
+            return [{ id: nanoid(), ...connection }];
+        });
+        if (createdConnections.length) setConnections((prev) => [...prev, ...createdConnections]);
+        setContextMenu(null);
+    }, []);
+
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
             const metadata =
@@ -962,10 +1013,18 @@ function InfiniteCanvasPage() {
                   : undefined;
             const createdNode = createCanvasNode(type, pending.position, metadata);
             const newNode = type === CanvasNodeType.Audio ? { ...createdNode, title: "配音" } : createdNode;
-            const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
-            if (!connection) return;
+            const nextConnectionKeys = new Set(connectionsRef.current.map((connection) => `${connection.fromNodeId}:${connection.toNodeId}`));
+            const createdConnections = pending.connections.flatMap((current) => {
+                const connection = normalizeConnection(current.nodeId, newNode.id, [...nodesRef.current, newNode], current.handleType);
+                if (!connection) return [];
+                const key = `${connection.fromNodeId}:${connection.toNodeId}`;
+                if (nextConnectionKeys.has(key)) return [];
+                nextConnectionKeys.add(key);
+                return [{ id: nanoid(), ...connection }];
+            });
+            if (!createdConnections.length) return;
             const nextNodes = [...nodesRef.current, newNode];
-            const nextConnections = [...connectionsRef.current, { id: nanoid(), ...connection }];
+            const nextConnections = [...connectionsRef.current, ...createdConnections];
             setNodes(nextNodes);
             setConnections(nextConnections);
             setSelectedNodeIds(new Set([newNode.id]));
@@ -993,8 +1052,62 @@ function InfiniteCanvasPage() {
 
     const cancelPendingConnectionCreate = useCallback(() => {
         setPendingConnectionCreate(null);
+        batchConnectingRef.current = null;
+        setBatchConnectingParams(null);
         setConnecting(null);
     }, [setConnecting]);
+
+    const handleBatchConnectionStart = useCallback(
+        (event: ReactPointerEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            const sourceNodes = nodesRef.current.filter((node) => selectedNodeIdsRef.current.has(node.id) && node.type !== CanvasNodeType.Group && (getNodeDefinition(node.type)?.hasSourceHandle ?? true));
+            if (sourceNodes.length < 2) return;
+            const handles = sourceNodes.map((node) => ({ nodeId: node.id, handleType: "source" as const }));
+            batchPointerStartRef.current = { x: event.clientX, y: event.clientY };
+            batchDidMoveRef.current = false;
+            suppressBatchConnectClickRef.current = false;
+            batchConnectingRef.current = handles;
+            setBatchConnectingParams(handles);
+            setConnecting(null);
+            setConnectionTargetNodeId(null);
+            setMouseWorld(screenToCanvas(event.clientX, event.clientY));
+        },
+        [screenToCanvas, setConnecting],
+    );
+
+    const startBatchConnectionCreate = useCallback(
+        (event: ReactMouseEvent<HTMLButtonElement>) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const sourceNodes = nodesRef.current.filter((node) => selectedNodeIdsRef.current.has(node.id) && node.type !== CanvasNodeType.Group && (getNodeDefinition(node.type)?.hasSourceHandle ?? true));
+            if (sourceNodes.length < 2) return;
+            const bounds = nodeBounds(sourceNodes);
+            const currentViewport = viewportRef.current;
+            const scale = Math.max(currentViewport.k, 0.05);
+            const centerY = (bounds.top + bounds.bottom) / 2;
+            const anchorPosition = { x: bounds.right + 30 / scale, y: centerY };
+            const viewLeft = -currentViewport.x / scale;
+            const viewTop = -currentViewport.y / scale;
+            const viewRight = (size.width - currentViewport.x) / scale;
+            const viewBottom = (size.height - currentViewport.y) / scale;
+            const menuWidth = 292 / scale;
+            const menuHeight = 236 / scale;
+            const edgePadding = 12 / scale;
+            let menuX = anchorPosition.x + 30 / scale;
+            if (menuX + menuWidth > viewRight - edgePadding) menuX = anchorPosition.x - menuWidth - 30 / scale;
+            menuX = Math.max(viewLeft + edgePadding, Math.min(menuX, viewRight - menuWidth - edgePadding));
+            const menuY = Math.max(viewTop + edgePadding, Math.min(centerY - menuHeight / 2, viewBottom - menuHeight - edgePadding));
+            setNodeCreatePosition(null);
+            setConnecting(null);
+            setPendingConnectionCreate({
+                connections: sourceNodes.map((node) => ({ nodeId: node.id, handleType: "source" as const })),
+                anchorPosition,
+                menuPosition: { x: menuX, y: menuY },
+                position: { x: bounds.right + 250 / scale, y: centerY },
+            });
+        },
+        [setConnecting, size.height, size.width],
+    );
 
     const getConnectionDropTarget = useCallback(
         (clientX: number, clientY: number, current: ConnectionHandle): ConnectionDropTarget => {
@@ -1075,14 +1188,6 @@ function InfiniteCanvasPage() {
         return { left: viewLeft, top: viewTop, right: viewRight, bottom: viewBottom };
     }, [size.height, size.width, viewport.k, viewport.x, viewport.y]);
 
-    const visibleNodes = useMemo(
-        () =>
-            nodeSpatialIndex.query(canvasViewBounds)
-                .map((node) => nodeById.get(node.id))
-                .filter((node): node is CanvasNodeData => Boolean(node && !isHiddenBatchChild(node, nodeById, collapsingBatchIds))),
-        [canvasViewBounds, collapsingBatchIds, nodeById, nodeSpatialIndex],
-    );
-
     const visibleConnections = useMemo(
         () =>
             connectionSpatialIndex.query(canvasViewBounds).filter((connection) => {
@@ -1092,6 +1197,21 @@ function InfiniteCanvasPage() {
                 return true;
             }),
         [canvasViewBounds, connectionSpatialIndex, nodeById],
+    );
+    // Nodes and connections must share one visibility boundary. A connection can
+    // enter the padded viewport before its endpoint does; keep both endpoints in
+    // the render set so the edge never appears detached from its node.
+    const visibleNodeIds = useMemo(() => {
+        const ids = new Set(nodeSpatialIndex.query(canvasViewBounds).map((node) => node.id));
+        visibleConnections.forEach((connection) => {
+            ids.add(connection.fromNodeId);
+            ids.add(connection.toNodeId);
+        });
+        return ids;
+    }, [canvasViewBounds, nodeSpatialIndex, visibleConnections]);
+    const visibleNodes = useMemo(
+        () => nodes.filter((node) => visibleNodeIds.has(node.id) && !isHiddenBatchChild(node, nodeById, collapsingBatchIds)),
+        [collapsingBatchIds, nodeById, nodes, visibleNodeIds],
     );
     // 工具条跟随「单选节点」:点击/新建/框选/键盘选中任一节点都会显示,不再仅靠精确点中触发。
     // 多选时不显示;拖拽中由下方 isNodeDragging 守卫隐藏。
@@ -1106,6 +1226,13 @@ function InfiniteCanvasPage() {
     const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
+    const batchConnectionNodes = useMemo(
+        () => nodes.filter((node) => selectedNodeIds.has(node.id) && node.type !== CanvasNodeType.Group && (getNodeDefinition(node.type)?.hasSourceHandle ?? true)),
+        [nodes, selectedNodeIds],
+    );
+    const batchSelectionBounds = useMemo(() => (batchConnectionNodes.length > 1 ? nodeBounds(batchConnectionNodes) : null), [batchConnectionNodes]);
+    const batchConnectionPreview = pendingConnectionCreate && pendingConnectionCreate.connections.length > 1 ? pendingConnectionCreate : null;
+    const batchConnectingPreview = batchConnectingParams && !pendingConnectionCreate ? batchConnectingParams : null;
     const activeNodeId = hasMultipleSelectedNodes ? null : hoveredNodeId || (selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null);
     const batchChildCountById = useMemo(() => {
         const map = new Map<string, number>();
@@ -1842,8 +1969,13 @@ function InfiniteCanvasPage() {
                 return;
             }
 
-            if (connectingParamsRef.current && !pendingConnectionCreateRef.current) {
-                const dropTarget = getConnectionDropTarget(event.clientX, event.clientY, connectingParamsRef.current);
+            const batchConnection = batchConnectingRef.current;
+            if (batchConnection && Math.hypot(event.clientX - batchPointerStartRef.current.x, event.clientY - batchPointerStartRef.current.y) > 3) {
+                batchDidMoveRef.current = true;
+            }
+            const currentConnection = connectingParamsRef.current || batchConnection?.[0];
+            if (currentConnection && !pendingConnectionCreateRef.current) {
+                const dropTarget = getConnectionDropTarget(event.clientX, event.clientY, currentConnection);
                 connectionTargetNodeIdRef.current = dropTarget.nodeId;
                 setConnectionTargetNodeId(dropTarget.nodeId);
                 setMouseWorld(screenToCanvas(event.clientX, event.clientY));
@@ -1855,7 +1987,20 @@ function InfiniteCanvasPage() {
     const handleGlobalPointerMove = useCallback(
         (event: PointerEvent) => {
             const currentSelection = selectionBoxRef.current;
-            if (!currentSelection) return;
+            if (!currentSelection) {
+                const batchConnection = batchConnectingRef.current;
+                if (batchConnection && Math.hypot(event.clientX - batchPointerStartRef.current.x, event.clientY - batchPointerStartRef.current.y) > 3) {
+                    batchDidMoveRef.current = true;
+                }
+                const currentConnection = connectingParamsRef.current || batchConnection?.[0];
+                if (currentConnection && !pendingConnectionCreateRef.current) {
+                    const dropTarget = getConnectionDropTarget(event.clientX, event.clientY, currentConnection);
+                    connectionTargetNodeIdRef.current = dropTarget.nodeId;
+                    setConnectionTargetNodeId(dropTarget.nodeId);
+                    setMouseWorld(screenToCanvas(event.clientX, event.clientY));
+                }
+                return;
+            }
 
             if (event.buttons === 0) {
                 selectionBoxRef.current = null;
@@ -1883,7 +2028,7 @@ function InfiniteCanvasPage() {
             setSelectionBox(nextSelectionBox);
             setSelectedNodeIds(nextSelected);
         },
-        [screenToCanvas],
+        [getConnectionDropTarget, screenToCanvas],
     );
 
     const handleGlobalMouseUp = useCallback(
@@ -1895,6 +2040,26 @@ function InfiniteCanvasPage() {
 
             if (pendingConnectionCreateRef.current) return;
 
+            const batchConnections = batchConnectingRef.current;
+            if (batchConnections) {
+                batchConnectingRef.current = null;
+                setBatchConnectingParams(null);
+                if (!batchDidMoveRef.current) return;
+                suppressBatchConnectClickRef.current = true;
+                const dropTarget = getConnectionDropTarget(event.clientX, event.clientY, batchConnections[0]);
+                if (dropTarget.nodeId) {
+                    connectMultipleNodes(batchConnections, dropTarget.nodeId);
+                    setConnectionTargetNodeId(null);
+                } else if (dropTarget.isNearNode) {
+                    setConnectionTargetNodeId(null);
+                } else {
+                    const position = screenToCanvas(event.clientX, event.clientY);
+                    setMouseWorld(position);
+                    setPendingConnectionCreate({ connections: batchConnections, position, anchorPosition: position });
+                }
+                return;
+            }
+
             const currentConnection = connectingParamsRef.current;
             if (currentConnection) {
                 const dropTarget = getConnectionDropTarget(event.clientX, event.clientY, currentConnection);
@@ -1905,26 +2070,32 @@ function InfiniteCanvasPage() {
                     setConnecting(null);
                 } else {
                     setMouseWorld(screenToCanvas(event.clientX, event.clientY));
-                    setPendingConnectionCreate({ connection: currentConnection, position: screenToCanvas(event.clientX, event.clientY) });
+                    setPendingConnectionCreate({ connections: [currentConnection], position: screenToCanvas(event.clientX, event.clientY) });
                 }
             }
         },
-        [connectNodes, finishNodeDrag, getConnectionDropTarget, screenToCanvas, setConnecting],
+        [connectMultipleNodes, connectNodes, finishNodeDrag, getConnectionDropTarget, screenToCanvas, setConnecting],
     );
 
     useEffect(() => {
-        const handlePointerUp = (event: PointerEvent) => finishNodeDrag(event.clientX, event.clientY);
-        const cancelNodeDrag = () => finishNodeDrag();
+        const cancelNodeDrag = () => {
+            finishNodeDrag();
+            if (!batchConnectingRef.current) return;
+            batchConnectingRef.current = null;
+            batchDidMoveRef.current = false;
+            setBatchConnectingParams(null);
+            setConnectionTargetNodeId(null);
+        };
         window.addEventListener("mousemove", handleGlobalMouseMove);
         window.addEventListener("mouseup", handleGlobalMouseUp);
-        window.addEventListener("pointerup", handlePointerUp);
+        window.addEventListener("pointerup", handleGlobalMouseUp);
         window.addEventListener("pointercancel", cancelNodeDrag);
         window.addEventListener("blur", cancelNodeDrag);
         window.addEventListener("pointermove", handleGlobalPointerMove);
         return () => {
             window.removeEventListener("mousemove", handleGlobalMouseMove);
             window.removeEventListener("mouseup", handleGlobalMouseUp);
-            window.removeEventListener("pointerup", handlePointerUp);
+            window.removeEventListener("pointerup", handleGlobalMouseUp);
             window.removeEventListener("pointercancel", cancelNodeDrag);
             window.removeEventListener("blur", cancelNodeDrag);
             window.removeEventListener("pointermove", handleGlobalPointerMove);
@@ -2686,8 +2857,9 @@ function InfiniteCanvasPage() {
                 return;
             }
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
+            const isVoiceDesign = mode === "audio" && (options?.audioMode === "design" || sourceNode?.metadata?.audioMode === "design");
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
-            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+            if (!isVoiceDesign && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
             }
@@ -2997,7 +3169,7 @@ function InfiniteCanvasPage() {
                         position: isEmptyAudioNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y + ((sourceNode?.height || spec.height) - spec.height) / 2 },
                         width: isEmptyAudioNode ? sourceNode.width : spec.width,
                         height: isEmptyAudioNode ? sourceNode.height : spec.height,
-                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, sourceType: "tts", ...sourceMetadata, ...buildAudioGenerationMetadata(generationConfig) },
+                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, sourceType: "tts", audioMode: isVoiceDesign ? "design" : "synthesis", voiceDesignDescription: isVoiceDesign ? effectivePrompt : undefined, ...sourceMetadata, ...buildAudioGenerationMetadata(generationConfig) },
                     };
                     pendingChildIds = [audioId];
                     setNodes((prev) =>
@@ -3009,19 +3181,21 @@ function InfiniteCanvasPage() {
                     const controller = startGenerationRequest(audioId, nodeId, nodeId, runController);
                     try {
                         const audio = await storeGeneratedAudio(
-                            await requestAudioGeneration(generationConfig, effectivePrompt, {
-                            signal: controller.signal,
-                            referenceAudio: generationContext.referenceAudios[0],
-                            onTaskCreated: (task) => {
-                                resumedAudioTaskIdsRef.current.add(task.taskId);
-                                    setNodes((prev) =>
-                                        prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, audioTaskId: task.taskId, audioEngine: task.engine, voiceId: task.voiceId, characterCount: task.characterCount } } : node)),
-                                    );
-                            },
-                            }),
-                            generationConfig.audioFormat,
+                            isVoiceDesign
+                                ? await requestVoiceDesign(effectivePrompt, { signal: controller.signal })
+                                : await requestAudioGeneration(generationConfig, effectivePrompt, {
+                                      signal: controller.signal,
+                                      referenceAudio: generationContext.referenceAudios[0],
+                                      onTaskCreated: (task) => {
+                                          resumedAudioTaskIdsRef.current.add(task.taskId);
+                                          setNodes((prev) =>
+                                              prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, audioTaskId: task.taskId, audioEngine: task.engine, voiceId: task.voiceId, characterCount: task.characterCount } } : node)),
+                                          );
+                                      },
+                                  }),
+                            isVoiceDesign ? "wav" : generationConfig.audioFormat,
                         );
-                        setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio, "tts"), prompt: effectivePrompt, ...buildAudioGenerationMetadata(generationConfig) } } : node)));
+                        setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio, "tts"), prompt: effectivePrompt, audioMode: isVoiceDesign ? "design" : "synthesis", voiceDesignDescription: isVoiceDesign ? effectivePrompt : undefined, ...buildAudioGenerationMetadata(generationConfig) } } : node)));
                         playGenerationCompleteSound();
                     } finally {
                         finishGenerationRequest(audioId, controller);
@@ -3115,6 +3289,7 @@ function InfiniteCanvasPage() {
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData) => {
             const sourceNode = node;
+            const isVoiceDesign = node.type === CanvasNodeType.Audio && node.metadata?.audioMode === "design";
             const batchRoot = node.metadata?.batchRootId ? nodesRef.current.find((item) => item.id === node.metadata?.batchRootId) : null;
             const savedImageMetadata = node.type === CanvasNodeType.Image ? { ...batchRoot?.metadata, ...node.metadata } : undefined;
             const hasSavedImageMetadata = Boolean(savedImageMetadata?.generationType);
@@ -3128,7 +3303,7 @@ function InfiniteCanvasPage() {
                           count: "1",
                       }
                     : { ...buildGenerationConfig(effectiveConfig, sourceNode, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image"), count: "1" };
-            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+            if (!isVoiceDesign && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
             }
@@ -3227,19 +3402,21 @@ function InfiniteCanvasPage() {
                 }
                 if (node.type === CanvasNodeType.Audio) {
                     const audio = await storeGeneratedAudio(
-                        await requestAudioGeneration(generationConfig, prompt, {
-                        signal: controller.signal,
-                        referenceAudio: context?.referenceAudios[0],
-                        onTaskCreated: (task) => {
-                            resumedAudioTaskIdsRef.current.add(task.taskId);
-                                setNodes((prev) =>
-                                    prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, audioTaskId: task.taskId, audioEngine: task.engine, voiceId: task.voiceId, characterCount: task.characterCount } } : item)),
-                                );
-                        },
-                        }),
-                        generationConfig.audioFormat,
+                        isVoiceDesign
+                            ? await requestVoiceDesign(prompt, { signal: controller.signal })
+                            : await requestAudioGeneration(generationConfig, prompt, {
+                                  signal: controller.signal,
+                                  referenceAudio: context?.referenceAudios[0],
+                                  onTaskCreated: (task) => {
+                                      resumedAudioTaskIdsRef.current.add(task.taskId);
+                                      setNodes((prev) =>
+                                          prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, audioTaskId: task.taskId, audioEngine: task.engine, voiceId: task.voiceId, characterCount: task.characterCount } } : item)),
+                                      );
+                                  },
+                              }),
+                        isVoiceDesign ? "wav" : generationConfig.audioFormat,
                     );
-                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio, "tts"), prompt, ...buildAudioGenerationMetadata(generationConfig) } } : item)));
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio, "tts"), prompt, audioMode: isVoiceDesign ? "design" : "synthesis", voiceDesignDescription: isVoiceDesign ? prompt : undefined, ...buildAudioGenerationMetadata(generationConfig) } } : item)));
                     playGenerationCompleteSound();
                     return;
                 }
@@ -3588,6 +3765,17 @@ function InfiniteCanvasPage() {
                             );
                         })}
                         {connectingParams ? <ActiveConnectionPath node={nodeById.get(connectingParams.nodeId)} handle={connectingParams} mouseWorld={mouseWorld} target={connectionTargetNodeId ? nodeById.get(connectionTargetNodeId) : undefined} /> : null}
+                        {batchConnectionPreview || batchConnectingPreview
+                            ? (batchConnectionPreview?.connections || batchConnectingPreview)!.map((handle) => (
+                                  <ActiveConnectionPath
+                                      key={`batch-${handle.nodeId}`}
+                                      node={nodeById.get(handle.nodeId)}
+                                      handle={handle}
+                                      mouseWorld={batchConnectionPreview ? batchConnectionPreview.anchorPosition || batchConnectionPreview.position : mouseWorld}
+                                      target={connectionTargetNodeId ? nodeById.get(connectionTargetNodeId) : undefined}
+                                  />
+                              ))
+                            : null}
                     </svg>
 
                     {visibleNodes.map((node) => (
@@ -3599,7 +3787,8 @@ function InfiniteCanvasPage() {
                             isRelated={relatedHighlight.nodeIds.has(node.id)}
                             isFocusRelated={activeNodeId === node.id}
                             isConnectionTarget={connectionTargetNodeId === node.id}
-                            isConnecting={Boolean(connectingParams)}
+                            isConnecting={Boolean(connectingParams || batchConnectingParams)}
+                            hideConnectionHandles={batchConnectionNodes.length > 1}
                             editRequestNonce={editingNodeId === node.id ? editRequestNonce : 0}
                             showPanel={dialogNodeId === node.id && !selectionBox && !getNodeDefinition(node.type)?.hidePanel}
                             batchCount={batchChildCountById.get(node.id) || 0}
@@ -3635,6 +3824,52 @@ function InfiniteCanvasPage() {
                             onContextMenu={handleCanvasNodeContextMenu}
                         />
                     ))}
+
+                    {batchSelectionBounds && !isNodeDragging ? (
+                        <div
+                            data-canvas-multi-selection
+                            className="pointer-events-none absolute z-[60] border border-dashed"
+                            style={{
+                                left: batchSelectionBounds.left - 12 / Math.max(viewport.k, 0.05),
+                                top: batchSelectionBounds.top - 12 / Math.max(viewport.k, 0.05),
+                                width: batchSelectionBounds.right - batchSelectionBounds.left + 24 / Math.max(viewport.k, 0.05),
+                                height: batchSelectionBounds.bottom - batchSelectionBounds.top + 24 / Math.max(viewport.k, 0.05),
+                                borderWidth: `${1 / Math.max(viewport.k, 0.05)}px`,
+                                borderColor: theme.canvas.selectionStroke,
+                            }}
+                        >
+                            <button
+                                type="button"
+                                data-canvas-multi-connect
+                                data-canvas-no-zoom
+                                className="pointer-events-auto absolute top-1/2 grid -translate-y-1/2 cursor-pointer place-items-center rounded-full border shadow-lg transition-[transform,background-color] duration-150 hover:scale-110"
+                                style={{
+                                    right: `${-33 / Math.max(viewport.k, 0.05)}px`,
+                                    width: `${30 / Math.max(viewport.k, 0.05)}px`,
+                                    height: `${30 / Math.max(viewport.k, 0.05)}px`,
+                                    borderWidth: `${1.25 / Math.max(viewport.k, 0.05)}px`,
+                                    background: theme.node.panel,
+                                    borderColor: theme.canvas.selectionStroke,
+                                    color: theme.node.text,
+                                }}
+                                aria-label={`连接选中的 ${batchConnectionNodes.length} 个节点`}
+                                title={`连接选中的 ${batchConnectionNodes.length} 个节点`}
+                                onPointerDown={handleBatchConnectionStart}
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                    if (suppressBatchConnectClickRef.current) {
+                                        suppressBatchConnectClickRef.current = false;
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        return;
+                                    }
+                                    startBatchConnectionCreate(event);
+                                }}
+                            >
+                                <Plus style={{ width: `${19 / Math.max(viewport.k, 0.05)}px`, height: `${19 / Math.max(viewport.k, 0.05)}px` }} strokeWidth={1.9} />
+                            </button>
+                        </div>
+                    ) : null}
 
                     {selectionBox ? (
                         <div

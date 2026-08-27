@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -87,8 +87,10 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     };
     finishWheelInteractionRef.current = finishWheelInteraction;
 
-    useEffect(() => {
-        if (!wheelInteractionActiveRef.current && !panState.current.isPanning) viewportRef.current = viewport;
+    useLayoutEffect(() => {
+        if (wheelInteractionActiveRef.current || panState.current.isPanning) return;
+        viewportRef.current = viewport;
+        applyViewportPreview(sceneRef.current, gridRef.current, viewport);
     }, [viewport]);
 
     useEffect(() => {
@@ -227,7 +229,9 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             if (panFrameRef.current !== null) return;
             panFrameRef.current = requestAnimationFrame(() => {
                 panFrameRef.current = null;
-                if (nextViewportRef.current) applyViewportPreview(sceneRef.current, gridRef.current, nextViewportRef.current);
+                if (!nextViewportRef.current) return;
+                viewportRef.current = nextViewportRef.current;
+                applyViewportPreview(sceneRef.current, gridRef.current, nextViewportRef.current);
             });
         };
 
@@ -291,12 +295,12 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             onDragOver={(event) => event.preventDefault()}
             onDrop={onDrop}
         >
-            <CanvasGrid gridRef={gridRef} viewport={viewport} mode={backgroundMode} />
+            <CanvasGrid gridRef={gridRef} viewport={viewportRef.current} mode={backgroundMode} />
             <div
                 ref={sceneRef}
                 className="absolute origin-top-left"
                 style={{
-                    transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})`,
+                    transform: `translate(${viewportRef.current.x}px, ${viewportRef.current.y}px) scale(${viewportRef.current.k})`,
                 }}
             >
                 {children}

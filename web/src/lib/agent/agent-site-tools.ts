@@ -6,7 +6,7 @@ import { imageAspectOptions, imageQualityOptions } from "@/lib/image-settings";
 import { videoResolutionOptions, videoSecondOptions, videoSizeOptions } from "@/components/video-settings-panel";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useAssetStore } from "@/stores/use-asset-store";
-import { modelOptionLabel, modelOptionName, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
+import { modelOptionLabel, modelOptionName, normalizeModelOptionValue, normalizeVideoDuration, selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 
 // 在网页端执行 Agent 的「站点级」工具（画布列表、工作台生成、提示词搜索、资产增删查等）。
@@ -123,7 +123,7 @@ function getVideoConfig() {
             model,
             modelName: modelOptionName(model),
             size: config.size || "1280x720",
-            seconds: config.videoSeconds || "6",
+            seconds: String(normalizeVideoDuration(config.videoSeconds || "6")),
             resolution: config.vquality || "720",
             generateAudio: config.videoGenerateAudio !== "false",
             watermark: config.videoWatermark === "true",
@@ -148,8 +148,9 @@ function runVideoWorkbench(input: SiteToolInput, navigate: NavigateFunction) {
         applied.size = input.size;
     }
     if (typeof input.seconds === "string" && input.seconds.trim()) {
-        configStore.updateConfig("videoSeconds", input.seconds);
-        applied.seconds = input.seconds;
+        const seconds = String(normalizeVideoDuration(input.seconds));
+        configStore.updateConfig("videoSeconds", seconds);
+        applied.seconds = seconds;
     }
     if (typeof input.resolution === "string" && input.resolution.trim()) {
         configStore.updateConfig("vquality", input.resolution);

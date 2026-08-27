@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { createModelChannel, encodeChannelModel, normalizeChannelModels, videoCapabilitiesOf, type VideoModelCapabilities } from "./use-config-store";
+import { createModelChannel, encodeChannelModel, normalizeChannelModels, normalizeVideoDuration, videoCapabilitiesOf, type VideoModelCapabilities } from "./use-config-store";
 import { defaultConfig } from "./use-config-store";
 
 describe("backend video model capabilities", () => {
+    it("does not expose an unpublished bundled video model by default", () => {
+        expect(defaultConfig.videoModel).toBe("");
+        expect(defaultConfig.channels.flatMap((channel) => channel.models).filter((model) => model.capability === "video")).toEqual([]);
+    });
+
     it("preserves server-provided capabilities instead of guessing from the model name", () => {
         const videoCapabilities: VideoModelCapabilities = {
             provider: "canvas-video",
@@ -23,5 +28,11 @@ describe("backend video model capabilities", () => {
         const config = { ...defaultConfig, channels: [channel], models: [encodeChannelModel(channel.id, "opaque-model-id")] };
 
         expect(videoCapabilitiesOf(config, encodeChannelModel(channel.id, "opaque-model-id"))).toEqual(videoCapabilities);
+    });
+
+    it("never normalizes a generated duration below five seconds", () => {
+        expect(normalizeVideoDuration("2")).toBe(5);
+        expect(normalizeVideoDuration("2", { min: 2, max: 30, options: null })).toBe(5);
+        expect(normalizeVideoDuration("2", { min: 2, max: 30, options: [2, 4, 6] })).toBe(6);
     });
 });

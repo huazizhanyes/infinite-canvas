@@ -111,6 +111,19 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string, o
     }
 }
 
+/** Generate a free VoxCPM audition from a natural-language voice description. */
+export async function requestVoiceDesign(description: string, options?: { signal?: AbortSignal; sampleText?: string }): Promise<GeneratedAudioResult> {
+    const connection = useUserStore.getState().connection;
+    if (!connection?.token) throw new Error("请先登录后设计音色");
+    const response = await axios.post<Blob>(
+        `${connection.canvasBaseUrl.replace(/\/+$/, "")}/v1/audio/design`,
+        { description: description.trim(), ...(options?.sampleText ? { sampleText: options.sampleText } : {}) },
+        { headers: { Authorization: `Bearer ${connection.token}` }, responseType: "blob", signal: options?.signal },
+    );
+    await assertAudioBlob(response.data);
+    return { blob: response.data.type.startsWith("audio/") ? response.data : new Blob([response.data], { type: "audio/wav" }), format: "wav", mimeType: "audio/wav" };
+}
+
 async function audioPluginBlob(result: unknown, format: string): Promise<Blob> {
     if (result instanceof Blob) return result.type.startsWith("audio/") ? result : new Blob([result], { type: audioMimeType(format) });
     let source = "";
@@ -266,14 +279,14 @@ function assertAudioConfig(config: AiConfig, model: string) {
 
 async function assertAudioBlob(blob: Blob) {
     if (!blob.type.includes("json")) return;
-    let payload: { code?: number; msg?: string; error?: { message?: string } };
+    let payload: { code?: number; msg?: string; message?: string; error?: { message?: string } };
     try {
         payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; error?: { message?: string } };
     } catch {
         return;
     }
     if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "音频生成失败");
-    if (payload.error?.message) throw new Error(payload.error.message);
+    if (payload.error?.message || payload.message) throw new Error(payload.error?.message || payload.message);
 }
 
 function readAxiosError(error: unknown, fallback: string) {

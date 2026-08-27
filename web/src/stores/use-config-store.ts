@@ -7,6 +7,7 @@ import { localForageStorage } from "@/lib/localforage-storage";
 
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text" | "audio";
+export const MIN_VIDEO_DURATION_SECONDS = 5;
 
 export type VideoParameterOption = { value: string | number | boolean; label?: string };
 export type VideoParameterDefinition = {
@@ -53,6 +54,20 @@ export type VideoModelCapabilities = {
     faceFriendly?: boolean;
     displayNotice?: string | null;
 };
+
+export function normalizeVideoDuration(value: string | number | undefined, range?: VideoModelCapabilities["duration"] | null) {
+    const requested = Math.floor(Number(value));
+    const rawMax = Number(range?.max);
+    const minimum = Math.max(MIN_VIDEO_DURATION_SECONDS, Number.isFinite(Number(range?.min)) ? Math.ceil(Number(range?.min)) : MIN_VIDEO_DURATION_SECONDS);
+    const options = [...(range?.options || [])].map(Number).filter((item) => Number.isInteger(item) && item >= minimum && (!Number.isFinite(rawMax) || item <= rawMax)).sort((left, right) => left - right);
+    if (options.length) {
+        const unique = [...new Set(options)];
+        return unique.includes(requested) ? requested : unique[0];
+    }
+    const min = minimum;
+    const max = Number.isFinite(rawMax) && rawMax >= min ? Math.floor(rawMax) : Math.max(min, 60);
+    return Math.max(min, Math.min(max, Number.isFinite(requested) ? requested : min));
+}
 
 export type ChannelModel = {
     name: string;
@@ -124,7 +139,6 @@ export const defaultConfig: AiConfig = {
             apiFormat: "openai",
             models: [
                 { name: "gpt-image-2", capability: "image" },
-                { name: "grok-imagine-video", capability: "video" },
                 { name: "gpt-5.5", capability: "text" },
                 { name: "gpt-4o-mini-tts", capability: "audio" },
             ],
@@ -132,7 +146,7 @@ export const defaultConfig: AiConfig = {
     ],
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
-    videoModel: "default::grok-imagine-video",
+    videoModel: "",
     textModel: "default::gpt-5.5",
     audioModel: "default::gpt-4o-mini-tts",
     audioVoice: "alloy",
@@ -146,7 +160,7 @@ export const defaultConfig: AiConfig = {
     videoWatermark: "false",
     videoMode: "text2video",
     systemPrompt: "",
-    models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
+    models: ["default::gpt-image-2", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
     quality: "auto",
     size: "1:1",
     count: "1",
@@ -271,7 +285,7 @@ export const useConfigStore = create<ConfigStore>()(
                         audioFormat: config.audioFormat || defaultConfig.audioFormat,
                         audioSpeed: config.audioSpeed || defaultConfig.audioSpeed,
                         audioInstructions: config.audioInstructions || "",
-                        videoSeconds: config.videoSeconds || "6",
+                        videoSeconds: String(normalizeVideoDuration(config.videoSeconds || "6")),
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
@@ -393,7 +407,12 @@ function normalizeChannels(config: AiConfig) {
             ...channel,
             id: channel.id || (index === 0 ? "default" : `channel-${index + 1}`),
             name: channel.name || (index === 0 ? "默认渠道" : `渠道 ${index + 1}`),
-            models: normalizeChannelModels(channel.models),
+            models: normalizeChannelModels(channel.models).filter((model) => !(
+                model.name === "grok-imagine-video"
+                && (channel.id || (index === 0 ? "default" : "")) === "default"
+                && !String(channel.apiKey || "").trim()
+                && String(channel.baseUrl || OPENAI_BASE_URL).replace(/\/+$/, "") === OPENAI_BASE_URL
+            )),
         }),
     );
     if (!channels.length) {

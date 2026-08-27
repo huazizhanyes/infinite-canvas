@@ -707,7 +707,7 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                     <div className="mt-2 flex flex-wrap gap-1">
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.size}</Tag>
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.resolution}p</Tag>
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.seconds}s</Tag>
+                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{normalizeVideoSeconds(log.seconds)}s</Tag>
                     </div>
                 </div>
                 <div className="grid justify-items-end gap-2">
@@ -851,7 +851,7 @@ function buildLog({ id, prompt, model, config, references, videoReferences, audi
         videoModel: config.videoModel,
         size: config.size,
         vquality: normalizeResolution(config.vquality),
-        videoSeconds: config.videoSeconds,
+        videoSeconds: normalizeVideoSeconds(config.videoSeconds),
         videoGenerateAudio: config.videoGenerateAudio,
         videoWatermark: config.videoWatermark,
         videoMode: config.videoMode,
@@ -894,9 +894,8 @@ function buildVideoConfig(config: AiConfig, model: string): AiConfig {
 }
 
 function normalizeVideoSeconds(value: string) {
-    if (String(value).trim() === "-1") return "-1";
     const seconds = Math.floor(Number(value) || 6);
-    return String(Math.max(1, Math.min(20, seconds)));
+    return String(Math.max(5, Math.min(20, seconds)));
 }
 
 function normalizeVideoSize(value: string) {

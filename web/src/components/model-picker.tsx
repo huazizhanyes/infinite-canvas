@@ -103,11 +103,12 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
 function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
     const video = videoCapabilitiesOf(config, model);
     if (video) {
+        const label = `${video.displayName}${video.faceFriendly ? " · 不卡人脸" : ""}`;
         return (
             <span className="flex min-w-0 items-start gap-2 py-1">
                 <ModelIcon config={config} model={model} />
                 <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">MiniMax H3 · 不卡人脸</span>
+                    <span className="block truncate font-medium">{label}</span>
                 </span>
             </span>
         );

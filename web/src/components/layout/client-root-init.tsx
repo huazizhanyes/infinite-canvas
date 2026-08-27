@@ -24,7 +24,8 @@ type SucaiInitState = "idle" | "loading" | "ready" | "error";
 
 function isSucaiModeRequested() {
     const searchParams = new URLSearchParams(window.location.search);
-    return import.meta.env.VITE_SUCAI_INTEGRATION === "true" || searchParams.get("sucai") === "1" || sessionStorage.getItem(SUCAI_MODE_KEY) === "1";
+    const hasTransferredSession = Boolean(SUCAI_API_BASE && localStorage.getItem(SUCAI_TOKEN_KEY));
+    return import.meta.env.VITE_SUCAI_INTEGRATION === "true" || hasTransferredSession || searchParams.get("sucai") === "1" || sessionStorage.getItem(SUCAI_MODE_KEY) === "1";
 }
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
@@ -101,7 +102,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 parameters: Array.isArray(item.parameters || item.parameter_schema) ? (item.parameters || item.parameter_schema) : [],
                 modeRules: Array.isArray(item.modeRules || item.mode_rules) ? (item.modeRules || item.mode_rules) : [],
                 faceFriendly: Boolean(item.faceFriendly || item.face_friendly || item.channel === "59" && item.upstream_model === "minimax-h3"),
-                displayNotice: item.displayNotice || item.display_notice || "不卡人脸；不代表换脸、口型驱动或强身份一致性。",
+                displayNotice: item.displayNotice || item.display_notice || null,
             },
         });
         const refreshVideoPricing = () => {
@@ -114,7 +115,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 const nextDefault = videoModels.find((item: { default_option?: boolean }) => item.default_option) || videoModels[0];
                 updateConfig("channels", channels);
                 updateConfig("models", modelOptionsFromChannels(channels));
-                if (!selectedExists && nextDefault?.id) updateConfig("videoModel", encodeChannelModel(SUCAI_CHANNEL_ID, nextDefault.id));
+                if (!selectedExists) updateConfig("videoModel", nextDefault?.id ? encodeChannelModel(SUCAI_CHANNEL_ID, nextDefault.id) : "");
             }).catch(() => undefined);
         };
         window.addEventListener("canvas-video-pricing-changed", refreshVideoPricing);
@@ -161,7 +162,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     updateConfig("vquality", videoModel.qualities?.[0]?.quality || "720p");
                     updateConfig("videoSeconds", String(videoModel.duration?.options?.[0] || videoModel.duration?.min || 5));
                     updateConfig("videoParameters", Object.fromEntries((videoModel.parameters || []).map((parameter: any) => [parameter.key, parameter.defaultValue] as [string, unknown]).filter(([, value]: [string, unknown]) => value !== undefined)));
-                }
+                } else updateConfig("videoModel", "");
                 if (audioModelValue) {
                     updateConfig("audioModel", audioModelValue);
                     updateConfig("audioFormat", "wav");

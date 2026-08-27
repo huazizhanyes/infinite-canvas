@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Group, Image as ImageIcon, Maximize2, Music2, Puzzle, RefreshCw, Search, Star, Video, X } from "lucide-react";
+import { ChevronRight, Group, Image as ImageIcon, Maximize2, Music2, Plus, Puzzle, RefreshCw, Search, Star, Video, X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { buildNodeContext } from "@/lib/canvas/plugin-node-context";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { normalizeVideoDuration } from "@/stores/use-config-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeData, type Position } from "@/types/canvas";
 import type { CanvasNodeContext, CanvasPluginHost } from "@/types/canvas-plugin";
@@ -30,6 +31,7 @@ type CanvasNodeProps = {
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
     isConnecting: boolean;
+    hideConnectionHandles?: boolean;
     editRequestNonce?: number;
     showPanel: boolean;
     showImageInfo: boolean;
@@ -99,6 +101,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     isFocusRelated,
     isConnectionTarget,
     isConnecting,
+    hideConnectionHandles = false,
     editRequestNonce = 0,
     showPanel,
     showImageInfo,
@@ -494,8 +497,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                 <ResizeHandle corner="bottom-right" onMouseDown={handleResizeMouseDown} />
             </div>
 
-            {!isGroup ? <ConnectionHandleDot side="left" scale={scale} visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} /> : null}
-            {!isGroup ? <ConnectionHandleDot side="right" scale={scale} visible={(definition?.hasSourceHandle ?? true) && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /> : null}
+            {!isGroup && !hideConnectionHandles ? <ConnectionHandleDot side="left" scale={scale} visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} /> : null}
+            {!isGroup && !hideConnectionHandles ? <ConnectionHandleDot side="right" scale={scale} visible={(definition?.hasSourceHandle ?? true) && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /> : null}
 
             {showPanel && !isGroup && renderPanel ? (
                 <div
@@ -801,7 +804,7 @@ function VideoInfoBar({ node }: { node: CanvasNodeData }) {
             <span>{meta?.videoRouteLabel || "视频线路"}</span>
             {meta?.model ? <span>{meta.model}</span> : null}
             {meta?.vquality ? <span>{meta.vquality}</span> : null}
-            {meta?.seconds ? <span>{meta.seconds}s</span> : null}
+            {meta?.seconds ? <span>{normalizeVideoDuration(meta.seconds)}s</span> : null}
         </div>
     );
 }
@@ -813,14 +816,14 @@ function AudioNodeContent({ node, theme, scale }: NodeContentRendererProps) {
                 <div className="flex size-10 items-center justify-center rounded-lg" style={{ background: theme.toolbar.activeBg }}>
                     <Music2 className="size-5 opacity-35" />
                 </div>
-                <span className="text-[11px] opacity-65">{node.metadata?.sourceType === "tts" ? "输入文本开始配音" : "空音频节点"}</span>
+                <span className="text-[11px] opacity-65">{node.metadata?.audioMode === "design" ? "输入音色描述开始设计" : node.metadata?.sourceType === "tts" ? "输入文本开始配音" : "空音频节点"}</span>
             </div>
         );
     return (
         <div className="flex h-full w-full flex-col justify-center gap-2 px-3" style={{ background: theme.node.fill, color: theme.node.text }}>
             <div className="flex min-w-0 items-center gap-2 text-xs opacity-70">
                 <Music2 className="size-4 shrink-0" />
-                <span className="truncate">{node.metadata?.sourceType === "tts" ? (node.metadata.audioEngine ? `${node.metadata.audioEngine === "voxcpm2" ? "VoxCPM2" : "Speech"} 配音` : "生成音频") : "上传音频"}</span>
+                <span className="truncate">{node.metadata?.audioMode === "design" ? "VoxCPM 音色设计" : node.metadata?.sourceType === "tts" ? (node.metadata.audioEngine ? `${node.metadata.audioEngine === "voxcpm2" ? "VoxCPM2" : "Speech"} 配音` : "生成音频") : "上传音频"}</span>
             </div>
             <audio src={node.metadata.content} controls className="w-full" data-canvas-no-zoom />
         </div>
@@ -964,18 +967,55 @@ function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDo
 
 function ConnectionHandleDot({ side, scale, visible, onMouseDown }: { side: "left" | "right"; scale: number; visible: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const dotRef = useRef<HTMLDivElement>(null);
+    const safeScale = Math.max(scale, 0.05);
+    const activationRadius = 112;
+    const restingOffset = 20;
+    const baseOffsetX = side === "left" ? activationRadius / 2 - restingOffset : restingOffset - activationRadius / 2;
+
+    const followPointer = (event: React.MouseEvent<HTMLDivElement>) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const dx = event.clientX - (rect.left + rect.width / 2);
+        const dy = event.clientY - (rect.top + rect.height / 2);
+        if (dotRef.current) dotRef.current.style.transform = `translate(${dx / safeScale}px, ${dy / safeScale}px)`;
+    };
+
+    const resetPosition = () => {
+        if (dotRef.current) dotRef.current.style.transform = `translate(${baseOffsetX / safeScale}px, 0)`;
+    };
 
     return (
         <div
-            className={`absolute top-1/2 z-30 flex size-10 -translate-y-1/2 cursor-crosshair items-center justify-center transition-opacity duration-150 ${
-                side === "left" ? "-left-5" : "-right-5"
-            } ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+            data-canvas-connection-handle={side}
+            className="absolute top-1/2 z-30 flex cursor-crosshair items-center justify-center rounded-full"
+            style={{
+                width: `${activationRadius / safeScale}px`,
+                height: `${(activationRadius * 2) / safeScale}px`,
+                transform: "translateY(-50%)",
+                borderRadius: side === "left" ? "9999px 0 0 9999px" : "0 9999px 9999px 0",
+                ...(side === "left" ? { right: "100%" } : { left: "100%" }),
+            }}
+            title={side === "left" ? "连接到此节点" : "从此节点连接"}
+            aria-label={side === "left" ? "连接到此节点" : "从此节点连接"}
+            onMouseMove={followPointer}
+            onMouseLeave={resetPosition}
             onMouseDown={onMouseDown}
         >
             <div
-                className="rounded-full border transition-transform hover:scale-125"
-                style={{ width: `${10 / Math.max(scale, 0.05)}px`, height: `${10 / Math.max(scale, 0.05)}px`, borderWidth: `${1 / Math.max(scale, 0.05)}px`, background: theme.node.panel, borderColor: theme.node.muted }}
-            />
+                ref={dotRef}
+                className={`pointer-events-none grid place-items-center rounded-full border transition-[opacity,transform,background-color,border-color] duration-150 ${visible ? "opacity-100" : "opacity-0"}`}
+                style={{
+                    width: `${24 / safeScale}px`,
+                    height: `${24 / safeScale}px`,
+                    borderWidth: `${1.25 / safeScale}px`,
+                    transform: `translate(${baseOffsetX / safeScale}px, 0)`,
+                    background: theme.node.panel,
+                    borderColor: theme.node.muted,
+                    color: theme.node.text,
+                }}
+            >
+                <Plus style={{ width: `${16 / safeScale}px`, height: `${16 / safeScale}px` }} strokeWidth={1.9} />
+            </div>
         </div>
     );
 }
