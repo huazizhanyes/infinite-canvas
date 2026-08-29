@@ -38,6 +38,8 @@ export type VideoModeRule = {
 export type VideoModelCapabilities = {
     provider: "canvas-video";
     displayName: string;
+    displayBaseName?: string;
+    displaySuffix?: string | null;
     channel: string;
     routeLabel?: string;
     upstreamModel: string;

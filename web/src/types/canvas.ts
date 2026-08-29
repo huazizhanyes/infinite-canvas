@@ -107,6 +107,8 @@ export type CanvasNodeMetadata = {
     voiceDesignDescription?: string;
     voiceDesignSampleText?: string;
     references?: string[];
+    /** Stable canvas resource node order for media inputs. */
+    referenceOrder?: string[];
     naturalWidth?: number;
     naturalHeight?: number;
     freeResize?: boolean;

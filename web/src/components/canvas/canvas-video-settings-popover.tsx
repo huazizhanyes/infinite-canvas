@@ -53,7 +53,7 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, hasReferenc
             <span ref={buttonRef} className="inline-flex min-w-0">
                 <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[170px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => setOpen((current) => !current)}>
                     <span className="truncate">
-                        {videoResolutionLabel(config.vquality)} · {videoSizeLabel(config.size)} · {videoSecondsLabel(config.videoSeconds)}
+                        {videoSizeLabel(config.size)} · {videoResolutionLabel(config.vquality, config)} · {videoSecondsLabel(config.videoSeconds)}
                     </span>
                 </Button>
             </span>
@@ -112,7 +112,7 @@ function VideoSettingsPortal({
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
         >
-            <VideoSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} hasReferenceVideo={hasReferenceVideo} className="w-full space-y-5 px-0 py-0" quote={quote} />
+            <VideoSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} hasReferenceVideo={hasReferenceVideo} showTitle={false} className="w-full space-y-4 px-0 py-0" quote={quote} />
         </div>,
         document.body,
     );

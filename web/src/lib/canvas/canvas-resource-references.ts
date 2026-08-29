@@ -35,10 +35,15 @@ export function normalizeCanvasResourceMentions(prompt: string, references: Pick
 
 export function buildCanvasResourceReferences(nodes: CanvasNodeData[], connections: CanvasConnection[], contextNodeId?: string | null, graphIndex?: CanvasGraphIndex) {
     const index = graphIndex || createCanvasGraphIndex(nodes, connections);
-    const contextNodes = contextNodeId ? getMentionResourceNodes(contextNodeId, nodes, connections, index) : [];
+    // Hovering a resource node must not make that node its own context.  Doing
+    // so re-numbered the badge (for example 图片3 -> 图片1) even though no
+    // connection or generation order changed.
     const globalReferences = labelResourceNodes(nodes.filter(isResourceNode), false);
-    const activeByNodeId = new Map(labelResourceNodes(contextNodes, true).map((reference) => [reference.nodeId, reference]));
-    return globalReferences.map((reference) => activeByNodeId.get(reference.nodeId) || reference);
+    const contextNode = contextNodeId ? index.nodeById.get(contextNodeId) : undefined;
+    const contextNodes = contextNode && !isResourceNode(contextNode) ? getMentionResourceNodes(contextNodeId!, nodes, connections, index) : [];
+    if (!contextNodes.length) return globalReferences;
+    const activeIds = new Set(contextNodes.map((node) => node.id));
+    return globalReferences.map((reference) => ({ ...reference, active: activeIds.has(reference.nodeId) }));
 }
 
 export function buildNodeMentionReferences(node: CanvasNodeData, nodes: CanvasNodeData[], connections: CanvasConnection[], graphIndex?: CanvasGraphIndex, assets: Asset[] = []) {
@@ -60,11 +65,38 @@ export function getGenerationResourceNodes(nodeId: string, nodes: CanvasNodeData
     return [];
 }
 
+/**
+ * Merge the currently connected resources into the node's stable semantic order.
+ * Existing ids (including temporarily disconnected ones) keep their positions;
+ * newly connected ids are appended in the current connection order.
+ */
+export function mergeCanvasReferenceOrder(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], graphIndex?: CanvasGraphIndex) {
+    const node = nodes.find((item) => item.id === nodeId);
+    if (!node) return [];
+    const current = getContextResourceNodes(nodeId, graphIndex || createCanvasGraphIndex(nodes, connections)).map((item) => item.id);
+    const existing = node.metadata?.referenceOrder || [];
+    if (!existing.length) return current;
+    const known = new Set(existing);
+    return [...existing, ...current.filter((id) => !known.has(id))];
+}
+
 function getContextResourceNodes(nodeId: string, graphIndex: CanvasGraphIndex) {
-    return [...incomingConnections(graphIndex, nodeId), ...outgoingConnections(graphIndex, nodeId)]
+    const resources = [...incomingConnections(graphIndex, nodeId), ...outgoingConnections(graphIndex, nodeId)]
         .map((connection) => graphIndex.nodeById.get(connection.fromNodeId === nodeId ? connection.toNodeId : connection.fromNodeId))
         .filter((node): node is CanvasNodeData => Boolean(node && isResourceNode(node)))
         .filter((node, index, all) => all.findIndex((candidate) => candidate.id === node.id) === index);
+    const metadata = graphIndex.nodeById.get(nodeId)?.metadata;
+    const explicitOrder = metadata?.referenceOrder?.length ? metadata.referenceOrder : metadata?.references || [];
+    if (!explicitOrder.length) return resources;
+    const orderByReference = new Map(explicitOrder.map((reference, index) => [reference, index]));
+    return resources
+        .map((node, index) => ({ node, index, order: resourceReferenceKeys(node).reduce((order, key) => Math.min(order, orderByReference.get(key) ?? Number.POSITIVE_INFINITY), Number.POSITIVE_INFINITY) }))
+        .sort((left, right) => left.order - right.order || left.index - right.index)
+        .map((item) => item.node);
+}
+
+function resourceReferenceKeys(node: CanvasNodeData) {
+    return [node.metadata?.scriptAssetId, node.id, node.metadata?.storageKey, node.metadata?.content].filter((value): value is string => Boolean(value));
 }
 
 function labelResourceNodes(nodes: CanvasNodeData[], active: boolean) {

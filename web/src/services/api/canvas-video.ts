@@ -25,6 +25,7 @@ export type CanvasVideoTask = {
     width?: number | null;
     height?: number | null;
     error?: { code?: string | null; message?: string | null } | null;
+    upstreamRetryCount?: number;
     statusMessage?: string | null;
     estimatedCostCredits?: number;
     chargedCredits?: number;
@@ -122,6 +123,16 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
     const imageAssetIds = await uploadAssets(requestConfig, "image", referenceImages, signal);
     const videoAssetIds = await uploadAssets(requestConfig, "video", referenceVideos, signal);
     const audioAssetIds = await uploadAssets(requestConfig, "audio", referenceAudios, signal);
+    if (typeof window !== "undefined" && window.localStorage.getItem("canvas.debug.references") === "1") {
+        console.log("[Canvas] uploaded asset order", {
+            imageSourceIds: referenceImages.map((reference) => reference.id),
+            imageAssetIds,
+            videoSourceIds: referenceVideos.map((reference) => reference.id),
+            videoAssetIds,
+            audioSourceIds: referenceAudios.map((reference) => reference.id),
+            audioAssetIds,
+        });
+    }
     const aspectRatio = capabilities.aspectRatios.includes(config.size) ? config.size : capabilities.aspectRatios[0];
     const quality = capabilities.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities.qualities[0]?.quality;
     const duration = normalizeVideoDuration(config.videoSeconds, capabilities.duration);

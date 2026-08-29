@@ -1,7 +1,9 @@
 import { type ReactNode } from "react";
 import { Input, InputNumber, Select, Slider, Switch } from "antd";
+import { Gem } from "lucide-react";
 
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
+import { openAiMembershipModal } from "@/components/layout/ai-membership-modal";
 import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { MIN_VIDEO_DURATION_SECONDS, modelOptionName, normalizeVideoDuration, videoCapabilitiesOf, type AiConfig, type VideoModelCapabilities, type VideoParameterDefinition } from "@/stores/use-config-store";
@@ -127,29 +129,29 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="flex min-h-8 items-center justify-between gap-3"><span className="text-lg font-semibold leading-6">{capabilities.displayName}</span>{capabilities.faceFriendly ? <span className="rounded-md bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold leading-4 text-emerald-500" title={capabilities.displayNotice || undefined}>不卡人脸</span> : null}</div> : null}
-                <SettingGroup title="清晰度" color={theme.node.muted}>
-                    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(4, Math.max(1, capabilities.qualities.length))}, minmax(0, 1fr))` }}>
-                        {capabilities.qualities.map((item) => (
-                            <OptionPill key={item.quality} selected={quality === item.quality} theme={theme} onClick={() => onConfigChange("vquality", item.quality)}>
-                                <span className="flex flex-col items-center leading-tight">
-                                    <span>{item.quality}</span>
-                                    <span className="whitespace-nowrap text-[10px] font-semibold text-amber-400">普通价 ¥{(Number(item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0) / 1_000_000).toFixed(2)}/{item.pricing.type === "fixed_total" ? "任务" : "秒"}</span>
-                                </span>
-                            </OptionPill>
-                        ))}
-                    </div>
-                </SettingGroup>
                 <SettingGroup title="画幅比例" color={theme.node.muted}>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(5, Math.max(1, capabilities.aspectRatios.length))}, minmax(0, 1fr))` }}>
                         {capabilities.aspectRatios.map((value) => {
                             const preview = ratioPreview(value);
                             return (
-                                <button key={value} type="button" className="flex h-[68px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border px-1 text-sm transition hover:opacity-90" style={{ borderColor: ratio === value ? theme.node.activeStroke : theme.node.stroke, background: ratio === value ? theme.toolbar.activeBg : "transparent", color: ratio === value ? theme.toolbar.activeText : theme.node.text, boxShadow: ratio === value ? `inset 0 0 0 1px ${theme.node.activeStroke}` : "none" }} onMouseDown={(event) => event.stopPropagation()} onClick={() => onConfigChange("size", value)}>
+                                <button key={value} type="button" className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border px-1 text-sm transition hover:opacity-90" style={{ borderColor: ratio === value ? theme.node.activeStroke : theme.node.stroke, background: ratio === value ? theme.toolbar.activeBg : "transparent", color: ratio === value ? theme.toolbar.activeText : theme.node.text, boxShadow: ratio === value ? `inset 0 0 0 1px ${theme.node.activeStroke}` : "none" }} onMouseDown={(event) => event.stopPropagation()} onClick={() => onConfigChange("size", value)}>
                                     <SizePreview width={preview.width} height={preview.height} color={ratio === value ? theme.toolbar.activeText : theme.node.text} />
                                     <span className="font-medium leading-5">{value}</span>
                                 </button>
                             );
                         })}
+                    </div>
+                </SettingGroup>
+                <SettingGroup title="清晰度" hint={billingType === "fixed_total" ? "按任务计费" : "按秒计费"} color={theme.node.muted}>
+                    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(4, Math.max(1, capabilities.qualities.length))}, minmax(0, 1fr))` }}>
+                        {capabilities.qualities.map((item) => (
+                            <OptionPill key={item.quality} selected={quality === item.quality} className="h-14" theme={theme} onClick={() => onConfigChange("vquality", item.quality)}>
+                                <span className="flex flex-col items-center gap-0.5 leading-tight">
+                                    <span className="text-base font-semibold leading-5">{item.quality}</span>
+                                    <span className="whitespace-nowrap text-[11px] font-normal leading-4" style={{ color: quality === item.quality ? theme.toolbar.activeText : theme.node.muted, opacity: quality === item.quality ? 0.72 : 1 }}>¥{(Number(item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0) / 1_000_000).toFixed(2)}/{item.pricing.type === "fixed_total" ? "任务" : "秒"}</span>
+                                </span>
+                            </OptionPill>
+                        ))}
                     </div>
                 </SettingGroup>
                 <SettingGroup title="时长" color={theme.node.muted}>
@@ -187,21 +189,25 @@ function VideoPriceSummary({ tier, tierUnitPrice, payablePrice, originalPrice, s
     const tierLabels = { NORMAL: "普通用户", SILVER: "白银", GOLD: "黄金", DIAMOND: "钻石" } as const;
     const hasLiveQuote = Boolean(tier && tierUnitPrice > 0);
     const discounted = hasLiveQuote && savings > 0;
+    const showMembershipCta = !tier || tier === "NORMAL";
     return (
-        <div className="rounded-lg border px-3.5 py-2.5" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
-            <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-sm font-medium" style={{ color: theme.node.text }}>{hasLiveQuote ? `${tierLabels[tier!]}实付价` : "价格预览"}</span>
-                        {discounted ? <span className="rounded bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-amber-400">已优惠</span> : null}
+        <div>
+            {showMembershipCta ? <button type="button" className="inline-flex cursor-pointer items-center gap-0.5 border-0 bg-transparent p-0 font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2" style={{ marginBottom: 4, height: 14, fontSize: 10, lineHeight: "14px", color: "#22c55e", textDecoration: "none" }} onClick={openAiMembershipModal}><Gem style={{ width: 10, height: 10 }} />去享受折扣</button> : null}
+            <div className="rounded-lg border px-3 py-2" style={{ borderColor: theme.node.stroke, background: `${theme.node.fill}99` }}>
+                <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-xs font-medium" style={{ color: theme.node.text }}>预计扣款</span>
+                            {discounted ? <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-emerald-500">已优惠</span> : null}
+                        </div>
+                        <div className="mt-0.5 text-[10px] leading-4" style={{ color: theme.node.muted }}>
+                            {billingType === "fixed_total" ? `${hasLiveQuote ? tierLabels[tier!] : "普通价"} · ¥${hasLiveQuote ? tierUnitPrice.toFixed(2) : normalUnitPrice.toFixed(2)}/任务` : `${hasLiveQuote ? tierLabels[tier!] : "普通价"} · ¥${hasLiveQuote ? tierUnitPrice.toFixed(2) : normalUnitPrice.toFixed(2)}/秒 × ${duration} 秒`}
+                        </div>
                     </div>
-                    <div className="mt-1 text-[11px] leading-4" style={{ color: theme.node.muted }}>
-                        {billingType === "fixed_total" ? `${hasLiveQuote ? `¥${tierUnitPrice.toFixed(2)}` : `普通价 ¥${normalUnitPrice.toFixed(2)}`} / 任务` : hasLiveQuote ? `¥${tierUnitPrice.toFixed(2)}/秒 × ${duration} 秒` : `普通价 ¥${normalUnitPrice.toFixed(2)}/秒 × ${duration} 秒`}
-                    </div>
+                    <strong className="shrink-0 text-base font-semibold leading-5 text-amber-400">¥{(hasLiveQuote ? payablePrice : originalPrice).toFixed(2)}</strong>
                 </div>
-                <strong className="shrink-0 text-xl font-bold leading-6 text-amber-400">¥{(hasLiveQuote ? payablePrice : originalPrice).toFixed(2)}</strong>
+                {discounted ? <div className="mt-1 flex items-center justify-between border-t pt-1 text-[10px]" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}><span>普通原价 <span className="line-through">¥{originalPrice.toFixed(2)}</span></span><strong className="font-semibold text-emerald-500">已省 ¥{savings.toFixed(2)}</strong></div> : null}
             </div>
-            {discounted ? <div className="mt-1.5 flex items-center justify-between border-t pt-1.5 text-[11px]" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}><span>普通原价 <span className="line-through">¥{originalPrice.toFixed(2)}</span></span><strong className="font-semibold text-emerald-500">已省 ¥{savings.toFixed(2)}</strong></div> : <div className="mt-1.5 border-t pt-1.5 text-[11px] leading-4" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>{hasLiveQuote ? "当前账户按普通档位计费" : "实付金额以实时账户报价为准"}</div>}
         </div>
     );
 }
@@ -280,7 +286,14 @@ function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, 
     );
 }
 
-export function videoResolutionLabel(value: string) {
+export function videoResolutionLabel(value: string, config?: AiConfig) {
+    const capabilities = config ? videoCapabilitiesOf(config, config.model || config.videoModel) : undefined;
+    if (capabilities?.qualities.length) {
+        return capabilities.qualities.find((item) => item.quality === value)?.quality || capabilities.qualities[0].quality;
+    }
+    if (config && isSeedanceVideoConfig(config)) {
+        return normalizeSeedanceResolution(value, modelOptionName(config.model || config.videoModel));
+    }
     return `${normalizeVideoResolutionValue(value)}p`;
 }
 
@@ -308,19 +321,20 @@ export function normalizeVideoResolutionValue(value: string) {
     return value.replace(/p$/i, "") || "720";
 }
 
-function OptionPill({ selected, disabled = false, theme, onClick, children }: { selected: boolean; disabled?: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {
+function OptionPill({ selected, disabled = false, className = "h-9", theme, onClick, children }: { selected: boolean; disabled?: boolean; className?: string; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {
     return (
-        <button type="button" disabled={disabled} className="h-9 cursor-pointer rounded-lg border px-2 text-sm font-medium transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35" style={{ background: selected ? theme.toolbar.activeBg : "transparent", borderColor: selected ? theme.node.activeStroke : theme.node.stroke, color: selected ? theme.toolbar.activeText : theme.node.text, boxShadow: selected ? `inset 0 0 0 1px ${theme.node.activeStroke}` : "none" }} onMouseDown={(event) => event.stopPropagation()} onClick={onClick}>
+        <button type="button" disabled={disabled} aria-pressed={selected} className={`${className} cursor-pointer rounded-lg border px-2 text-sm font-medium transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35`} style={{ background: selected ? theme.toolbar.activeBg : "transparent", borderColor: selected ? theme.node.activeStroke : theme.node.stroke, color: selected ? theme.toolbar.activeText : theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={onClick}>
             {children}
         </button>
     );
 }
 
-function SettingGroup({ title, color, children }: { title: string; color: string; children: ReactNode }) {
+function SettingGroup({ title, hint, color, children }: { title: string; hint?: string; color: string; children: ReactNode }) {
     return (
         <div className="space-y-1.5">
-            <div className="text-xs font-medium leading-5" style={{ color }}>
-                {title}
+            <div className="flex items-center justify-between gap-3 text-xs font-medium leading-5" style={{ color }}>
+                <span>{title}</span>
+                {hint ? <span className="text-[11px] font-normal opacity-75">{hint}</span> : null}
             </div>
             {children}
         </div>
@@ -353,8 +367,8 @@ function DurationSlider({ value, min, max, options, theme, onChange }: { value: 
     const values = options?.length ? [...options].sort((left, right) => left - right) : undefined;
     const marks = values ? Object.fromEntries(values.map((item, index) => [item, index === 0 || index === values.length - 1 ? item === -1 ? "智能" : `${item}s` : ""])) : { [min]: `${min}s`, [max]: `${max}s` };
     return (
-        <div className="rounded-lg border px-3 pb-3 pt-2" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>
-            <div className="mb-1 flex items-center justify-between text-xs leading-5" style={{ color: theme.node.muted }}><span>拖动选择</span><strong className="text-sm font-semibold" style={{ color: theme.node.text }}>{value === -1 ? "智能" : `${value} 秒`}</strong></div>
+        <div className="px-0.5 pb-2 pt-0.5">
+            <div className="mb-0.5 flex items-center justify-between text-[11px] leading-5" style={{ color: theme.node.muted }}><span>拖动选择</span><strong className="rounded-md px-2 py-0.5 text-xs font-semibold" style={{ background: theme.node.fill, color: theme.node.text }}>{value === -1 ? "智能" : `${value} 秒`}</strong></div>
             <Slider min={min} max={max} step={values ? null : 1} marks={marks} value={value} tooltip={{ formatter: (current) => current === -1 ? "智能" : `${current} 秒` }} onChange={onChange} />
         </div>
     );

@@ -88,6 +88,8 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             videoCapabilities: {
                 provider: "canvas-video" as const,
                 displayName: item.display_name || item.id,
+                displayBaseName: item.display_base_name || item.display_name || item.id,
+                displaySuffix: item.display_suffix || null,
                 channel: item.channel,
                 routeLabel: item.routeLabel || item.channel_title || item.channel,
                 upstreamModel: item.upstream_model,

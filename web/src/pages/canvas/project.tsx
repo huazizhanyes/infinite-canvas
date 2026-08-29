@@ -52,7 +52,7 @@ import { canvasScriptApi } from "@/services/api/canvas-script";
 import { canvasTextApi } from "@/services/api/canvas-text";
 import { syncSucaiCanvasProject } from "@/services/sucai-canvas-sync";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
-import { buildCanvasResourceReferences, buildNodeMentionReferences, normalizeCanvasResourceMentions, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { buildCanvasResourceReferences, buildNodeMentionReferences, mergeCanvasReferenceOrder, normalizeCanvasResourceMentions, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { createCanvasGraphIndex, incomingConnections, outgoingConnections } from "@/lib/canvas/canvas-graph-index";
 import { createCanvasSpatialIndex } from "@/lib/canvas/canvas-spatial-index";
 import { sameNodeGeometry } from "@/lib/canvas/canvas-geometry";
@@ -134,7 +134,7 @@ type NodeDragState = {
 
 const VIDEO_NODE_MAX_WIDTH = 420;
 const VIDEO_NODE_MAX_HEIGHT = 420;
-const CONNECTION_HANDLE_HIT_RADIUS = 40;
+const CONNECTION_HANDLE_HIT_RADIUS = 16;
 const CONNECTION_NODE_HIT_PADDING = 32;
 const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
@@ -567,7 +567,7 @@ function InfiniteCanvasPage() {
     const updateVideoHostTask = useCallback((targetNodeId: string, task: CanvasVideoTask) => {
         const request = generationRequestsRef.current.get(targetNodeId);
         if (!request) return;
-        const phase = task.archiveStatus === "archiving" ? "视频归档中" : task.status === "queued" ? "视频排队中" : task.status === "submission_unknown" ? "提交结果未知，请勿重复生成" : task.status === "completed" ? "视频已完成" : task.status === "failed" ? "视频生成失败" : "视频生成中";
+        const phase = task.statusMessage || (task.archiveStatus === "archiving" ? "视频归档中" : task.status === "queued" ? "视频排队中" : task.status === "submission_unknown" ? "提交结果未知，请勿重复生成" : task.status === "completed" ? "视频已完成" : task.status === "failed" ? "视频生成失败" : "视频生成中");
         const billing = task.billingStatus === "refunded" ? "已退款" : "";
         useCanvasHostTaskStore.getState().updateTask(request.taskId, { progress: task.progress, stage: [phase, billing].filter(Boolean).join(" · ") });
     }, []);
@@ -976,7 +976,10 @@ function InfiniteCanvasPage() {
             const { fromNodeId, toNodeId } = connection;
             const exists = connectionsRef.current.some((conn) => conn.fromNodeId === fromNodeId && conn.toNodeId === toNodeId);
             if (!exists) {
-                setConnections((prev) => [...prev, { id: `conn-${Date.now()}`, fromNodeId, toNodeId }]);
+                const nextConnections = [...connectionsRef.current, { id: `conn-${Date.now()}`, fromNodeId, toNodeId }];
+                connectionsRef.current = nextConnections;
+                setConnections(nextConnections);
+                setNodes((prev) => prev.map((node) => node.id === toNodeId ? { ...node, metadata: { ...node.metadata, referenceOrder: mergeCanvasReferenceOrder(toNodeId, prev, nextConnections) } } : node));
             }
             setContextMenu(null);
         },
@@ -993,7 +996,13 @@ function InfiniteCanvasPage() {
             nextConnectionKeys.add(key);
             return [{ id: nanoid(), ...connection }];
         });
-        if (createdConnections.length) setConnections((prev) => [...prev, ...createdConnections]);
+        if (createdConnections.length) {
+            const nextConnections = [...connectionsRef.current, ...createdConnections];
+            connectionsRef.current = nextConnections;
+            setConnections(nextConnections);
+            const target = nodesRef.current.find((node) => node.id === targetNodeId);
+            if (target) setNodes((prev) => prev.map((node) => node.id === targetNodeId ? { ...node, metadata: { ...node.metadata, referenceOrder: mergeCanvasReferenceOrder(targetNodeId, prev, nextConnections) } } : node));
+        }
         setContextMenu(null);
     }, []);
 
@@ -1023,8 +1032,10 @@ function InfiniteCanvasPage() {
                 return [{ id: nanoid(), ...connection }];
             });
             if (!createdConnections.length) return;
-            const nextNodes = [...nodesRef.current, newNode];
             const nextConnections = [...connectionsRef.current, ...createdConnections];
+            connectionsRef.current = nextConnections;
+            const nextNodes = [...nodesRef.current, { ...newNode, metadata: { ...newNode.metadata, referenceOrder: mergeCanvasReferenceOrder(newNode.id, [...nodesRef.current, newNode], nextConnections) } }];
+            nodesRef.current = nextNodes;
             setNodes(nextNodes);
             setConnections(nextConnections);
             setSelectedNodeIds(new Set([newNode.id]));
@@ -1556,7 +1567,20 @@ function InfiniteCanvasPage() {
     );
 
     const deleteConnection = useCallback((connectionId: string) => {
-        setConnections((prev) => prev.filter((conn) => conn.id !== connectionId));
+        const connection = connectionsRef.current.find((conn) => conn.id === connectionId);
+        if (connection) {
+            const endpointIds = new Set([connection.fromNodeId, connection.toNodeId]);
+            const nextNodes = nodesRef.current.map((node) => {
+                if (!endpointIds.has(node.id) || node.metadata?.referenceOrder?.length) return node;
+                const referenceOrder = mergeCanvasReferenceOrder(node.id, nodesRef.current, connectionsRef.current);
+                return referenceOrder.length ? { ...node, metadata: { ...node.metadata, referenceOrder } } : node;
+            });
+            nodesRef.current = nextNodes;
+            setNodes(nextNodes);
+        }
+        const nextConnections = connectionsRef.current.filter((conn) => conn.id !== connectionId);
+        connectionsRef.current = nextConnections;
+        setConnections(nextConnections);
         setSelectedConnectionId((current) => (current === connectionId ? null : current));
         setContextMenu((current) => (current?.type === "connection" && current.connectionId === connectionId ? null : current));
     }, []);
@@ -2372,7 +2396,7 @@ function InfiniteCanvasPage() {
     }, []);
 
     const handleNodePromptChange = useCallback((nodeId: string, prompt: string) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt } } : node)));
+        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt, referenceOrder: mergeCanvasReferenceOrder(nodeId, prev, connectionsRef.current) } } : node)));
     }, []);
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
@@ -2874,6 +2898,7 @@ function InfiniteCanvasPage() {
             const sourceMetadata: Pick<CanvasNodeMetadata, "sourceNodeId" | "sourceScope"> = derivedSourceId ? { sourceNodeId: derivedSourceId, sourceScope: sourceNode?.metadata?.sourceScope || options?.sourceScope || "full" } : {};
             const editingTextNode = mode === "text" && Boolean(sourceTextContent);
             const mentionReferences = mentionReferencesByNodeId.get(nodeId) || [];
+            const canvasReferenceOrder = mentionReferences.filter((reference) => reference.active && reference.source === "canvas").map((reference) => reference.nodeId);
             const generationPrompt = normalizeCanvasResourceMentions(editingTextNode ? `请根据要求处理以下文本。\n\n原文：\n${sourceTextForGeneration}\n\n处理要求：\n${prompt}` : prompt, mentionReferences);
             let generationContext: Awaited<ReturnType<typeof hydrateNodeGenerationContext>>;
             try {
@@ -3090,6 +3115,7 @@ function InfiniteCanvasPage() {
                             generationRequestId: nanoid(),
                             videoProvider: isCanvasVideoModel(generationConfig) ? "canvas-video" : undefined,
                             references: generationReferenceUrls(generationContext),
+                            referenceOrder: canvasReferenceOrder,
                         },
                     };
                     pendingChildIds = [videoId];
@@ -3104,6 +3130,15 @@ function InfiniteCanvasPage() {
                         let video: UploadedFile | CanvasVideoStoredResult;
                         if (isCanvasVideoModel(generationConfig)) {
                             const clientRequestId = String(videoNode.metadata?.generationRequestId || nanoid());
+                            logCanvasVideoReferenceDebug({
+                                nodeId: videoId,
+                                prompt: effectivePrompt,
+                                referenceOrder: canvasReferenceOrder,
+                                references: mentionReferences,
+                                generationContext,
+                                nodes: nodesRef.current,
+                                connections: connectionsRef.current,
+                            });
                             const task = await createCanvasVideoTask(generationConfig, {
                                 projectId,
                                 nodeId: videoId,
@@ -3145,6 +3180,7 @@ function InfiniteCanvasPage() {
                                                watermark: generationConfig.videoWatermark,
                                                videoMode: generationConfig.videoMode,
                                               references: generationReferenceUrls(generationContext),
+                                              referenceOrder: canvasReferenceOrder,
                                           },
                                       }
                                     : node,
@@ -3329,7 +3365,8 @@ function InfiniteCanvasPage() {
 
             setRunningNodeId(node.id);
             unlockGenerationCompleteSound();
-            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
+            const retryReferenceOrder = mentionReferences.filter((reference) => reference.active && reference.source === "canvas").map((reference) => reference.nodeId);
+            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined, referenceOrder: item.metadata?.referenceOrder?.length ? item.metadata.referenceOrder : retryReferenceOrder } } : item)));
             const controller = startGenerationRequest(node.id, sourceNode.id, node.id);
 
             try {
@@ -3842,7 +3879,7 @@ function InfiniteCanvasPage() {
                                 type="button"
                                 data-canvas-multi-connect
                                 data-canvas-no-zoom
-                                className="pointer-events-auto absolute top-1/2 grid -translate-y-1/2 cursor-pointer place-items-center rounded-full border shadow-lg transition-[transform,background-color] duration-150 hover:scale-110"
+                                className={`pointer-events-auto absolute top-1/2 grid place-items-center rounded-full border shadow-lg transition-[background-color] duration-150 ${batchConnectingParams ? "cursor-grabbing" : "cursor-grab"}`}
                                 style={{
                                     right: `${-33 / Math.max(viewport.k, 0.05)}px`,
                                     width: `${30 / Math.max(viewport.k, 0.05)}px`,
@@ -3851,6 +3888,9 @@ function InfiniteCanvasPage() {
                                     background: theme.node.panel,
                                     borderColor: theme.canvas.selectionStroke,
                                     color: theme.node.text,
+                                    transform: batchConnectingParams
+                                        ? `translate(${mouseWorld.x - (batchSelectionBounds.right + 30 / Math.max(viewport.k, 0.05))}px, ${mouseWorld.y - (batchSelectionBounds.top + batchSelectionBounds.bottom) / 2}px) translateY(-50%)`
+                                        : "translateY(-50%)",
                                 }}
                                 aria-label={`连接选中的 ${batchConnectionNodes.length} 个节点`}
                                 title={`连接选中的 ${batchConnectionNodes.length} 个节点`}
@@ -4363,6 +4403,36 @@ function generationReferenceUrls(context: { referenceImages: ReferenceImage[]; r
         ...context.referenceVideos.map((video) => video.storageKey || video.url).filter((url): url is string => Boolean(url)),
         ...(context.referenceAudios || []).map((audio) => audio.storageKey || audio.url).filter((url): url is string => Boolean(url)),
     ];
+}
+
+function logCanvasVideoReferenceDebug(input: {
+    nodeId: string;
+    prompt: string;
+    referenceOrder: string[];
+    references: CanvasResourceReference[];
+    generationContext: { referenceImages: ReferenceImage[]; referenceVideos: Array<{ id?: string; storageKey?: string; url?: string }>; referenceAudios: Array<{ id?: string; storageKey?: string; url?: string }> };
+    nodes: CanvasNodeData[];
+    connections: CanvasConnection[];
+}) {
+    if (typeof window === "undefined" || window.localStorage.getItem("canvas.debug.references") !== "1") return;
+    const nodeById = new Map(input.nodes.map((node) => [node.id, node]));
+    console.groupCollapsed("[Canvas] video reference order");
+    console.log("target", nodeById.get(input.nodeId));
+    console.table(input.nodes.filter((node) => input.references.some((reference) => reference.nodeId === node.id)).map((node) => ({
+        id: node.id,
+        title: node.title,
+        kind: node.type,
+        storageKey: node.metadata?.storageKey,
+        referenceOrder: node.metadata?.referenceOrder?.join(",") || "",
+        label: input.references.find((reference) => reference.nodeId === node.id)?.label || "",
+    })));
+    console.table(input.connections.map((connection, index) => ({ index, id: connection.id, from: connection.fromNodeId, to: connection.toNodeId })));
+    console.log("prompt", input.prompt);
+    console.log("referenceOrder", input.referenceOrder);
+    console.log("uploaded image ids", input.generationContext.referenceImages.map((reference) => reference.id));
+    console.log("uploaded video ids", input.generationContext.referenceVideos.map((reference) => reference.id));
+    console.log("uploaded audio ids", input.generationContext.referenceAudios.map((reference) => reference.id));
+    console.groupEnd();
 }
 
 async function resolveMetadataReferences(metadata: CanvasNodeMetadata) {

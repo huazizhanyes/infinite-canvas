@@ -42,6 +42,22 @@ describe("buildNodeGenerationContext asset mentions", () => {
         expect(context.referenceImages).toEqual([{ id: image.id, name: "图片.png", type: "image/png", dataUrl: "blob:image", storageKey: undefined }]);
     });
 
+    it("keeps stable reference order when node and connection order differ", () => {
+        const video: CanvasNodeData = { ...target, id: "video", type: CanvasNodeType.Video, title: "视频", metadata: { referenceOrder: ["image-b", "image-a"] } };
+        const imageA: CanvasNodeData = { ...target, id: "image-a", type: CanvasNodeType.ScriptAsset, title: "A", metadata: { content: "blob:a", mimeType: "image/png", scriptAssetId: "a" } };
+        const imageB: CanvasNodeData = { ...target, id: "image-b", type: CanvasNodeType.ScriptAsset, title: "B", metadata: { content: "blob:b", mimeType: "image/png", scriptAssetId: "b" } };
+        const connections = [
+            { id: "line-a", fromNodeId: imageA.id, toNodeId: video.id },
+            { id: "line-b", fromNodeId: imageB.id, toNodeId: video.id },
+        ];
+
+        const references = buildNodeMentionReferences(video, [video, imageA, imageB], connections);
+        const context = buildNodeGenerationContext(video.id, [video, imageA, imageB], connections, "@图片1 是B，@图片2 是A", references);
+
+        expect(references.map((reference) => [reference.label, reference.nodeId])).toEqual([["图片1", imageB.id], ["图片2", imageA.id]]);
+        expect(context.referenceImages.map((image) => image.id)).toEqual([imageB.id, imageA.id]);
+    });
+
     it("passes a connected uploaded audio as a synthesis reference", () => {
         const audioTarget: CanvasNodeData = { ...target, id: "audio-target", type: CanvasNodeType.Audio, title: "配音", metadata: {} };
         const uploadedAudio: CanvasNodeData = {
@@ -81,6 +97,17 @@ describe("buildNodeGenerationContext asset mentions", () => {
 
         expect(context.referenceImages).toEqual([{ id: "image-1", name: "秦墨.png", type: "image/png", dataUrl: "blob:image", storageKey: "image-key" }]);
         expect(context.referenceVideos).toEqual([]);
+    });
+
+    it("uploads manually mentioned assets in prompt order", () => {
+        const references: CanvasResourceReference[] = [
+            { id: "asset:image-a", nodeId: "asset:image-a", source: "user-asset", assetId: "image-a", kind: "image", label: "资产·A", title: "A", previewUrl: "blob:a", active: true },
+            { id: "asset:image-b", nodeId: "asset:image-b", source: "user-asset", assetId: "image-b", kind: "image", label: "资产·B", title: "B", previewUrl: "blob:b", active: true },
+        ];
+
+        const context = buildNodeGenerationContext(target.id, [target], [], "@资产·B 先出现，@资产·A 后出现", references);
+
+        expect(context.referenceImages.map((image) => image.id)).toEqual(["image-b", "image-a"]);
     });
 
     it("gives same-title assets distinct mention labels", () => {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { buildNodeMentionReferences, normalizeCanvasResourceMentions } from "@/lib/canvas/canvas-resource-references";
+import { buildCanvasResourceReferences, buildNodeMentionReferences, mergeCanvasReferenceOrder, normalizeCanvasResourceMentions } from "@/lib/canvas/canvas-resource-references";
 import type { Asset } from "@/stores/use-asset-store";
-import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 
 const references = [
     { label: "图片1", active: true },
@@ -24,6 +24,44 @@ describe("normalizeCanvasResourceMentions", () => {
 });
 
 describe("buildNodeMentionReferences", () => {
+    it("keeps canvas badge labels stable while hovering a connected target", () => {
+        const image = (id: string): CanvasNodeData => ({ id, type: CanvasNodeType.Image, title: id, position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: `blob:${id}` } });
+        const target: CanvasNodeData = { id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 240, metadata: { referenceOrder: ["image-b", "image-a"] } };
+        const nodes = [target, image("image-a"), image("image-b")];
+        const connections: CanvasConnection[] = [
+            { id: "a", fromNodeId: "image-a", toNodeId: "video" },
+            { id: "b", fromNodeId: "image-b", toNodeId: "video" },
+        ];
+        const idle = buildCanvasResourceReferences(nodes, connections, null);
+        const hovered = buildCanvasResourceReferences(nodes, connections, "video");
+        expect(hovered.map((reference) => [reference.nodeId, reference.label])).toEqual(idle.map((reference) => [reference.nodeId, reference.label]));
+        expect(hovered.filter((reference) => reference.active).map((reference) => reference.nodeId)).toEqual(["image-a", "image-b"]);
+    });
+
+    it("keeps disconnected resources in their original positions when reconnected", () => {
+        const target: CanvasNodeData = { id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 240, metadata: { referenceOrder: ["a", "b", "c"] } };
+        const image = (id: string): CanvasNodeData => ({ id, type: CanvasNodeType.Image, title: id, position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: `blob:${id}` } });
+        const nodes = [target, image("a"), image("b"), image("c")];
+        const connections: CanvasConnection[] = [
+            { id: "a", fromNodeId: "a", toNodeId: "video" },
+            { id: "b", fromNodeId: "b", toNodeId: "video" },
+        ];
+        expect(mergeCanvasReferenceOrder("video", nodes, connections)).toEqual(["a", "b", "c"]);
+        const reconnected = [...connections, { id: "c", fromNodeId: "c", toNodeId: "video" }];
+        expect(mergeCanvasReferenceOrder("video", nodes, reconnected)).toEqual(["a", "b", "c"]);
+    });
+
+    it("uses referenceOrder before connection array order", () => {
+        const target: CanvasNodeData = { id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 240, metadata: { referenceOrder: ["b", "a"] } };
+        const image = (id: string): CanvasNodeData => ({ id, type: CanvasNodeType.Image, title: id, position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: `blob:${id}` } });
+        const nodes = [target, image("a"), image("b")];
+        const connections: CanvasConnection[] = [
+            { id: "a", fromNodeId: "a", toNodeId: "video" },
+            { id: "b", fromNodeId: "b", toNodeId: "video" },
+        ];
+        expect(buildNodeMentionReferences(target, nodes, connections).map((reference) => reference.nodeId)).toEqual(["b", "a"]);
+    });
+
     it("prefers a restored local image over an expired asset cover", () => {
         const node: CanvasNodeData = {
             id: "node-1",

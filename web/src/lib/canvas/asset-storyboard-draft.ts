@@ -19,6 +19,7 @@ export function buildAssetStoryboardDraft(source: CanvasNodeData, assets: Script
     const storyboardNodeId = existingStoryboard?.id || nanoid();
     const videoNodeId = existingVideo?.id || nanoid();
     const imageAssets = assets.filter((asset) => asset.image?.imageUrl || nodes.some((node) => node.metadata?.scriptAssetId === asset.id && node.metadata?.content));
+    const imageAssetIds = imageAssets.map((asset) => asset.id);
     const references = imageAssets.map((_asset, index) => `图片${index + 1}`);
     const characters = assets.filter((asset) => asset.type === "character");
     const scenes = assets.filter((asset) => asset.type === "scene");
@@ -73,13 +74,13 @@ export function buildAssetStoryboardDraft(source: CanvasNodeData, assets: Script
             type: existingVideo ? "update_node" : "add_node",
             id: videoNodeId,
             ...(existingVideo ? { patch: { title: "视频草稿", position: videoPosition, width: 420, height: 236 } } : { nodeType: CanvasNodeType.Video, title: "视频草稿", position: videoPosition, width: 420, height: 236 }),
-            metadata: { prompt: videoPrompt, status: "idle", assetExtractionVideoDraftSourceId: source.id, sourceNodeId: storyboardNodeId },
+            metadata: { prompt: videoPrompt, status: "idle", assetExtractionVideoDraftSourceId: source.id, sourceNodeId: storyboardNodeId, references: imageAssetIds },
         },
         ...(!connections.some((connection) => connection.fromNodeId === source.id && connection.toNodeId === storyboardNodeId) ? [{ type: "connect_nodes" as const, id: nanoid(), fromNodeId: source.id, toNodeId: storyboardNodeId }] : []),
         ...(!connections.some((connection) => connection.fromNodeId === storyboardNodeId && connection.toNodeId === videoNodeId) ? [{ type: "connect_nodes" as const, id: nanoid(), fromNodeId: storyboardNodeId, toNodeId: videoNodeId }] : []),
     ];
-    const assetNodes = nodes.filter((node) => node.type === CanvasNodeType.ScriptAsset && node.metadata?.assetExtractionNodeId === source.id && imageAssets.some((asset) => asset.id === node.metadata?.scriptAssetId));
-    assetNodes.forEach((node) => {
+    const assetNodeByAssetId = new Map(nodes.filter((node) => node.type === CanvasNodeType.ScriptAsset && node.metadata?.assetExtractionNodeId === source.id).map((node) => [node.metadata?.scriptAssetId, node]));
+    imageAssetIds.flatMap((assetId) => assetNodeByAssetId.get(assetId) || []).forEach((node) => {
         if (!connections.some((connection) => connection.fromNodeId === node.id && connection.toNodeId === videoNodeId)) ops.push({ type: "connect_nodes", id: nanoid(), fromNodeId: node.id, toNodeId: videoNodeId });
     });
     ops.push({ type: "select_nodes", ids: [videoNodeId] });

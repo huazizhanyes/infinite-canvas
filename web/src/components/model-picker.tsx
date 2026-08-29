@@ -14,18 +14,15 @@ type ModelPickerProps = {
     fullWidth?: boolean;
     placeholder?: string;
     onMissingConfig?: () => void;
+    compactVideo?: boolean;
 };
 
-const VIDEO_COMING_SOON_MODELS = [
-    { value: "__video_seedance_coming_soon", label: "Seedance 2.0 · 即将上线" },
-    { value: "__video_happyhorse_coming_soon", label: "HappyHorse · 即将上线" },
-] as const;
-
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, compactVideo = false }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
     const current = value || "";
+    const currentLabel = current ? modelOptionLabel(config, current) : placeholder;
 
     useEffect(() => {
         const closeOtherPicker = (event: Event) => {
@@ -50,15 +47,17 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 className={cn(
                     "canvas-composer-model-picker h-8 w-fit max-w-full gap-1.5 rounded-md border border-input bg-transparent px-2 text-xs font-normal shadow-none transition-colors",
                     fullWidth ? "w-full min-w-0 justify-start" : "min-w-[9rem] justify-start",
-                    "data-[state=open]:border-ring data-[state=open]:ring-2 data-[state=open]:ring-ring/20",
+                    compactVideo
+                        ? "!w-[160px] !min-w-0 !max-w-[160px] !flex-none justify-start !shadow-none focus-visible:!border-transparent focus-visible:!outline-none focus-visible:!ring-0 data-[state=open]:!border-transparent data-[state=open]:!shadow-none data-[state=open]:!ring-0 dark:!bg-transparent dark:hover:!bg-transparent"
+                        : "data-[state=open]:border-ring data-[state=open]:ring-2 data-[state=open]:ring-ring/20",
                     className,
                 )}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
-                title={current ? modelOptionLabel(config, current) : placeholder}
+                title={currentLabel}
             >
                 <ModelIcon config={config} model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelOptionLabel(config, current) : placeholder}</span>
+                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{currentLabel}</span>
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
@@ -81,14 +80,6 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                         {emptyModelLabel(config, capability)}
                     </SelectItem>
                 )}
-                {capability === "video" ? VIDEO_COMING_SOON_MODELS.map((model) => (
-                    <SelectItem key={model.value} value={model.value} textValue={model.label} disabled>
-                        <span className="flex min-w-0 items-center gap-2 opacity-60">
-                            <Clapperboard className="size-4 shrink-0" />
-                            <span className="truncate">{model.label}</span>
-                        </span>
-                    </SelectItem>
-                )) : null}
             </SelectContent>
         </Select>
     );

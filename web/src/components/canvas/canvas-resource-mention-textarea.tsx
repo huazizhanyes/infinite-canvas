@@ -346,7 +346,11 @@ function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyD
                     if (event.key === "Enter" && onSubmit && !event.shiftKey) { event.preventDefault(); onSubmit(); return; }
                     onKeyDown?.(event as never);
                 }}
-                onKeyUp={updateMention}
+                onKeyUp={(event) => {
+                    // Arrow navigation is handled on keydown; re-scanning here would reset the highlighted item.
+                    if (event.key === "ArrowDown" || event.key === "ArrowUp") return;
+                    updateMention();
+                }}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
                 onWheel={(event) => event.stopPropagation()}

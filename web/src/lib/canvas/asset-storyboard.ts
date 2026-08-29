@@ -89,6 +89,7 @@ export function buildShotPrompt(shot: AssetStoryboardShot, assets: ScriptAsset[]
 export function buildVideoScriptOps(storyboard: CanvasNodeData, source: CanvasNodeData, state: AssetStoryboardState, assetNodes: CanvasNodeData[], existingNodes: CanvasNodeData[], connections: CanvasConnection[]): CanvasAgentOp[] {
     const ops: CanvasAgentOp[] = [];
     const existing = new Map(existingNodes.filter((node) => node.type === CanvasNodeType.Video && node.metadata?.assetStoryboardSourceId === storyboard.id).map((node) => [node.metadata?.assetStoryboardShotId, node]));
+    const assetNodeByAssetId = new Map(assetNodes.map((node) => [node.metadata?.scriptAssetId, node]));
     const selectedIds: string[] = [];
     state.shots.forEach((shot, index) => {
         if (!shot.finalPrompt) return;
@@ -100,7 +101,7 @@ export function buildVideoScriptOps(storyboard: CanvasNodeData, source: CanvasNo
         if (old) ops.push({ type: "update_node", id, patch: { title: `分镜 ${shot.index} · ${shot.title} · ${shot.durationSec}秒`, position, width: 420, height: 236 }, metadata });
         else ops.push({ type: "add_node", id, nodeType: CanvasNodeType.Video, title: `分镜 ${shot.index} · ${shot.title} · ${shot.durationSec}秒`, position, width: 420, height: 236, metadata });
         if (!connections.some((connection) => connection.fromNodeId === storyboard.id && connection.toNodeId === id)) ops.push({ type: "connect_nodes", id: nanoid(), fromNodeId: storyboard.id, toNodeId: id });
-        assetNodes.filter((node) => shot.assetIds.includes(String(node.metadata?.scriptAssetId))).forEach((assetNode) => {
+        Array.from(new Set(shot.assetIds)).flatMap((assetId) => assetNodeByAssetId.get(assetId) || []).forEach((assetNode) => {
             if (!connections.some((connection) => connection.fromNodeId === assetNode.id && connection.toNodeId === id)) ops.push({ type: "connect_nodes", id: nanoid(), fromNodeId: assetNode.id, toNodeId: id });
         });
     });

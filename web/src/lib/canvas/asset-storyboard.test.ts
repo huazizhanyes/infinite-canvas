@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildVideoScriptOps, inspectAssetReadiness, parseStoryboardAnalysis } from "@/lib/canvas/asset-storyboard";
+import type { CanvasAgentOp } from "@/lib/canvas/canvas-agent-ops";
 import { CanvasNodeType, type AssetStoryboardState, type CanvasNodeData } from "@/types/canvas";
 import type { ScriptAsset } from "@/services/api/canvas-script";
 
@@ -44,5 +45,17 @@ describe("asset storyboard workflow", () => {
         expect(ops.filter((op) => op.type === "add_node" && op.nodeType === CanvasNodeType.Video)).toHaveLength(2);
         expect(ops.filter((op) => op.type === "connect_nodes" && op.fromNodeId === "node-a")).toHaveLength(1);
         expect(ops.find((op) => op.type === "select_nodes")).toMatchObject({ ids: expect.arrayContaining([expect.any(String)]) });
+    });
+
+    it("connects shot assets in the explicit assetIds order", () => {
+        const state: AssetStoryboardState = { version: 1, sourceNodeId: source.id, contentHash: "hash", status: "ready", title: "分镜", totalDurationSec: 8, continuityBible: "", shots: [
+            { id: "s1", index: 1, durationSec: 8, title: "一", sourceExcerpt: "", storyPurpose: "", visualDescription: "", shotSize: "中景", lighting: "", dialogue: "", sound: "", cameraMovement: "", characters: [], assetIds: ["b", "a"], previousHandoff: "", startState: "", endState: "", continuity: "", negativeConstraints: [], finalPrompt: "图片1是B，图片2是A", promptStatus: "success" },
+        ] };
+        const storyboard = { id: "story", type: CanvasNodeType.AssetStoryboard, title: "分镜", position: { x: 0, y: 0 }, width: 300, height: 180, metadata: { assetStoryboardSourceId: source.id } };
+        const ops = buildVideoScriptOps(storyboard, source, state, [assetData("a", "blob:a"), assetData("b", "blob:b")], [source, storyboard], []);
+        const assetConnections = ops.filter((op): op is Extract<CanvasAgentOp, { type: "connect_nodes" }> => op.type === "connect_nodes" && op.fromNodeId.startsWith("node-"));
+
+        expect(assetConnections.map((op) => op.fromNodeId)).toEqual(["node-b", "node-a"]);
+        expect(ops.find((op) => op.type === "add_node" && op.nodeType === CanvasNodeType.Video)).toMatchObject({ metadata: { references: ["b", "a"] } });
     });
 });

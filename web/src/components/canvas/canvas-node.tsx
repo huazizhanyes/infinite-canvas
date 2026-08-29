@@ -87,8 +87,6 @@ type NodeContentRendererProps = {
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
-    onSetBatchPrimary?: () => void;
-    isBatchPrimary: boolean;
     groupChildCount: number;
     onGroupColorChange: (color: string) => void;
 };
@@ -355,8 +353,13 @@ export const CanvasNode = React.memo(function CanvasNode({
             }}
         >
             <div
-                className="absolute left-0 top-[-24px] z-[65] flex h-5 max-w-full items-center gap-1.5 text-[12px]"
-                style={{ color: theme.node.label, transform: `scale(${1 / Math.max(1, scale / 1.25)})`, transformOrigin: "left bottom" }}
+                className="absolute left-0 top-[-30px] z-[65] flex h-6 max-w-full items-center gap-1.5 text-[12px]"
+                style={{
+                    color: theme.node.label,
+                    maxWidth: isBatchRoot || isBatchChild ? "calc(100% - 108px)" : "100%",
+                    transform: `scale(${1 / Math.max(1, scale / 1.25)})`,
+                    transformOrigin: "left bottom",
+                }}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
             >
@@ -392,7 +395,43 @@ export const CanvasNode = React.memo(function CanvasNode({
                         {data.title || "未命名节点"}
                     </button>
                 )}
+                {resourceLabel && data.type !== CanvasNodeType.Text ? <ResourceLabelBadge reference={resourceLabel} /> : null}
             </div>
+
+            {isBatchRoot ? (
+                <button
+                    type="button"
+                    className="absolute right-0 top-[-32px] z-[66] flex h-7 items-center justify-center gap-1 rounded-md border px-2 text-[11px] font-semibold shadow-[0_6px_18px_rgba(15,23,42,.10)] backdrop-blur-md transition hover:bg-white/5"
+                    style={{ background: `${theme.toolbar.panel}e8`, borderColor: `${theme.toolbar.border}cc`, color: theme.node.text }}
+                    aria-label={batchExpanded ? "图片组已展开" : "图片组已收起"}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onToggleBatch?.(data.id);
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
+                    <span className="leading-none text-[#2f80ff]">{batchCount}</span>
+                    <ChevronRight className={`size-3.5 opacity-55 transition-transform ${batchExpanded ? "rotate-90" : ""}`} />
+                </button>
+            ) : null}
+
+            {isBatchChild ? (
+                <button
+                    type="button"
+                    className={`absolute right-0 top-[-34px] z-[66] flex h-8 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium shadow-[0_8px_20px_rgba(68,64,60,.13)] backdrop-blur-md transition hover:bg-white/5 ${isBatchPrimary ? "opacity-100" : "opacity-0 group-hover/node:opacity-100"}`}
+                    style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onSetBatchPrimary?.(data);
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
+                    <Star className={`size-3.5 text-[#2f80ff] ${isBatchPrimary ? "fill-[#2f80ff]" : ""}`} />
+                    {isBatchPrimary ? "主图" : "设为主图"}
+                </button>
+            ) : null}
 
             <div
                 data-canvas-node-shell
@@ -460,8 +499,6 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onStopEditing={() => setIsEditingContent(false)}
                         onRetry={onRetry}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
-                        onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
-                        isBatchPrimary={isBatchPrimary}
                         groupChildCount={groupChildCount}
                         onGroupColorChange={(color) => onGroupColorChange(data.id, color)}
                     />
@@ -469,7 +506,6 @@ export const CanvasNode = React.memo(function CanvasNode({
 
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
                 {hovered && hasVideoContent && data.metadata?.videoProvider === "canvas-video" ? <VideoInfoBar node={data} /> : null}
-                {resourceLabel && data.type !== CanvasNodeType.Text ? <ResourceLabelBadge reference={resourceLabel} /> : null}
                 {data.type === CanvasNodeType.Text ? (
                     <button
                         type="button"
@@ -503,7 +539,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             {showPanel && !isGroup && renderPanel ? (
                 <div
                     data-canvas-node-panel={data.id}
-                    className={`absolute left-1/2 z-[70] max-w-[calc(100vw-24px)] ${data.type === CanvasNodeType.Text ? "w-[560px]" : "w-[580px]"}`}
+                    className={`absolute left-1/2 z-[70] max-w-[calc(100vw-24px)] ${data.type === CanvasNodeType.Text ? "w-[560px]" : "w-[640px]"}`}
                     style={{
                         top: "calc(100% + 8px)",
                         transform: `translateX(-50%) scale(${screenFixedScale(scale)})`,
@@ -705,7 +741,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, textContentRe
 
 function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference }) {
     return (
-        <span className={`pointer-events-none absolute left-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "bg-[#2f80ff] text-white shadow-sm" : "bg-black/35 text-white/75"}`}>
+        <span className={`pointer-events-none shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "bg-[#2f80ff] text-white shadow-sm" : "border text-white/75"}`} style={reference.active ? undefined : { background: "rgba(0,0,0,.35)", borderColor: "rgba(255,255,255,.18)" }}>
             {reference.label}
         </span>
     );
@@ -738,8 +774,6 @@ function ImageNodeContent(props: NodeContentRendererProps) {
             batchOpening={props.batchOpening}
             batchRecovering={props.batchRecovering}
             onToggleBatch={props.onToggleBatch}
-            onSetBatchPrimary={props.onSetBatchPrimary}
-            isBatchPrimary={props.isBatchPrimary}
         />
     );
 }
@@ -838,8 +872,6 @@ function ImageContent({
     batchOpening,
     batchRecovering,
     onToggleBatch,
-    onSetBatchPrimary,
-    isBatchPrimary,
 }: {
     node: CanvasNodeData;
     isBatchRoot: boolean;
@@ -848,12 +880,7 @@ function ImageContent({
     batchOpening: boolean;
     batchRecovering: boolean;
     onToggleBatch?: () => void;
-    onSetBatchPrimary?: () => void;
-    isBatchPrimary: boolean;
 }) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const isBatchChild = Boolean(node.metadata?.batchRootId);
-
     return (
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
             <div className="h-full w-full overflow-hidden rounded-[8px]">
@@ -865,39 +892,6 @@ function ImageContent({
                     className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
                 />
             </div>
-            {isBatchRoot ? (
-                <button
-                    type="button"
-                    className="absolute right-2 top-2 z-30 flex h-7 items-center justify-center gap-1 rounded-md border px-2 text-[11px] font-semibold shadow-[0_6px_18px_rgba(15,23,42,.10)] backdrop-blur-md transition hover:bg-white/5"
-                    style={{ background: `${theme.toolbar.panel}d9`, borderColor: `${theme.toolbar.border}cc`, color: theme.node.text }}
-                    aria-label={batchExpanded ? "图片组已展开" : "图片组已收起"}
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        onToggleBatch?.();
-                    }}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onPointerDown={(event) => event.stopPropagation()}
-                >
-                    <span className="leading-none text-[#2f80ff]">{batchCount}</span>
-                    <ChevronRight className={`size-3.5 opacity-55 transition-transform ${batchExpanded ? "rotate-90" : ""}`} />
-                </button>
-            ) : null}
-            {isBatchChild ? (
-                <button
-                    type="button"
-                    className={`absolute right-2 top-2 z-30 flex h-8 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium shadow-[0_8px_20px_rgba(68,64,60,.13)] backdrop-blur-md transition hover:bg-white/5 ${isBatchPrimary ? "opacity-100" : "opacity-0 group-hover/batch:opacity-100"}`}
-                    style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        onSetBatchPrimary?.();
-                    }}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onPointerDown={(event) => event.stopPropagation()}
-                >
-                    <Star className={`size-3.5 text-[#2f80ff] ${isBatchPrimary ? "fill-[#2f80ff]" : ""}`} />
-                    {isBatchPrimary ? "主图" : "设为主图"}
-                </button>
-            ) : null}
         </BatchFrame>
     );
 }
@@ -969,8 +963,8 @@ function ConnectionHandleDot({ side, scale, visible, onMouseDown }: { side: "lef
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const dotRef = useRef<HTMLDivElement>(null);
     const safeScale = Math.max(scale, 0.05);
-    const activationRadius = 112;
-    const restingOffset = 20;
+    const activationRadius = 28;
+    const restingOffset = 12;
     const baseOffsetX = side === "left" ? activationRadius / 2 - restingOffset : restingOffset - activationRadius / 2;
 
     const followPointer = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -981,7 +975,7 @@ function ConnectionHandleDot({ side, scale, visible, onMouseDown }: { side: "lef
     };
 
     const resetPosition = () => {
-        if (dotRef.current) dotRef.current.style.transform = `translate(${baseOffsetX / safeScale}px, 0)`;
+        if (dotRef.current) dotRef.current.style.transform = `translate(${baseOffsetX}px, 0)`;
     };
 
     return (
@@ -989,8 +983,8 @@ function ConnectionHandleDot({ side, scale, visible, onMouseDown }: { side: "lef
             data-canvas-connection-handle={side}
             className="absolute top-1/2 z-30 flex cursor-crosshair items-center justify-center rounded-full"
             style={{
-                width: `${activationRadius / safeScale}px`,
-                height: `${(activationRadius * 2) / safeScale}px`,
+                width: `${activationRadius}px`,
+                height: `${activationRadius * 2}px`,
                 transform: "translateY(-50%)",
                 borderRadius: side === "left" ? "9999px 0 0 9999px" : "0 9999px 9999px 0",
                 ...(side === "left" ? { right: "100%" } : { left: "100%" }),
@@ -1005,16 +999,16 @@ function ConnectionHandleDot({ side, scale, visible, onMouseDown }: { side: "lef
                 ref={dotRef}
                 className={`pointer-events-none grid place-items-center rounded-full border transition-[opacity,transform,background-color,border-color] duration-150 ${visible ? "opacity-100" : "opacity-0"}`}
                 style={{
-                    width: `${24 / safeScale}px`,
-                    height: `${24 / safeScale}px`,
-                    borderWidth: `${1.25 / safeScale}px`,
-                    transform: `translate(${baseOffsetX / safeScale}px, 0)`,
+                    width: "20px",
+                    height: "20px",
+                    borderWidth: "1.25px",
+                    transform: `translate(${baseOffsetX}px, 0)`,
                     background: theme.node.panel,
                     borderColor: theme.node.muted,
                     color: theme.node.text,
                 }}
             >
-                <Plus style={{ width: `${16 / safeScale}px`, height: `${16 / safeScale}px` }} strokeWidth={1.9} />
+                <Plus className="size-3" strokeWidth={1.9} />
             </div>
         </div>
     );

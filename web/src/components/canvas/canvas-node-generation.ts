@@ -62,8 +62,10 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
 
 function buildMentionGenerationInputs(prompt: string, references: CanvasResourceReference[]): NodeGenerationInput[] {
     return references
-        .filter((reference) => reference.active && reference.source === "user-asset" && prompt.includes(reference.label))
-        .flatMap((reference): NodeGenerationInput[] => {
+        .map((reference, index) => ({ reference, index, position: mentionPosition(prompt, reference.label) }))
+        .filter(({ reference, position }) => reference.active && reference.source === "user-asset" && position >= 0)
+        .sort((left, right) => left.position - right.position || left.index - right.index)
+        .flatMap(({ reference }): NodeGenerationInput[] => {
             if (reference.kind === "image") {
                 return [{
                     nodeId: reference.nodeId,
@@ -98,6 +100,11 @@ function buildMentionGenerationInputs(prompt: string, references: CanvasResource
             }
             return [];
         });
+}
+
+function mentionPosition(prompt: string, label: string) {
+    const markedPosition = prompt.indexOf(`@${label}`);
+    return markedPosition >= 0 ? markedPosition : prompt.indexOf(label);
 }
 
 export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], graphIndex?: CanvasGraphIndex): NodeGenerationInput[] {

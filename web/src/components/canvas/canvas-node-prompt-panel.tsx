@@ -137,6 +137,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                   ? quote.canSubmit ? canvasCompactQuoteLabel(quote) : "余额不足"
                   : "等待报价";
     const referenceAudio = mode === "audio" ? activeReferences.find((reference) => reference.kind === "audio") : undefined;
+    const isMediaComposer = mode === "image" || mode === "video" || mode === "audio";
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
@@ -162,8 +163,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     return (
         <div
-            className="rounded-[10px] border p-3 text-xs backdrop-blur"
-            style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text, boxShadow: "0 10px 28px rgba(0,0,0,.16)" }}
+            className={isMediaComposer ? "canvas-node-media-composer overflow-hidden rounded-lg border px-4 pb-3 pt-3 text-xs backdrop-blur" : "rounded-[10px] border p-3 text-xs backdrop-blur"}
+            style={{
+                background: theme.toolbar.panel,
+                borderColor: theme.toolbar.border,
+                color: theme.node.text,
+                boxShadow: isMediaComposer ? "0 18px 48px rgba(0,0,0,.2)" : "0 10px 28px rgba(0,0,0,.16)",
+            }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
@@ -174,9 +180,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 onChange={updatePrompt}
                 onSubmit={submit}
                 richMentions={mode === "image" || mode === "video"}
-                placeholderClassName={mode === "image" || mode === "video" ? "text-sm leading-6" : "text-[13px] leading-5"}
-                className={`thin-scrollbar w-full resize-none rounded-md border-0 px-3.5 py-2.5 ${mode === "image" || mode === "video" ? "text-sm leading-6" : "text-[13px] leading-5"} outline-none ${mode === "video" ? "h-48 min-h-48" : mode === "image" ? "h-40 min-h-40" : "h-20 min-h-20"}`}
-                style={{ background: theme.node.fill, color: theme.node.text }}
+                containerClassName={isMediaComposer ? "canvas-node-media-composer-editor" : undefined}
+                placeholderClassName={isMediaComposer ? "!inset-x-1 !top-1 text-[15px] leading-6 opacity-70" : "text-[13px] leading-5"}
+                className={`thin-scrollbar w-full resize-none border-0 outline-none ${isMediaComposer ? "rounded-none bg-transparent px-1 pb-3 pt-1 text-[15px] leading-6" : "rounded-md px-3.5 py-2.5 text-[13px] leading-5"} ${mode === "video" ? "h-40 min-h-40" : mode === "image" ? "h-36 min-h-36" : mode === "audio" ? "h-28 min-h-28" : "h-20 min-h-20"}`}
+                style={{ background: isMediaComposer ? "transparent" : theme.node.fill, color: theme.node.text }}
                 placeholder={isVoiceDesign ? "描述想要的音色，例如：年轻、温柔、略带沙哑的女声" : mode === "text" && isEditingExistingContent ? textAction === "custom" ? "输入自定义处理要求" : "可选：补充处理要求" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
 
@@ -186,16 +193,16 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 {selectedText.trim() ? <Tag bordered={false}>已选 {selectedText.length} 字</Tag> : <span className="text-[11px] opacity-60">编辑文字时选中一段即可局部处理</span>}
             </div> : null}
 
-            <div className={`mt-2 flex min-w-0 items-center gap-1.5 ${mode === "video" ? "max-w-[580px]" : mode === "text" ? "max-w-[500px]" : ""}`}>
-                <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+            <div className={`${isMediaComposer ? "canvas-node-media-composer-toolbar mt-1 min-h-10" : "mt-2"} flex min-w-0 items-center gap-1.5 ${mode === "text" ? "max-w-[500px]" : "w-full"}`}>
+                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
                     {mode !== "audio" ? <CanvasPromptLibrary onSelect={updatePrompt} /> : null}
                     {mode === "image" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" className="!h-8 !min-w-0 !max-w-[200px] flex-1 !px-2 !text-xs" onMissingConfig={() => openConfigDialog(true)} />
+                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" className="!h-9 !min-w-0 !max-w-[210px] flex-1 !rounded-lg !border-transparent !bg-transparent !px-2 !text-xs hover:!bg-white/5" onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasImageSettingsPopover
                                 config={config}
                                 placement="topLeft"
-                                buttonClassName="!h-8 !max-w-[140px] !justify-start !rounded-md !px-2 !text-xs"
+                                buttonClassName="!h-9 !max-w-[170px] !justify-start !rounded-lg !bg-transparent !px-2.5 !text-xs hover:!bg-white/5"
                                 onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
                                 onMissingConfig={() => openConfigDialog(true)}
                                 onOpenChange={onImageSettingsOpenChange}
@@ -203,7 +210,21 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </>
                     ) : mode === "video" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" className="!h-8 !min-w-0 !max-w-[200px] flex-1 !px-2 !text-xs" onMissingConfig={() => openConfigDialog(true)} />
+                            <ModelPicker
+                                config={config}
+                                value={config.model}
+                                onChange={(model) => {
+                                    const nextCapabilities = videoCapabilitiesOf(config, model);
+                                    const nextQuality = nextCapabilities?.qualities.length && !nextCapabilities.qualities.some((item) => item.quality === config.vquality)
+                                        ? nextCapabilities.qualities[0].quality
+                                        : undefined;
+                                    onConfigChange(node.id, { model, ...(nextQuality ? { vquality: nextQuality } : {}) });
+                                }}
+                                capability="video"
+                                compactVideo
+                                className="!h-9 !rounded-lg !border-transparent !bg-transparent !px-2 !text-xs hover:!bg-transparent"
+                                onMissingConfig={() => openConfigDialog(true)}
+                            />
                             <Dropdown
                                 trigger={["click"]}
                                 placement="topLeft"
@@ -218,8 +239,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 <Button
                                     type="text"
                                     size="small"
-                                    className="!h-8 !min-w-0 !max-w-[170px] !justify-start !rounded-md !px-2 !text-xs"
-                                    style={{ background: theme.node.fill, color: theme.node.text }}
+                                    className="!h-9 !min-w-0 !max-w-[170px] !justify-start !rounded-lg !bg-transparent !px-2 !text-xs hover:!bg-white/5"
+                                    style={{ color: theme.node.text }}
                                     icon={<Clapperboard className="size-3.5 shrink-0" />}
                                     title="切换生成模式；输入 @ 素材时会自动切换到全能参考"
                                     onMouseDown={(event) => event.stopPropagation()}
@@ -229,24 +250,25 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                     {mentionedMediaReferenceCount(prompt, mentionReferences) > 0 ? <span className="ml-1 shrink-0 opacity-60">{mentionedMediaReferenceCount(prompt, mentionReferences)}项</span> : null}
                                 </Button>
                             </Dropdown>
-                            <CanvasVideoSettingsPopover config={config} quote={quoteState === "ready" ? quote : null} hasReferenceVideo={mentionReferences.some((reference) => reference.active && reference.kind === "video" && (reference.source !== "user-asset" || prompt.includes(reference.label)))} buttonClassName="!h-8 !max-w-[140px] !justify-start !rounded-md !px-2 !text-xs" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                            <CanvasVideoSettingsPopover config={config} quote={quoteState === "ready" ? quote : null} hasReferenceVideo={mentionReferences.some((reference) => reference.active && reference.kind === "video" && (reference.source !== "user-asset" || prompt.includes(reference.label)))} buttonClassName="!h-9 !max-w-[170px] !justify-start !rounded-lg !px-2.5 !text-xs" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                         </>
                     ) : mode === "audio" ? (
                         <>
                             <Segmented
                                 size="small"
+                                className="canvas-media-mode-segmented"
                                 value={audioMode}
                                 options={[{ value: "synthesis", label: "音频合成" }, { value: "design", label: "音色设计" }]}
                                 onChange={(value) => onConfigChange(node.id, { audioMode: value as "synthesis" | "design", ...(value === "design" ? { audioFormat: "wav" } : {}) })}
                             />
                             {isVoiceDesign ? (
-                                <span className="flex h-8 min-w-0 items-center gap-1 rounded-md px-2 text-[11px] opacity-70" style={{ background: theme.node.fill }}>
+                                <span className="flex h-9 min-w-0 items-center gap-1 rounded-lg px-2.5 text-[11px] opacity-70" style={{ background: theme.toolbar.activeBg }}>
                                     VoxCPM <span className="opacity-60">· 免费</span>
                                 </span>
                             ) : (
                                 <>
-                                    <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" className="!h-8 !w-[184px] !min-w-0 shrink !px-2 !text-xs" onMissingConfig={() => openConfigDialog(true)} />
-                                    <CanvasAudioSettingsPopover config={config} referenceAudioName={official ? referenceAudio?.title || referenceAudio?.label : undefined} buttonClassName="!h-8 !w-[138px] !min-w-0 !justify-start !rounded-md !px-2 !text-xs" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                                    <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" className="!h-9 !w-[190px] !min-w-0 shrink !rounded-lg !border-transparent !bg-transparent !px-2 !text-xs hover:!bg-white/5" onMissingConfig={() => openConfigDialog(true)} />
+                                    <CanvasAudioSettingsPopover config={config} referenceAudioName={official ? referenceAudio?.title || referenceAudio?.label : undefined} buttonClassName="!h-9 !w-[154px] !min-w-0 !justify-start !rounded-lg !bg-transparent !px-2.5 !text-xs hover:!bg-white/5" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                                 </>
                             )}
                         </>
@@ -258,7 +280,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 <Tooltip title={isRunning ? "停止生成" : "开始生成"}>
                     <Button
                         type="primary"
-                        className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-md !p-0"
+                        className={`${isMediaComposer ? "!h-10 !w-10 !min-w-10 !rounded-[10px]" : "!h-8 !w-8 !min-w-8 !rounded-md"} shrink-0 !p-0`}
                         danger={isRunning}
                         disabled={!isRunning && (!prompt.trim() || quoteBlocked)}
                         onClick={() => (isRunning ? onStop(node.id) : submit())}
@@ -348,9 +370,9 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
 }
 
 function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: boolean, hasTextContent: boolean) {
-    if (mode === "video") return "上传参考图片、音频等，输入文字或 @ 参考内容，自由组合图、文、音、视频多元素，定义精彩互动。例如：@图片1 模仿 @视频1 的动作，音色参考 @音频1。可将文件拖到此处上传。";
+    if (mode === "video") return "描述你想要生成的画面内容，@ 引用素材";
     if (mode === "audio") return "输入需要配音的文本，或连接上游文本节点";
-    if (mode === "image") return hasImageContent ? "请输入你想要把这张图修改成什么" : "上传参考图、输入文字或 @ 主体，描述你想生成的图片。";
+    if (mode === "image") return hasImageContent ? "描述你想要如何修改这张图片，@ 引用主体" : "描述你想要生成的图片，@ 引用主体";
     return hasTextContent ? "请输入你想要将本段文本修改成什么" : "请输入你想要生成的文本内容";
 }
 

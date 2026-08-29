@@ -15,8 +15,8 @@ export function CanvasQuoteDisplay({ quote, state, label, error }: CanvasQuoteDi
     const loading = state === "loading";
     return (
         <Tooltip color="#303640" title={loading ? null : <QuoteDetails quote={quote} state={state} label={label} error={error} />}>
-            <span className={`inline-flex h-7 shrink-0 items-center gap-1 px-1 text-[11px] font-bold ${failed ? "text-red-500" : "text-amber-400"}`} aria-label={loading ? "报价加载中" : label}>
-                {loading ? <LoaderCircle className="size-3 shrink-0 animate-spin" /> : <span className="drop-shadow-[0_0_8px_rgba(251,191,36,0.2)]">{label}</span>}
+            <span className={`inline-flex h-7 shrink-0 items-center gap-1 px-1.5 text-[11px] font-semibold ${failed ? "text-red-500" : "text-amber-400/90"}`} aria-label={loading ? "报价加载中" : label}>
+                {loading ? <LoaderCircle className="size-3 shrink-0 animate-spin" /> : <span>{label}</span>}
             </span>
         </Tooltip>
     );
