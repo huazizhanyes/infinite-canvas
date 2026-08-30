@@ -2,13 +2,15 @@ import type { AiTextMessage } from "@/services/api/image";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
-import { getGenerationResourceNodes } from "@/lib/canvas/canvas-resource-references";
+import { getGenerationResourceNodes, mentionedCanvasResourceReferences } from "@/lib/canvas/canvas-resource-references";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import type { CanvasGraphIndex } from "@/lib/canvas/canvas-graph-index";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
+import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 
 export type NodeGenerationContext = {
     prompt: string;
+    submissionPrompt: string;
     referenceImages: ReferenceImage[];
     referenceVideos: ReferenceVideo[];
     referenceAudios: ReferenceAudio[];
@@ -16,6 +18,9 @@ export type NodeGenerationContext = {
     imageCount: number;
     videoCount: number;
     audioCount: number;
+    selectedReferenceNodeIds: string[];
+    ignoredReferenceLabels: string[];
+    referenceLabelMapping: Record<string, string>;
 };
 
 export type NodeGenerationInput = {
@@ -26,16 +31,24 @@ export type NodeGenerationInput = {
     image?: ReferenceImage;
     video?: ReferenceVideo;
     audio?: ReferenceAudio;
+    label?: string;
 };
 
 export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string, mentionReferences: CanvasResourceReference[] = []): NodeGenerationContext {
+    const targetNode = nodes.find((node) => node.id === nodeId);
+    const labelByNodeId = new Map(mentionReferences.map((reference) => [reference.nodeId, reference.label]));
+    const mentionedCanvasReferences = mentionedCanvasResourceReferences(prompt, mentionReferences);
+    const mentionedCanvasIds = new Set(mentionedCanvasReferences.map((reference) => reference.nodeId));
+    const connectedInputs = buildNodeGenerationInputs(nodeId, nodes, connections).map((input) => ({ ...input, label: labelByNodeId.get(input.nodeId) }));
+    const selectedConnectedInputs = targetNode?.type === CanvasNodeType.Video
+        ? connectedInputs.filter((input) => (input.type !== "image" && input.type !== "video") || mentionedCanvasIds.has(input.nodeId))
+        : connectedInputs;
     const inputs = [
-        ...buildNodeGenerationInputs(nodeId, nodes, connections),
+        ...selectedConnectedInputs,
         ...buildMentionGenerationInputs(prompt, mentionReferences),
     ].filter((input, index, all) => all.findIndex((candidate) => candidate.nodeId === input.nodeId) === index);
     // An uploaded audio node doubles as the reference and the source of the generated child.
     // It has no connection yet, so include it explicitly without reusing generated TTS output.
-    const targetNode = nodes.find((node) => node.id === nodeId);
     if (targetNode?.type === CanvasNodeType.Audio && targetNode.metadata?.content && targetNode.metadata.sourceType !== "tts" && !inputs.some((input) => input.type === "audio")) {
         const audio = readReferenceAudio(targetNode);
         if (audio) inputs.push({ nodeId: targetNode.id, type: "audio", title: targetNode.title, audio });
@@ -47,9 +60,11 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     const referenceImages = inputs.map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
     const referenceVideos = inputs.map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
     const referenceAudios = inputs.map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
+    const submission = targetNode?.type === CanvasNodeType.Video ? buildVideoSubmissionPrompt(prompt, inputs, mentionReferences) : { prompt, selectedNodeIds: [], ignoredLabels: [], labelMapping: {} };
 
     return {
         prompt: upstreamText ? `${prompt}\n\n${upstreamText}` : prompt,
+        submissionPrompt: upstreamText ? `${submission.prompt}\n\n${upstreamText}` : submission.prompt,
         referenceImages,
         referenceVideos,
         referenceAudios,
@@ -57,6 +72,9 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
         imageCount: referenceImages.length,
         videoCount: referenceVideos.length,
         audioCount: referenceAudios.length,
+        selectedReferenceNodeIds: submission.selectedNodeIds,
+        ignoredReferenceLabels: submission.ignoredLabels,
+        referenceLabelMapping: submission.labelMapping,
     };
 }
 
@@ -78,6 +96,7 @@ function buildMentionGenerationInputs(prompt: string, references: CanvasResource
                         dataUrl: reference.previewUrl || "",
                         storageKey: reference.storageKey,
                     },
+                    label: reference.label,
                 }];
             }
             if (reference.kind === "video") {
@@ -96,10 +115,57 @@ function buildMentionGenerationInputs(prompt: string, references: CanvasResource
                         height: reference.height,
                         durationMs: reference.durationMs,
                     },
+                    label: reference.label,
                 }];
             }
             return [];
         });
+}
+
+function buildVideoSubmissionPrompt(prompt: string, inputs: NodeGenerationInput[], references: CanvasResourceReference[]) {
+    const imageInputs = inputs.filter((input) => input.type === "image" && input.image);
+    const selectedNodeIds = imageInputs.map((input) => input.nodeId);
+    const labelMapping: Record<string, string> = {};
+    imageInputs.forEach((input, index) => {
+        const label = input.label || references.find((reference) => reference.nodeId === input.nodeId)?.label;
+        if (label) labelMapping[label] = imageReferenceLabel(index);
+    });
+    const ignoredLabels = mentionedCanvasResourceReferences(prompt, references)
+        .filter((reference) => reference.kind === "image" && !reference.active)
+        .map((reference) => reference.label);
+    return {
+        prompt: rewriteVideoImageMentions(prompt, references, labelMapping, new Set(ignoredLabels)),
+        selectedNodeIds,
+        ignoredLabels,
+        labelMapping,
+    };
+}
+
+function rewriteVideoImageMentions(prompt: string, references: CanvasResourceReference[], labelMapping: Record<string, string>, ignoredLabels: Set<string>) {
+    const byLabel = new Map(references.filter((reference) => reference.kind === "image").map((reference) => [reference.label, reference]));
+    const labels = [...byLabel.keys()].sort((left, right) => right.length - left.length);
+    let result = "";
+    for (let index = 0; index < prompt.length;) {
+        if (prompt[index] !== "@") {
+            result += prompt[index];
+            index += 1;
+            continue;
+        }
+        const label = labels.find((candidate) => prompt.startsWith(candidate, index + 1) && isMentionBoundary(prompt[index + candidate.length + 1]));
+        if (!label) {
+            result += prompt[index];
+            index += 1;
+            continue;
+        }
+        if (labelMapping[label]) result += `@${labelMapping[label]}`;
+        else if (!ignoredLabels.has(label)) result += `@${label}`;
+        index += label.length + 1;
+    }
+    return result.replace(/ {2,}/g, " ").trim();
+}
+
+function isMentionBoundary(value?: string) {
+    return !value || !/\d/.test(value);
 }
 
 function mentionPosition(prompt: string, label: string) {

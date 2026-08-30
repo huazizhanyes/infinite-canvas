@@ -1,13 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Group, Image as ImageIcon, Maximize2, Music2, Plus, Puzzle, RefreshCw, Search, Star, Video, X } from "lucide-react";
+import { ChevronRight, Group, Image as ImageIcon, Maximize2, Music2, Pause, Play, Plus, Puzzle, RefreshCw, Search, Star, Video, Volume2, VolumeX, X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { buildNodeContext } from "@/lib/canvas/plugin-node-context";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { normalizeVideoDuration } from "@/stores/use-config-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeData, type Position } from "@/types/canvas";
 import type { CanvasNodeContext, CanvasPluginHost } from "@/types/canvas-plugin";
@@ -64,6 +63,7 @@ type CanvasNodeProps = {
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
+    onVideoMetadata?: (nodeId: string, width: number, height: number) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
 
@@ -86,6 +86,7 @@ type NodeContentRendererProps = {
     onStopEditing: () => void;
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
+    onVideoMetadata?: (nodeId: string, width: number, height: number) => void;
     onToggleBatch?: () => void;
     groupChildCount: number;
     onGroupColorChange: (color: string) => void;
@@ -131,6 +132,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onSetBatchPrimary,
     onRetry,
     onViewImage,
+    onVideoMetadata,
     onContextMenu,
 }: CanvasNodeProps) {
     const colorTheme = useThemeStore((state) => state.theme);
@@ -339,7 +341,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 onHoverEnd(data.id);
             }}
             onMouseDownCapture={(event) => {
-                if (event.target instanceof Element && event.target.closest("[data-group-color-picker]")) return;
+                if (event.target instanceof Element && event.target.closest("[data-group-color-picker],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
                 onSelectCapture?.(event, data.id);
             }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
@@ -392,7 +394,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                             setIsEditingTitle(true);
                         }}
                     >
-                        {data.title || "未命名节点"}
+                        {canvasNodeDisplayTitle(data)}
                     </button>
                 )}
                 {resourceLabel && data.type !== CanvasNodeType.Text ? <ResourceLabelBadge reference={resourceLabel} /> : null}
@@ -498,6 +500,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onOpenPanel={onOpenPanel}
                         onStopEditing={() => setIsEditingContent(false)}
                         onRetry={onRetry}
+                        onVideoMetadata={onVideoMetadata}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
                         groupChildCount={groupChildCount}
                         onGroupColorChange={(color) => onGroupColorChange(data.id, color)}
@@ -505,7 +508,6 @@ export const CanvasNode = React.memo(function CanvasNode({
                 </div>
 
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
-                {hovered && hasVideoContent && data.metadata?.videoProvider === "canvas-video" ? <VideoInfoBar node={data} /> : null}
                 {data.type === CanvasNodeType.Text ? (
                     <button
                         type="button"
@@ -796,9 +798,15 @@ function EmptyImageContent({ theme, scale, isBatchRoot, batchCount, batchExpande
     return content;
 }
 
-function VideoNodeContent({ node, theme, scale }: NodeContentRendererProps) {
+function VideoNodeContent({ node, theme, scale, onVideoMetadata }: NodeContentRendererProps) {
     const [loadError, setLoadError] = useState(false);
     const [reloadKey, setReloadKey] = useState(0);
+    const [playing, setPlaying] = useState(false);
+    const [muted, setMuted] = useState(false);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(0);
+    const playerRef = useRef<HTMLDivElement>(null);
+    const videoRef = useRef<HTMLVideoElement>(null);
     if (!node.metadata?.content) {
         if (node.metadata?.status === "loading" && node.metadata?.videoProvider === "canvas-video") {
             const phase = node.metadata.videoPhase === "archiving" ? "正在归档" : node.metadata.videoPhase === "queued" ? `正在排队${node.metadata.videoQueuePosition ? ` · 前方 ${Math.max(0, node.metadata.videoQueuePosition - 1)} 条` : ""}` : node.metadata.videoPhase === "submission_unknown" ? "提交结果未知，请勿重复生成" : "正在生成";
@@ -828,19 +836,93 @@ function VideoNodeContent({ node, theme, scale }: NodeContentRendererProps) {
             </div>
         );
     }
-    return <video key={reloadKey} src={node.metadata.content} controls preload="metadata" playsInline className="h-full w-full rounded-[8px] bg-black object-contain" data-canvas-no-zoom onError={() => setLoadError(true)} />;
-}
+    const togglePlayback = async () => {
+        const video = videoRef.current;
+        if (!video) return;
+        if (video.paused) {
+            await video.play().catch(() => undefined);
+        } else {
+            video.pause();
+        }
+    };
+    const seek = (value: number) => {
+        const video = videoRef.current;
+        if (!video || !Number.isFinite(value)) return;
+        video.currentTime = value;
+        setCurrentTime(value);
+    };
+    const toggleMuted = () => {
+        const video = videoRef.current;
+        if (!video) return;
+        video.muted = !video.muted;
+        setMuted(video.muted);
+    };
+    const enterFullscreen = () => void playerRef.current?.requestFullscreen?.();
+    const stopPlayerInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
 
-function VideoInfoBar({ node }: { node: CanvasNodeData }) {
-    const meta = node.metadata;
     return (
-        <div className="pointer-events-none absolute inset-x-2 bottom-2 z-20 flex flex-wrap gap-x-2 gap-y-0.5 rounded-md bg-black/70 px-2 py-1.5 text-[10px] text-white backdrop-blur-sm">
-            <span>{meta?.videoRouteLabel || "视频线路"}</span>
-            {meta?.model ? <span>{meta.model}</span> : null}
-            {meta?.vquality ? <span>{meta.vquality}</span> : null}
-            {meta?.seconds ? <span>{normalizeVideoDuration(meta.seconds)}s</span> : null}
+        <div ref={playerRef} className="canvas-video-player group/video relative h-full w-full overflow-hidden rounded-[8px] bg-black [container-type:inline-size]" data-canvas-no-zoom onDoubleClick={stopPlayerInteraction}>
+            <video
+                key={reloadKey}
+                ref={videoRef}
+                src={node.metadata.content}
+                preload="metadata"
+                playsInline
+                className="block h-full w-full cursor-pointer object-contain"
+                onClick={() => void togglePlayback()}
+                onLoadedMetadata={(event) => {
+                    setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0);
+                    setMuted(event.currentTarget.muted);
+                    onVideoMetadata?.(node.id, event.currentTarget.videoWidth, event.currentTarget.videoHeight);
+                }}
+                onDurationChange={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+                onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                onEnded={() => setPlaying(false)}
+                onVolumeChange={(event) => setMuted(event.currentTarget.muted || event.currentTarget.volume === 0)}
+                onError={() => setLoadError(true)}
+            />
+            <div className="canvas-video-gradient pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/80 via-black/35 to-transparent opacity-0 transition-opacity duration-200 group-hover/video:opacity-100" />
+            <div className="canvas-video-controls absolute inset-x-3 bottom-2.5 z-10 flex items-center gap-2 text-white opacity-0 transition-opacity duration-200 group-hover/video:opacity-100" onMouseDown={stopPlayerInteraction} onPointerDown={stopPlayerInteraction}>
+                <button type="button" className="grid size-7 shrink-0 place-items-center rounded-md transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/80" title={playing ? "暂停" : "播放"} aria-label={playing ? "暂停" : "播放"} onClick={() => void togglePlayback()}>
+                    {playing ? <Pause className="size-4 fill-current" /> : <Play className="size-4 fill-current" />}
+                </button>
+                <span className="canvas-video-current-time w-9 shrink-0 text-right text-[11px] font-medium tabular-nums">{formatVideoTime(currentTime)}</span>
+                <input
+                    type="range"
+                    min={0}
+                    max={Math.max(duration, 0)}
+                    step={0.05}
+                    value={Math.min(currentTime, duration || 0)}
+                    className="canvas-video-progress min-w-16 flex-1"
+                    style={{ "--canvas-video-progress": `${duration > 0 ? (currentTime / duration) * 100 : 0}%` } as React.CSSProperties}
+                    aria-label="视频进度"
+                    onChange={(event) => seek(Number(event.currentTarget.value))}
+                />
+                <span className="w-9 shrink-0 text-[11px] font-medium tabular-nums">{formatVideoTime(duration)}</span>
+                <button type="button" className="canvas-video-volume grid size-7 shrink-0 place-items-center rounded-md transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/80" title={muted ? "取消静音" : "静音"} aria-label={muted ? "取消静音" : "静音"} onClick={toggleMuted}>
+                    {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+                </button>
+                <button type="button" className="grid size-7 shrink-0 place-items-center rounded-md transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/80" title="全屏" aria-label="全屏播放" onClick={enterFullscreen}>
+                    <Maximize2 className="size-4" />
+                </button>
+            </div>
         </div>
     );
+}
+
+function formatVideoTime(value: number) {
+    const seconds = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function canvasNodeDisplayTitle(node: CanvasNodeData) {
+    const title = node.title?.trim();
+    const promptTitle = node.metadata?.prompt?.trim().slice(0, 32);
+    if (node.type === CanvasNodeType.Video && node.metadata?.content && promptTitle && title === promptTitle) return "视频";
+    return title || "未命名节点";
 }
 
 function AudioNodeContent({ node, theme, scale }: NodeContentRendererProps) {
@@ -959,7 +1041,7 @@ function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDo
     return <div className={`absolute z-50 size-5 ${positionClass}`} onMouseDown={(event) => onMouseDown(event, corner)} />;
 }
 
-function ConnectionHandleDot({ side, scale, visible, onMouseDown }: { side: "left" | "right"; scale: number; visible: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
+function ConnectionHandleDot({ side, scale, visible, onMouseDown }: { side: "left" | "right"; scale: number; visible: boolean; onMouseDown?: (event: React.MouseEvent) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const dotRef = useRef<HTMLDivElement>(null);
     const safeScale = Math.max(scale, 0.05);
@@ -989,8 +1071,8 @@ function ConnectionHandleDot({ side, scale, visible, onMouseDown }: { side: "lef
                 borderRadius: side === "left" ? "9999px 0 0 9999px" : "0 9999px 9999px 0",
                 ...(side === "left" ? { right: "100%" } : { left: "100%" }),
             }}
-            title={side === "left" ? "连接到此节点" : "从此节点连接"}
-            aria-label={side === "left" ? "连接到此节点" : "从此节点连接"}
+            title={side === "left" ? "输入端：可向外拖动连接上游节点" : "输出端：拖动连接下游节点"}
+            aria-label={side === "left" ? "节点输入端" : "节点输出端"}
             onMouseMove={followPointer}
             onMouseLeave={resetPosition}
             onMouseDown={onMouseDown}

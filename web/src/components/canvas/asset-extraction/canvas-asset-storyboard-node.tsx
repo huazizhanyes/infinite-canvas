@@ -42,9 +42,18 @@ export function CanvasAssetStoryboardNode({ ctx }: { ctx: CanvasNodeContext }) {
         const sourceId = ctx.node.metadata?.assetStoryboardSourceId;
         return (sourceId ? ctx.getNode(sourceId) : null) || ctx.getUpstream().find((node) => node.type === CanvasNodeType.AssetExtraction) || null;
     }, [ctx]);
-    const assetNodes = useMemo(() => ctx.getNodes().filter((node) => node.type === CanvasNodeType.ScriptAsset && node.metadata?.assetExtractionNodeId === source?.id), [ctx, source?.id]);
-    const sourceHash = source?.metadata?.content ? assetExtractionContentHash(source.metadata.content) : "";
-    const stale = Boolean(sourceHash && state?.contentHash && sourceHash !== state.contentHash);
+    const episodeId = ctx.node.metadata?.assetStoryboardEpisodeId;
+    const sourceContent = source && source.metadata?.assetExtractionEpisodeId === episodeId
+        ? source.metadata?.content || ""
+        : ctx.node.metadata?.assetStoryboardSourceContent || "";
+    const episodeSource = useMemo(() => source ? { ...source, metadata: { ...source.metadata, content: sourceContent } } : null, [source, sourceContent]);
+    const assetNodes = useMemo(() => ctx.getNodes().filter((node) => {
+        if (node.type !== CanvasNodeType.ScriptAsset || node.metadata?.assetExtractionNodeId !== source?.id) return false;
+        return !episodeId || !node.metadata?.scriptAssetEpisodeIds?.length || node.metadata.scriptAssetEpisodeIds.includes(episodeId);
+    }), [ctx, episodeId, source?.id]);
+    const sourceHash = sourceContent ? assetExtractionContentHash(sourceContent) : "";
+    const sourceEpisodeIsActive = !episodeId || source?.metadata?.assetExtractionEpisodeId === episodeId;
+    const stale = Boolean(sourceEpisodeIsActive && sourceHash && state?.contentHash && sourceHash !== state.contentHash);
     const promptDone = state?.shots.filter((shot) => Boolean(shot.finalPrompt)).length || 0;
     const canCreateVideos = Boolean(state?.status === "ready" && state.shots.length && promptDone === state.shots.length && state.shots.every((shot) => shot.promptStatus === "success" && shot.finalPrompt));
 
@@ -72,19 +81,19 @@ export function CanvasAssetStoryboardNode({ ctx }: { ctx: CanvasNodeContext }) {
     useEffect(() => () => analysisAbortRef.current?.abort(), []);
 
     const analyze = async () => {
-        if (!connection || !source || analysisLoading) return;
-        const content = source.metadata?.content?.trim();
+        if (!connection || !episodeSource || analysisLoading) return;
+        const content = episodeSource.metadata?.content?.trim();
         if (!content) return message.warning("资产提取正文为空");
         setAnalysisLoading(true);
         analysisAbortRef.current?.abort();
         const controller = new AbortController();
         analysisAbortRef.current = controller;
         const timeoutId = window.setTimeout(() => controller.abort(), STORYBOARD_ANALYSIS_TIMEOUT_MS);
-        const working: AssetStoryboardState = { version: 1, sourceNodeId: source.id, contentHash: assetExtractionContentHash(content), status: "analyzing", title: "分镜脚本", totalDurationSec: 0, continuityBible: "", shots: [] };
+        const working: AssetStoryboardState = { version: 1, sourceNodeId: episodeSource.id, episodeId, contentHash: assetExtractionContentHash(content), status: "analyzing", title: "分镜脚本", totalDurationSec: 0, continuityBible: "", shots: [] };
         saveState(working);
         try {
             const catalog = assetNodes.map((node) => ({ id: String(node.metadata?.scriptAssetId || node.id), type: node.metadata?.scriptAssetType || "prop", name: node.title, aliases: [], identity: {}, visualDescription: node.metadata?.scriptAssetVisualDescription || "", imagePrompt: node.metadata?.scriptAssetImagePrompt || "", manuallyEdited: false, status: "active", mentionCount: 0, image: node.metadata?.content ? { id: String(node.metadata?.scriptAssetImageId || node.id), imageUrl: node.metadata.content, status: "success", selected: true } : null, variants: [] }));
-            const result = await canvasTextApi.complete(connection, { requestId: nanoid(), input: [{ role: "user", content: buildStoryboardAnalysisPrompt(source, catalog) }], model: modelOptionName(source.metadata?.assetExtractionTextModel || config.textModel), maxOutputTokens: 12000 }, controller.signal);
+            const result = await canvasTextApi.complete(connection, { requestId: nanoid(), input: [{ role: "user", content: buildStoryboardAnalysisPrompt(episodeSource, catalog) }], model: modelOptionName(episodeSource.metadata?.assetExtractionTextModel || config.textModel), maxOutputTokens: 12000 }, controller.signal);
             const parsed = parseStoryboardAnalysis(result.outputText, new Set(catalog.map((asset) => asset.id)));
             saveState({ ...working, ...parsed, status: "ready" });
             message.success(`已拆分 ${parsed.shots.length} 个分镜`);
@@ -102,14 +111,14 @@ export function CanvasAssetStoryboardNode({ ctx }: { ctx: CanvasNodeContext }) {
     const generatePrompt = async (shot: AssetStoryboardShot) => {
         const currentState = stateRef.current;
         const currentShot = currentState?.shots.find((item) => item.id === shot.id) || shot;
-        if (!connection || !source || !currentState || currentShot.promptStatus === "generating" || promptRequestsRef.current.has(shot.id)) return;
+        if (!connection || !episodeSource || !currentState || currentShot.promptStatus === "generating" || promptRequestsRef.current.has(shot.id)) return;
         promptRequestsRef.current.add(shot.id);
         const nextShots = currentState.shots.map((item) => item.id === shot.id ? { ...item, promptStatus: "generating" as const, promptError: undefined } : item);
         const working = { ...currentState, shots: nextShots };
         saveState(working);
         try {
             const catalog = assetNodes.map((node) => ({ id: String(node.metadata?.scriptAssetId || node.id), type: node.metadata?.scriptAssetType || "prop", name: node.title, aliases: [], identity: {}, visualDescription: node.metadata?.scriptAssetVisualDescription || "", imagePrompt: node.metadata?.scriptAssetImagePrompt || "", manuallyEdited: false, status: "active", mentionCount: 0, image: null, variants: [] }));
-            const result = await canvasTextApi.complete(connection, { requestId: nanoid(), input: [{ role: "user", content: `请把下面这条已拆好的分镜整理成最终视频提示词。只输出提示词正文，不要解释。\n\n${buildShotPrompt(currentShot, catalog, source)}` }], model: modelOptionName(source.metadata?.assetExtractionTextModel || config.textModel), maxOutputTokens: 4000 });
+            const result = await canvasTextApi.complete(connection, { requestId: nanoid(), input: [{ role: "user", content: `请把下面这条已拆好的分镜整理成最终视频提示词。只输出提示词正文，不要解释。\n\n${buildShotPrompt(currentShot, catalog, episodeSource)}` }], model: modelOptionName(episodeSource.metadata?.assetExtractionTextModel || config.textModel), maxOutputTokens: 4000 });
             const completed = { ...currentShot, finalPrompt: result.outputText.trim(), promptStatus: "success" as const, promptError: undefined };
             const latest = stateRef.current || working;
             saveState({ ...latest, shots: latest.shots.map((item) => item.id === shot.id ? completed : item) });
@@ -125,10 +134,10 @@ export function CanvasAssetStoryboardNode({ ctx }: { ctx: CanvasNodeContext }) {
     };
 
     const createVideos = () => {
-        if (!state || !source || !canCreateVideos || creatingVideos) return;
+        if (!state || !episodeSource || !canCreateVideos || creatingVideos) return;
         setCreatingVideos(true);
         try {
-            const ops = buildVideoScriptOps(ctx.node, source, state, assetNodes, ctx.getNodes(), ctx.getConnections());
+            const ops = buildVideoScriptOps(ctx.node, episodeSource, state, assetNodes, ctx.getNodes(), ctx.getConnections());
             ctx.applyOps(ops);
             message.success(`已创建 ${state.shots.length} 个视频脚本节点`);
         } finally {

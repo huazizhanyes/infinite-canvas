@@ -88,7 +88,8 @@ export function buildShotPrompt(shot: AssetStoryboardShot, assets: ScriptAsset[]
 
 export function buildVideoScriptOps(storyboard: CanvasNodeData, source: CanvasNodeData, state: AssetStoryboardState, assetNodes: CanvasNodeData[], existingNodes: CanvasNodeData[], connections: CanvasConnection[]): CanvasAgentOp[] {
     const ops: CanvasAgentOp[] = [];
-    const existing = new Map(existingNodes.filter((node) => node.type === CanvasNodeType.Video && node.metadata?.assetStoryboardSourceId === storyboard.id).map((node) => [node.metadata?.assetStoryboardShotId, node]));
+    const episodeId = state.episodeId || storyboard.metadata?.assetStoryboardEpisodeId;
+    const existing = new Map(existingNodes.filter((node) => node.type === CanvasNodeType.Video && node.metadata?.assetStoryboardSourceId === storyboard.id && (!episodeId || node.metadata?.assetStoryboardEpisodeId === episodeId)).map((node) => [node.metadata?.assetStoryboardShotId, node]));
     const assetNodeByAssetId = new Map(assetNodes.map((node) => [node.metadata?.scriptAssetId, node]));
     const selectedIds: string[] = [];
     state.shots.forEach((shot, index) => {
@@ -97,7 +98,7 @@ export function buildVideoScriptOps(storyboard: CanvasNodeData, source: CanvasNo
         const id = old?.id || nanoid();
         selectedIds.push(id);
         const position = { x: storyboard.position.x + 360 + (index % 3) * 540, y: storyboard.position.y + Math.floor(index / 3) * 330 };
-        const metadata = { prompt: shot.finalPrompt, seconds: String(shot.durationSec), status: "idle" as const, assetStoryboardSourceId: storyboard.id, assetStoryboardShotId: shot.id, assetStoryboardShotIndex: shot.index, sourceNodeId: storyboard.id, references: shot.assetIds };
+        const metadata = { prompt: shot.finalPrompt, seconds: String(shot.durationSec), status: "idle" as const, assetStoryboardSourceId: storyboard.id, assetStoryboardEpisodeId: episodeId, assetStoryboardShotId: shot.id, assetStoryboardShotIndex: shot.index, sourceNodeId: storyboard.id, references: shot.assetIds };
         if (old) ops.push({ type: "update_node", id, patch: { title: `分镜 ${shot.index} · ${shot.title} · ${shot.durationSec}秒`, position, width: 420, height: 236 }, metadata });
         else ops.push({ type: "add_node", id, nodeType: CanvasNodeType.Video, title: `分镜 ${shot.index} · ${shot.title} · ${shot.durationSec}秒`, position, width: 420, height: 236, metadata });
         if (!connections.some((connection) => connection.fromNodeId === storyboard.id && connection.toNodeId === id)) ops.push({ type: "connect_nodes", id: nanoid(), fromNodeId: storyboard.id, toNodeId: id });

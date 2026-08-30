@@ -5,6 +5,14 @@ export function fitNodeSize(width: number, height: number, maxWidth = 640, maxHe
     return { width: w * scale, height: h * scale };
 }
 
+/** Shrink a node box to the exact visible media bounds without cropping or stretching. */
+export function fitMediaInsideNode(mediaWidth: number, mediaHeight: number, nodeWidth: number, nodeHeight: number) {
+    const width = Math.max(1, mediaWidth);
+    const height = Math.max(1, mediaHeight);
+    const scale = Math.min(Math.max(1, nodeWidth) / width, Math.max(1, nodeHeight) / height);
+    return { width: width * scale, height: height * scale };
+}
+
 export function nodeSizeFromRatio(size: string, baseWidth: number, baseHeight: number) {
     const match = size?.match(/^(\d+)(?:x|:)(\d+)/);
     if (!match) return null;

@@ -10,6 +10,7 @@ export type ScriptEpisode = {
     title: string;
     content: string;
     contentHash?: string;
+    analyzedContentHash?: string;
     currentAnalysisRunId?: string;
     updatedAt: string;
 };
@@ -35,6 +36,7 @@ export type ScriptAssetImage = { id: string; imageUrl: string; status: string; s
 
 export type ScriptAssetVariant = {
     id: string;
+    firstEpisodeId?: string;
     name: string;
     state: Record<string, unknown>;
     visualDescription: string;
@@ -54,6 +56,8 @@ export type ScriptAsset = {
     status: string;
     firstEpisodeId?: string;
     mentionCount: number;
+    episodeIds?: string[];
+    occurrences?: Array<{ episodeId: string; matchStatus: string; variantId?: string }>;
     image: ScriptAssetImage | null;
     variants: ScriptAssetVariant[];
 };
@@ -120,7 +124,7 @@ export const canvasScriptApi = {
     getSet: (connection: UserAssetConnection, id: string) => request<ScriptSet>(connection, "get", `/script-sets/${id}`),
     updateSet: (connection: UserAssetConnection, id: string, data: Partial<Pick<ScriptSet, "title" | "visualStyle" | "aspectRatio" | "imageQuality">>) => request<ScriptSet>(connection, "put", `/script-sets/${id}`, data),
     deleteSet: (connection: UserAssetConnection, id: string) => request<{ success: boolean }>(connection, "delete", `/script-sets/${id}`),
-    createEpisode: (connection: UserAssetConnection, setId: string) => request<ScriptEpisode>(connection, "post", `/script-sets/${setId}/episodes`, {}),
+    createEpisode: (connection: UserAssetConnection, setId: string, data: { title?: string; content?: string } = {}) => request<ScriptEpisode>(connection, "post", `/script-sets/${setId}/episodes`, data),
     updateEpisode: (connection: UserAssetConnection, id: string, data: { title?: string; content?: string }) => request<ScriptEpisode>(connection, "put", `/script-episodes/${id}`, data),
     deleteEpisode: (connection: UserAssetConnection, id: string) => request<{ success: boolean }>(connection, "delete", `/script-episodes/${id}`),
     analyzeEpisode: (connection: UserAssetConnection, id: string, requestId: string, model?: string) => request<ScriptAnalysisRun>(connection, "post", `/script-episodes/${id}/analyze`, { requestId, model }),

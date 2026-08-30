@@ -57,6 +57,7 @@ export type AssetStoryboardShot = {
 export type AssetStoryboardState = {
     version: 1;
     sourceNodeId: string;
+    episodeId?: string;
     contentHash: string;
     status: "queued" | "analyzing" | "ready" | "error";
     errorDetails?: string;
@@ -109,6 +110,11 @@ export type CanvasNodeMetadata = {
     references?: string[];
     /** Stable canvas resource node order for media inputs. */
     referenceOrder?: string[];
+    /** Exact image reference node ids used by the most recent upstream submission. */
+    submittedReferenceOrder?: string[];
+    submittedReferenceLabelMap?: Record<string, string>;
+    submittedImageReferences?: string[];
+    submissionPrompt?: string;
     naturalWidth?: number;
     naturalHeight?: number;
     freeResize?: boolean;
@@ -124,6 +130,8 @@ export type CanvasNodeMetadata = {
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
+    videoFrameKind?: "first" | "last" | "current";
+    videoFrameTimeMs?: number;
     sourceType?: "upload" | "tts";
     audioTaskId?: string;
     audioEngine?: "speech" | "voxcpm2";
@@ -155,11 +163,15 @@ export type CanvasNodeMetadata = {
     assetExtractionUpdatedAt?: number;
     assetExtractionContentHash?: string;
     assetExtractionStoryboardNodeId?: string;
+    assetExtractionStoryboardEpisodeId?: string;
     assetExtractionVideoDraftNodeId?: string;
+    assetExtractionVideoDraftEpisodeId?: string;
     assetExtractionStoryboardSourceId?: string;
     assetExtractionVideoDraftSourceId?: string;
     assetStoryboard?: AssetStoryboardState;
     assetStoryboardSourceId?: string;
+    assetStoryboardEpisodeId?: string;
+    assetStoryboardSourceContent?: string;
     assetStoryboardShotId?: string;
     assetStoryboardShotIndex?: number;
     scriptAssetType?: "character" | "scene" | "prop";
@@ -167,6 +179,9 @@ export type CanvasNodeMetadata = {
     scriptAssetImagePrompt?: string;
     scriptAssetImageStatus?: string;
     scriptAssetStale?: boolean;
+    scriptAssetLayoutSlot?: number;
+    scriptAssetEpisodeIds?: string[];
+    scriptAssetOccurrences?: Array<{ episodeId: string; matchStatus: string; variantId?: string }>;
     sourceScriptAssetId?: string;
     sourceNodeId?: string;
     sourceOperation?: CanvasTextOperation;

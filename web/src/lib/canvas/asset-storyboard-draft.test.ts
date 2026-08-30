@@ -53,4 +53,13 @@ describe("buildAssetStoryboardDraft", () => {
         expect(videoOp).toMatchObject({ metadata: { references: ["b", "a"] } });
         expect(assetConnections.map((op) => op.fromNodeId)).toEqual(["node-b", "node-a"]);
     });
+
+    it("does not reuse another episode's draft nodes", () => {
+        const episodeSource = { ...source, metadata: { ...source.metadata, assetExtractionEpisodeId: "ep-2" } };
+        const oldStoryboard: CanvasNodeData = { id: "story-ep1", type: CanvasNodeType.Text, title: "第一集分镜", position: { x: 0, y: 0 }, width: 340, height: 420, metadata: { assetExtractionStoryboardSourceId: source.id, assetExtractionStoryboardEpisodeId: "ep-1" } };
+        const draft = buildAssetStoryboardDraft(episodeSource, [asset("c1", "character", "林夏")], [episodeSource, oldStoryboard], []);
+
+        expect(draft.storyboardNodeId).not.toBe(oldStoryboard.id);
+        expect(draft.ops.find((op) => "id" in op && op.id === draft.storyboardNodeId)).toMatchObject({ type: "add_node", metadata: { assetExtractionStoryboardEpisodeId: "ep-2" } });
+    });
 });

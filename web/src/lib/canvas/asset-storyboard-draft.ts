@@ -14,8 +14,9 @@ export type AssetStoryboardDraft = {
 
 /** 将正文与已提取资产整理为可审核的分镜草稿，不触发任何生成任务。 */
 export function buildAssetStoryboardDraft(source: CanvasNodeData, assets: ScriptAsset[], nodes: CanvasNodeData[], connections: CanvasConnection[]): AssetStoryboardDraft {
-    const existingStoryboard = nodes.find((node) => node.metadata?.assetExtractionStoryboardSourceId === source.id);
-    const existingVideo = nodes.find((node) => node.metadata?.assetExtractionVideoDraftSourceId === source.id);
+    const episodeId = source.metadata?.assetExtractionEpisodeId;
+    const existingStoryboard = nodes.find((node) => node.metadata?.assetExtractionStoryboardSourceId === source.id && (!episodeId || node.metadata?.assetExtractionStoryboardEpisodeId === episodeId));
+    const existingVideo = nodes.find((node) => node.metadata?.assetExtractionVideoDraftSourceId === source.id && (!episodeId || node.metadata?.assetExtractionVideoDraftEpisodeId === episodeId));
     const storyboardNodeId = existingStoryboard?.id || nanoid();
     const videoNodeId = existingVideo?.id || nanoid();
     const imageAssets = assets.filter((asset) => asset.image?.imageUrl || nodes.some((node) => node.metadata?.scriptAssetId === asset.id && node.metadata?.content));
@@ -61,20 +62,20 @@ export function buildAssetStoryboardDraft(source: CanvasNodeData, assets: Script
         storyboardContent,
         references.length ? `\n提示：${references.join("、")}为已连接的资产参考图，请按编号对应使用。` : "",
     ].join("\n");
-    const storyboardPosition = { x: source.position.x + source.width + 96, y: source.position.y + source.height + 96 };
+    const storyboardPosition = { x: source.position.x, y: source.position.y + source.height + 96 };
     const videoPosition = { x: storyboardPosition.x + 340 + 96, y: storyboardPosition.y };
     const ops: CanvasAgentOp[] = [
         {
             type: existingStoryboard ? "update_node" : "add_node",
             id: storyboardNodeId,
             ...(existingStoryboard ? { patch: { title: "分镜脚本草稿", position: storyboardPosition, width: 340, height: 420 } } : { nodeType: CanvasNodeType.Text, title: "分镜脚本草稿", position: storyboardPosition, width: 340, height: 420 }),
-            metadata: { content: storyboardContent, status: "success", assetExtractionStoryboardSourceId: source.id },
+            metadata: { content: storyboardContent, status: "success", assetExtractionStoryboardSourceId: source.id, assetExtractionStoryboardEpisodeId: episodeId },
         },
         {
             type: existingVideo ? "update_node" : "add_node",
             id: videoNodeId,
             ...(existingVideo ? { patch: { title: "视频草稿", position: videoPosition, width: 420, height: 236 } } : { nodeType: CanvasNodeType.Video, title: "视频草稿", position: videoPosition, width: 420, height: 236 }),
-            metadata: { prompt: videoPrompt, status: "idle", assetExtractionVideoDraftSourceId: source.id, sourceNodeId: storyboardNodeId, references: imageAssetIds },
+            metadata: { prompt: videoPrompt, status: "idle", assetExtractionVideoDraftSourceId: source.id, assetExtractionVideoDraftEpisodeId: episodeId, sourceNodeId: storyboardNodeId, references: imageAssetIds },
         },
         ...(!connections.some((connection) => connection.fromNodeId === source.id && connection.toNodeId === storyboardNodeId) ? [{ type: "connect_nodes" as const, id: nanoid(), fromNodeId: source.id, toNodeId: storyboardNodeId }] : []),
         ...(!connections.some((connection) => connection.fromNodeId === storyboardNodeId && connection.toNodeId === videoNodeId) ? [{ type: "connect_nodes" as const, id: nanoid(), fromNodeId: storyboardNodeId, toNodeId: videoNodeId }] : []),

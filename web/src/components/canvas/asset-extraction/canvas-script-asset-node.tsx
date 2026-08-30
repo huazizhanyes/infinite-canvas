@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
 import { App, Button, Tag } from "antd";
-import { Download, FolderPlus, ImagePlus, LoaderCircle, RotateCcw, Save, TriangleAlert, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Download, FolderPlus, GripVertical, ImagePlus, LoaderCircle, RotateCcw, Save, TriangleAlert, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
@@ -306,28 +306,29 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
             style={{ color: ctx.theme.node.text, background: ctx.theme.node.panel, "--ant-color-bg-container": ctx.theme.node.panel, "--ant-color-border": ctx.theme.node.stroke } as CSSProperties}
             data-canvas-no-zoom
         >
-            <section className="flex min-h-0 flex-col gap-2 border-r p-3" style={{ borderColor: ctx.theme.node.stroke }} onMouseDown={stopCanvasInteraction} onPointerDown={stopCanvasInteraction} onDoubleClick={stopCanvasInteraction} onWheel={stopCanvasInteraction}>
-                <div className="flex items-center gap-2">
+            <section className="flex min-h-0 flex-col gap-2 border-r p-3" style={{ borderColor: ctx.theme.node.stroke }} onDoubleClick={stopCanvasInteraction} onWheel={stopCanvasInteraction}>
+                <div className="flex cursor-grab items-center gap-2 active:cursor-grabbing" title="拖动资产节点">
+                    <GripVertical className="size-3.5 shrink-0 opacity-45" />
                     <Tag color={type === "character" ? "blue" : type === "scene" ? "green" : "gold"}>{type === "character" ? "人物" : type === "scene" ? "场景" : "道具"}</Tag>
                     {ctx.node.metadata?.scriptAssetStale ? <Tag>本次未识别</Tag> : null}
                 </div>
-                <input value={name} className="h-8 rounded-md border bg-transparent px-2 text-sm font-semibold outline-none" style={{ borderColor: ctx.theme.node.stroke, background: ctx.theme.node.fill }} onChange={(event) => setName(event.target.value)} />
-                <textarea value={description} placeholder="视觉描述" className="thin-scrollbar min-h-0 w-full flex-1 resize-none rounded-md border bg-transparent p-2 text-xs leading-5 outline-none" style={{ borderColor: ctx.theme.node.stroke, background: ctx.theme.node.fill }} onChange={(event) => setDescription(event.target.value)} />
-                <textarea value={prompt} placeholder="生图提示词" className="thin-scrollbar h-20 w-full shrink-0 resize-none rounded-md border bg-transparent p-2 text-xs leading-5 outline-none" style={{ borderColor: ctx.theme.node.stroke, background: ctx.theme.node.fill }} onChange={(event) => setPrompt(event.target.value)} />
-                <Button size="small" icon={<Save className="size-3.5" />} loading={saving} onClick={() => void save()}>保存描述</Button>
+                <input value={name} className="h-8 rounded-md border bg-transparent px-2 text-sm font-semibold outline-none" style={{ borderColor: ctx.theme.node.stroke, background: ctx.theme.node.fill }} onMouseDown={stopCanvasInteraction} onPointerDown={stopCanvasInteraction} onChange={(event) => setName(event.target.value)} />
+                <textarea value={description} placeholder="视觉描述" className="thin-scrollbar min-h-0 w-full flex-1 resize-none rounded-md border bg-transparent p-2 text-xs leading-5 outline-none" style={{ borderColor: ctx.theme.node.stroke, background: ctx.theme.node.fill }} onMouseDown={stopCanvasInteraction} onPointerDown={stopCanvasInteraction} onChange={(event) => setDescription(event.target.value)} />
+                <textarea value={prompt} placeholder="生图提示词" className="thin-scrollbar h-20 w-full shrink-0 resize-none rounded-md border bg-transparent p-2 text-xs leading-5 outline-none" style={{ borderColor: ctx.theme.node.stroke, background: ctx.theme.node.fill }} onMouseDown={stopCanvasInteraction} onPointerDown={stopCanvasInteraction} onChange={(event) => setPrompt(event.target.value)} />
+                <Button size="small" icon={<Save className="size-3.5" />} loading={saving} onMouseDown={stopCanvasInteraction} onPointerDown={stopCanvasInteraction} onClick={() => void save()}>保存描述</Button>
             </section>
 
             <section className="relative grid min-h-0 place-items-center overflow-hidden" style={{ background: ctx.theme.node.fill }}>
                 {ctx.node.metadata?.content ? (
-                    <button type="button" className="h-full w-full cursor-default" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => { event.stopPropagation(); setPreviewOpen(true); }} onMouseDown={stopCanvasInteraction} aria-label={`双击查看${ctx.node.title}大图`}>
-                        <img src={ctx.node.metadata.content} alt={ctx.node.title} className="h-full w-full object-contain" />
+                    <button type="button" className="h-full w-full cursor-grab active:cursor-grabbing" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => { event.stopPropagation(); setPreviewOpen(true); }} aria-label={`拖动${ctx.node.title}节点，双击查看大图`}>
+                        <img src={ctx.node.metadata.content} alt={ctx.node.title} className="h-full w-full object-contain" draggable={false} />
                     </button>
                 ) : generating ? (
                     <div className="flex flex-col items-center gap-2 text-xs" style={{ color: ctx.theme.node.muted }}><LoaderCircle className="size-7 animate-spin" /><span>正在生成图片</span></div>
                 ) : imageStatus === "failed" ? (
                     <div className="flex max-w-[80%] flex-col items-center gap-2 text-center text-xs text-red-500"><TriangleAlert className="size-7" /><span>{ctx.node.metadata?.errorDetails || "图片生成失败"}</span></div>
                 ) : (
-                    <div className="flex flex-col items-center gap-3 text-xs" style={{ color: ctx.theme.node.muted }}>
+                    <div className="flex flex-col items-center gap-3 text-xs" style={{ color: ctx.theme.node.muted }} onMouseDown={stopCanvasInteraction} onPointerDown={stopCanvasInteraction}>
                         <ImagePlus className="size-8 opacity-50" />
                         <span>还没有资产图片</span>
                         <div className="flex items-center gap-2">

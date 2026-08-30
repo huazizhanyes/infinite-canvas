@@ -4,7 +4,7 @@ import { cacheObjectUrl, revokeCachedObjectUrl } from "@/services/object-url-cac
 import { getCanvasStorageScopeId, getCanvasSessionEpoch } from "@/lib/canvas-account-scope";
 import { uploadCanvasMedia } from "@/services/canvas-media";
 
-export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number; mediaId?: string; mediaStatus?: "synced" | "failed" };
+export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number; mediaId?: string; mediaStatus?: "uploading" | "synced" | "failed" };
 
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "media_files" });
 const objectUrls = new Map<string, string>();
@@ -23,18 +23,27 @@ export async function migrateLegacyMediaStorage(userId: string) {
     return mapping;
 }
 
-export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
+export async function storeMediaFileLocally(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
     const epoch = getCanvasSessionEpoch();
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
     const storageKey = `${prefix}:u${getCanvasStorageScopeId()}:${nanoid()}`;
     await store.setItem(storageKey, blob);
     const url = cacheObjectUrl(objectUrls, storageKey, blob);
     const meta = blob.type.startsWith("video/") ? await readVideoMeta(url) : blob.type.startsWith("audio/") ? await readAudioMeta(url) : {};
+    if (epoch !== getCanvasSessionEpoch()) throw new Error("账号已切换，已忽略旧媒体请求");
+    return { url, storageKey, bytes: blob.size, mimeType: blob.type || "application/octet-stream", ...meta, mediaStatus: "uploading" };
+}
+
+export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
+    const epoch = getCanvasSessionEpoch();
+    const local = await storeMediaFileLocally(input, prefix);
+    const blob = await store.getItem<Blob>(local.storageKey);
+    if (!blob) throw new Error("本地媒体保存失败");
     let remote: Awaited<ReturnType<typeof uploadCanvasMedia>> = null;
     const kind = blob.type.startsWith("video/") ? "video" : blob.type.startsWith("audio/") ? "audio" : null;
     if (kind) { try { remote = await uploadCanvasMedia(blob, kind); } catch { remote = { mediaId: "", mediaStatus: "failed" }; } }
     if (epoch !== getCanvasSessionEpoch()) throw new Error("账号已切换，已忽略旧媒体请求");
-    return { url, storageKey, bytes: blob.size, mimeType: blob.type || "application/octet-stream", ...meta, ...(remote?.mediaId ? { mediaId: remote.mediaId } : {}), ...(remote?.mediaStatus ? { mediaStatus: remote.mediaStatus } : {}) };
+    return { ...local, ...(remote?.mediaId ? { mediaId: remote.mediaId } : {}), mediaStatus: remote?.mediaStatus || (kind ? "failed" : undefined) };
 }
 
 export async function resolveMediaUrl(storageKey?: string, fallback = "") {

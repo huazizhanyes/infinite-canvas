@@ -58,4 +58,14 @@ describe("asset storyboard workflow", () => {
         expect(assetConnections.map((op) => op.fromNodeId)).toEqual(["node-b", "node-a"]);
         expect(ops.find((op) => op.type === "add_node" && op.nodeType === CanvasNodeType.Video)).toMatchObject({ metadata: { references: ["b", "a"] } });
     });
+
+    it("marks generated video nodes with their episode ownership", () => {
+        const state: AssetStoryboardState = { version: 1, sourceNodeId: source.id, episodeId: "ep-2", contentHash: "hash", status: "ready", title: "第二集", totalDurationSec: 8, continuityBible: "", shots: [
+            { id: "s1", index: 1, durationSec: 8, title: "一", sourceExcerpt: "", storyPurpose: "", visualDescription: "", shotSize: "中景", lighting: "", dialogue: "", sound: "", cameraMovement: "", characters: [], assetIds: ["a"], previousHandoff: "", startState: "", endState: "", continuity: "", negativeConstraints: [], finalPrompt: "提示词", promptStatus: "success" },
+        ] };
+        const storyboard = { id: "story-ep2", type: CanvasNodeType.AssetStoryboard, title: "第二集分镜", position: { x: 0, y: 0 }, width: 300, height: 180, metadata: { assetStoryboardSourceId: source.id, assetStoryboardEpisodeId: "ep-2" } };
+        const op = buildVideoScriptOps(storyboard, source, state, [assetData("a", "blob:a")], [source, storyboard], []).find((candidate) => candidate.type === "add_node");
+
+        expect(op).toMatchObject({ metadata: { assetStoryboardEpisodeId: "ep-2", assetStoryboardSourceId: "story-ep2" } });
+    });
 });

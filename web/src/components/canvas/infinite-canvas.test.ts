@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { calculateWheelViewport } from "./infinite-canvas";
+import { calculateWheelViewport, shouldZoomCanvasForWheel } from "./infinite-canvas";
 
 describe("calculateWheelViewport", () => {
     it("keeps the world point under the pointer fixed", () => {
@@ -25,5 +25,20 @@ describe("calculateWheelViewport", () => {
     it("clamps zoom to the supported range", () => {
         expect(calculateWheelViewport({ x: 0, y: 0, k: 0.05 }, 0, 0, 120, 0, 800).k).toBe(0.05);
         expect(calculateWheelViewport({ x: 0, y: 0, k: 5 }, 0, 0, -120, 0, 800).k).toBe(5);
+    });
+});
+
+describe("shouldZoomCanvasForWheel", () => {
+    it("zooms for an ordinary wheel over the canvas", () => {
+        expect(shouldZoomCanvasForWheel(false, false, false)).toBe(true);
+    });
+
+    it("keeps ordinary scrolling inside canvas controls", () => {
+        expect(shouldZoomCanvasForWheel(true, false, false)).toBe(false);
+    });
+
+    it("routes Ctrl or Command wheel gestures to canvas zoom even over controls", () => {
+        expect(shouldZoomCanvasForWheel(true, true, false)).toBe(true);
+        expect(shouldZoomCanvasForWheel(true, false, true)).toBe(true);
     });
 });

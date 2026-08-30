@@ -15,7 +15,7 @@ export type UploadedImage = {
     bytes: number;
     mimeType: string;
     mediaId?: string;
-    mediaStatus?: "synced" | "failed";
+    mediaStatus?: "uploading" | "synced" | "failed";
 };
 
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "image_files" });
@@ -34,13 +34,22 @@ export async function migrateLegacyImageStorage(userId: string) {
     return mapping;
 }
 
-export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
+export async function storeImageLocally(input: string | Blob): Promise<UploadedImage> {
     const epoch = getCanvasSessionEpoch();
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
     const storageKey = `image:u${getCanvasStorageScopeId()}:${nanoid()}`;
     await store.setItem(storageKey, blob);
     const localUrl = cacheObjectUrl(objectUrls, storageKey, blob);
     const meta = await readImageMeta(localUrl);
+    if (epoch !== getCanvasSessionEpoch()) throw new Error("账号已切换，已忽略旧媒体请求");
+    return { url: localUrl, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType, mediaStatus: "uploading" };
+}
+
+export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
+    const epoch = getCanvasSessionEpoch();
+    const local = await storeImageLocally(input);
+    const blob = await store.getItem<Blob>(local.storageKey);
+    if (!blob) throw new Error("本地图片保存失败");
     let remote: Awaited<ReturnType<typeof uploadCanvasMedia>> = null;
     try {
         remote = await uploadCanvasMedia(blob, "image");
@@ -49,8 +58,8 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
         remote = { mediaId: "", mediaStatus: "failed" };
     }
     if (epoch !== getCanvasSessionEpoch()) throw new Error("账号已切换，已忽略旧媒体请求");
-    const url = remote?.mediaId ? await resolveCanvasMediaUrl(remote.mediaId, localUrl) : localUrl;
-    return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType, ...(remote?.mediaId ? { mediaId: remote.mediaId } : {}), ...(remote?.mediaStatus ? { mediaStatus: remote.mediaStatus } : {}) };
+    const url = remote?.mediaId ? await resolveCanvasMediaUrl(remote.mediaId, local.url) : local.url;
+    return { ...local, url, ...(remote?.mediaId ? { mediaId: remote.mediaId } : {}), mediaStatus: remote?.mediaStatus || "failed" };
 }
 
 export async function resolveImageUrl(storageKey?: string, fallback = "") {

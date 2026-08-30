@@ -3,7 +3,7 @@ import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import { normalizeReferenceMentions } from "@/lib/reference-mentions";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
-import { createCanvasGraphIndex, incomingConnections, outgoingConnections, type CanvasGraphIndex } from "@/lib/canvas/canvas-graph-index";
+import { createCanvasGraphIndex, incomingConnections, type CanvasGraphIndex } from "@/lib/canvas/canvas-graph-index";
 import { assetPreviewUrl, type Asset } from "@/stores/use-asset-store";
 
 export type CanvasResourceKind = "image" | "video" | "audio" | "text";
@@ -30,7 +30,18 @@ export type CanvasResourceReference = {
 
 /** Restore mention markers for prompts saved by older editor versions. */
 export function normalizeCanvasResourceMentions(prompt: string, references: Pick<CanvasResourceReference, "label" | "active">[]) {
-    return normalizeReferenceMentions(prompt, references.filter((reference) => reference.active).map((reference) => reference.label));
+    const activeLabels = references.filter((reference) => reference.active).map((reference) => reference.label);
+    return normalizeReferenceMentions(removeLegacyAudioMentionGlyphs(prompt, activeLabels), activeLabels);
+}
+
+function removeLegacyAudioMentionGlyphs(prompt: string, labels: string[]) {
+    return labels.filter((label) => /^音频\d+$/.test(label)).reduce((value, label) => (
+        value.replace(new RegExp(`(?:@?[♫♪♬♩🎵🎶]\\s*)+(?=@?${escapeRegExp(label)}(?!\\d))`, "g"), "")
+    ), prompt);
+}
+
+function escapeRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function buildCanvasResourceReferences(nodes: CanvasNodeData[], connections: CanvasConnection[], contextNodeId?: string | null, graphIndex?: CanvasGraphIndex) {
@@ -47,7 +58,27 @@ export function buildCanvasResourceReferences(nodes: CanvasNodeData[], connectio
 }
 
 export function buildNodeMentionReferences(node: CanvasNodeData, nodes: CanvasNodeData[], connections: CanvasConnection[], graphIndex?: CanvasGraphIndex, assets: Asset[] = []) {
-    return [...labelResourceNodes(getMentionResourceNodes(node.id, nodes, connections, graphIndex), true), ...labelUserAssets(assets)];
+    const index = graphIndex || createCanvasGraphIndex(nodes, connections);
+    const connected = getMentionResourceNodes(node.id, nodes, connections, index);
+    const connectedIds = new Set(connected.map((item) => item.id));
+    const ordered = stableContextResourceNodes(node, nodes, connected);
+    return [...labelResourceNodes(ordered, connectedIds), ...labelUserAssets(assets)];
+}
+
+export function mentionedCanvasResourceReferences(prompt: string, references: CanvasResourceReference[]) {
+    const byLabel = new Map(references.filter((reference) => reference.source === "canvas").map((reference) => [reference.label, reference]));
+    const labels = [...byLabel.keys()].sort((left, right) => right.length - left.length);
+    const mentioned: CanvasResourceReference[] = [];
+    const seen = new Set<string>();
+    for (let index = 0; index < prompt.length; index += 1) {
+        if (prompt[index] !== "@") continue;
+        const label = labels.find((candidate) => prompt.startsWith(candidate, index + 1) && isMentionBoundary(prompt[index + candidate.length + 1]));
+        const reference = label ? byLabel.get(label) : undefined;
+        if (!reference || seen.has(reference.nodeId)) continue;
+        seen.add(reference.nodeId);
+        mentioned.push(reference);
+    }
+    return mentioned;
 }
 
 export function getMentionResourceNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], graphIndex?: CanvasGraphIndex) {
@@ -81,8 +112,8 @@ export function mergeCanvasReferenceOrder(nodeId: string, nodes: CanvasNodeData[
 }
 
 function getContextResourceNodes(nodeId: string, graphIndex: CanvasGraphIndex) {
-    const resources = [...incomingConnections(graphIndex, nodeId), ...outgoingConnections(graphIndex, nodeId)]
-        .map((connection) => graphIndex.nodeById.get(connection.fromNodeId === nodeId ? connection.toNodeId : connection.fromNodeId))
+    const resources = incomingConnections(graphIndex, nodeId)
+        .map((connection) => graphIndex.nodeById.get(connection.fromNodeId))
         .filter((node): node is CanvasNodeData => Boolean(node && isResourceNode(node)))
         .filter((node, index, all) => all.findIndex((candidate) => candidate.id === node.id) === index);
     const metadata = graphIndex.nodeById.get(nodeId)?.metadata;
@@ -99,7 +130,26 @@ function resourceReferenceKeys(node: CanvasNodeData) {
     return [node.metadata?.scriptAssetId, node.id, node.metadata?.storageKey, node.metadata?.content].filter((value): value is string => Boolean(value));
 }
 
-function labelResourceNodes(nodes: CanvasNodeData[], active: boolean) {
+function stableContextResourceNodes(node: CanvasNodeData, nodes: CanvasNodeData[], connected: CanvasNodeData[]) {
+    const byReference = new Map<string, CanvasNodeData>();
+    nodes.filter(isResourceNode).forEach((resource) => resourceReferenceKeys(resource).forEach((key) => byReference.set(key, resource)));
+    const seen = new Set<string>();
+    const ordered: CanvasNodeData[] = [];
+    for (const key of node.metadata?.referenceOrder || []) {
+        const resource = byReference.get(key);
+        if (!resource || seen.has(resource.id)) continue;
+        seen.add(resource.id);
+        ordered.push(resource);
+    }
+    for (const resource of connected) {
+        if (seen.has(resource.id)) continue;
+        seen.add(resource.id);
+        ordered.push(resource);
+    }
+    return ordered;
+}
+
+function labelResourceNodes(nodes: CanvasNodeData[], active: boolean | Set<string>) {
     const counts: Record<CanvasResourceKind, number> = { image: 0, video: 0, audio: 0, text: 0 };
     return nodes.flatMap((node): CanvasResourceReference[] => {
         const kind = resourceKind(node);
@@ -118,10 +168,14 @@ function labelResourceNodes(nodes: CanvasNodeData[], active: boolean) {
                 storageKey: node.metadata?.storageKey,
                 mediaId: node.metadata?.mediaId,
                 text: resourceText(node),
-                active,
+                active: typeof active === "boolean" ? active : active.has(node.id),
             },
         ];
     });
+}
+
+function isMentionBoundary(value?: string) {
+    return !value || !/\d/.test(value);
 }
 
 function labelUserAssets(assets: Asset[]) {

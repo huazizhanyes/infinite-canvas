@@ -30,16 +30,78 @@ describe("buildNodeGenerationContext asset mentions", () => {
         expect(context.referenceImages).toEqual([{ id: assetNode.id, name: "林夏.png", type: "image/png", dataUrl: "blob:asset-image", storageKey: undefined }]);
     });
 
-    it("uses an image connected from a video's right handle as a mention and generation reference", () => {
+    it("uses an image connected into a video's left input as a generation reference", () => {
+        const video: CanvasNodeData = { ...target, id: "video", type: CanvasNodeType.Video, title: "视频", metadata: { content: "blob:video" } };
+        const image: CanvasNodeData = { ...target, id: "image", title: "图片", metadata: { content: "blob:image", mimeType: "image/png" } };
+        const connections = [{ id: "line", fromNodeId: image.id, toNodeId: video.id }];
+
+        const references = buildNodeMentionReferences(video, [video, image], connections);
+        const context = buildNodeGenerationContext(video.id, [video, image], connections, "@图片1 让图片动起来", references);
+
+        expect(references.map((reference) => reference.nodeId)).toEqual([image.id]);
+        expect(context.referenceImages).toEqual([{ id: image.id, name: "图片.png", type: "image/png", dataUrl: "blob:image", storageKey: undefined }]);
+    });
+
+    it("does not consume a resource connected from the target's right output", () => {
         const video: CanvasNodeData = { ...target, id: "video", type: CanvasNodeType.Video, title: "视频", metadata: { content: "blob:video" } };
         const image: CanvasNodeData = { ...target, id: "image", title: "图片", metadata: { content: "blob:image", mimeType: "image/png" } };
         const connections = [{ id: "line", fromNodeId: video.id, toNodeId: image.id }];
 
-        const references = buildNodeMentionReferences(video, [video, image], connections);
-        const context = buildNodeGenerationContext(video.id, [video, image], connections, "让图片动起来", references);
+        expect(buildNodeMentionReferences(video, [video, image], connections).some((reference) => reference.nodeId === image.id)).toBe(false);
+        expect(buildNodeGenerationContext(video.id, [video, image], connections, "@图片1", []).referenceImages).toEqual([]);
+    });
 
-        expect(references.map((reference) => reference.nodeId)).toEqual([image.id]);
-        expect(context.referenceImages).toEqual([{ id: image.id, name: "图片.png", type: "image/png", dataUrl: "blob:image", storageKey: undefined }]);
+    it("uploads only connected images explicitly mentioned by a video prompt without changing stable order", () => {
+        const video: CanvasNodeData = { ...target, id: "video", type: CanvasNodeType.Video, title: "视频", metadata: { referenceOrder: ["a", "b", "c", "d", "e"] } };
+        const images = ["a", "b", "c", "d", "e"].map((id) => ({ ...target, id, title: id.toUpperCase(), metadata: { content: `blob:${id}`, mimeType: "image/png" } }));
+        const connections = images.map((image) => ({ id: `line-${image.id}`, fromNodeId: image.id, toNodeId: video.id }));
+        const references = buildNodeMentionReferences(video, [video, ...images], connections);
+        const context = buildNodeGenerationContext(video.id, [video, ...images], connections, "@图片5、@图片2、@图片4、@图片1", references);
+
+        expect(context.referenceImages.map((image) => image.id)).toEqual(["a", "b", "d", "e"]);
+        expect(context.selectedReferenceNodeIds).toEqual(["a", "b", "d", "e"]);
+        expect(context.submissionPrompt).toBe("@图片4、@图片2、@图片3、@图片1");
+        expect(context.referenceLabelMapping).toEqual({ 图片1: "图片1", 图片2: "图片2", 图片4: "图片3", 图片5: "图片4" });
+    });
+
+    it("ignores a mentioned image after its line is disconnected and does not rebind its label", () => {
+        const video: CanvasNodeData = { ...target, id: "video", type: CanvasNodeType.Video, title: "视频", metadata: { referenceOrder: ["a", "b", "c"] } };
+        const images = ["a", "b", "c"].map((id) => ({ ...target, id, title: id.toUpperCase(), metadata: { content: `blob:${id}`, mimeType: "image/png" } }));
+        const connections = [
+            { id: "line-a", fromNodeId: "a", toNodeId: video.id },
+            { id: "line-c", fromNodeId: "c", toNodeId: video.id },
+        ];
+        const references = buildNodeMentionReferences(video, [video, ...images], connections);
+        const context = buildNodeGenerationContext(video.id, [video, ...images], connections, "@图片2 离线，@图片3 保留", references);
+
+        expect(references.filter((reference) => reference.source === "canvas").map((reference) => [reference.label, reference.nodeId, reference.active])).toEqual([
+            ["图片1", "a", true],
+            ["图片2", "b", false],
+            ["图片3", "c", true],
+        ]);
+        expect(context.referenceImages.map((image) => image.id)).toEqual(["c"]);
+        expect(context.ignoredReferenceLabels).toEqual(["图片2"]);
+        expect(context.submissionPrompt).toBe("离线，@图片1 保留");
+    });
+
+    it("does not upload connected video images that are not mentioned", () => {
+        const video: CanvasNodeData = { ...target, id: "video", type: CanvasNodeType.Video, title: "视频", metadata: { referenceOrder: ["a", "b"] } };
+        const images = ["a", "b"].map((id) => ({ ...target, id, title: id.toUpperCase(), metadata: { content: `blob:${id}`, mimeType: "image/png" } }));
+        const connections = images.map((image) => ({ id: `line-${image.id}`, fromNodeId: image.id, toNodeId: video.id }));
+        const references = buildNodeMentionReferences(video, [video, ...images], connections);
+        const context = buildNodeGenerationContext(video.id, [video, ...images], connections, "@图片1 作为唯一参考", references);
+
+        expect(context.referenceImages.map((image) => image.id)).toEqual(["a"]);
+    });
+
+    it("does not upload a connected video unless the video prompt mentions it", () => {
+        const targetVideo: CanvasNodeData = { ...target, id: "video-target", type: CanvasNodeType.Video, title: "目标视频", metadata: { referenceOrder: ["source-video"] } };
+        const sourceVideo: CanvasNodeData = { ...target, id: "source-video", type: CanvasNodeType.Video, title: "参考视频", metadata: { content: "blob:source-video", mimeType: "video/mp4" } };
+        const connections = [{ id: "line-video", fromNodeId: sourceVideo.id, toNodeId: targetVideo.id }];
+        const references = buildNodeMentionReferences(targetVideo, [targetVideo, sourceVideo], connections);
+
+        expect(buildNodeGenerationContext(targetVideo.id, [targetVideo, sourceVideo], connections, "只使用文字生成", references).referenceVideos).toEqual([]);
+        expect(buildNodeGenerationContext(targetVideo.id, [targetVideo, sourceVideo], connections, "参考 @视频1 的动作", references).referenceVideos.map((video) => video.id)).toEqual([sourceVideo.id]);
     });
 
     it("keeps stable reference order when node and connection order differ", () => {
@@ -108,6 +170,20 @@ describe("buildNodeGenerationContext asset mentions", () => {
         const context = buildNodeGenerationContext(target.id, [target], [], "@资产·B 先出现，@资产·A 后出现", references);
 
         expect(context.referenceImages.map((image) => image.id)).toEqual(["image-b", "image-a"]);
+    });
+
+    it("maps mentioned user assets to the compact upstream image numbering for video", () => {
+        const video: CanvasNodeData = { ...target, id: "video", type: CanvasNodeType.Video, title: "视频" };
+        const references: CanvasResourceReference[] = [
+            { id: "asset:image-a", nodeId: "asset:image-a", source: "user-asset", assetId: "image-a", kind: "image", label: "资产·A", title: "A", previewUrl: "blob:a", active: true },
+            { id: "asset:image-b", nodeId: "asset:image-b", source: "user-asset", assetId: "image-b", kind: "image", label: "资产·B", title: "B", previewUrl: "blob:b", active: true },
+        ];
+
+        const context = buildNodeGenerationContext(video.id, [video], [], "@资产·B 先出现，@资产·A 后出现", references);
+
+        expect(context.referenceImages.map((image) => image.id)).toEqual(["image-b", "image-a"]);
+        expect(context.submissionPrompt).toBe("@图片1 先出现，@图片2 后出现");
+        expect(context.selectedReferenceNodeIds).toEqual(["asset:image-b", "asset:image-a"]);
     });
 
     it("gives same-title assets distinct mention labels", () => {

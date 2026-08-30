@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
+import { Camera, Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
@@ -11,6 +11,7 @@ import { CanvasNodeType, type CanvasNodeData, type ViewportTransform } from "@/t
 import type { CanvasNodeToolbarItem } from "@/types/canvas-plugin";
 import { ImageToolSettingsModal, type ImageToolbarSettingsTool } from "./canvas-image-toolbar-settings-modal";
 import { IMAGE_QUICK_TOOLS_STORAGE_KEY, buildImageToolbarTools, defaultImageQuickToolIds, readImageQuickToolsConfig, type ImageQuickToolId } from "./canvas-image-toolbar-tools";
+import type { CanvasVideoFrameKind } from "@/lib/canvas/canvas-video-frame";
 
 type CanvasNodeHoverToolbarProps = {
     node: CanvasNodeData | null;
@@ -25,6 +26,7 @@ type CanvasNodeHoverToolbarProps = {
     onGenerateMedia?: (node: CanvasNodeData, mode: "image" | "audio" | "video") => void;
     onUpload: (node: CanvasNodeData) => void;
     onDownload: (node: CanvasNodeData) => void;
+    onCaptureVideoFrame?: (node: CanvasNodeData, kind: CanvasVideoFrameKind) => void;
     onSaveAsset: (node: CanvasNodeData) => void;
     onMaskEdit: (node: CanvasNodeData) => void;
     onCrop: (node: CanvasNodeData) => void;
@@ -63,6 +65,7 @@ export function CanvasNodeHoverToolbar({
     onGenerateMedia,
     onUpload,
     onDownload,
+    onCaptureVideoFrame,
     onSaveAsset,
     onMaskEdit,
     onCrop,
@@ -83,6 +86,7 @@ export function CanvasNodeHoverToolbar({
     const [draftShowImageToolLabels, setDraftShowImageToolLabels] = useState(true);
     const [imageToolSettingsOpen, setImageToolSettingsOpen] = useState(false);
     const [mediaMenuOpen, setMediaMenuOpen] = useState(false);
+    const [frameMenuOpen, setFrameMenuOpen] = useState(false);
     const { message } = App.useApp();
     const copyText = useCopyText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -103,6 +107,7 @@ export function CanvasNodeHoverToolbar({
     useEffect(() => {
         setImageToolSettingsOpen(false);
         setMediaMenuOpen(false);
+        setFrameMenuOpen(false);
     }, [node?.id]);
 
     if (!node) return null;
@@ -145,6 +150,7 @@ export function CanvasNodeHoverToolbar({
         ...(canRetry ? [{ id: "retry", title: "重新生成", label: "重试", icon: <RefreshCw className="size-4" />, onClick: () => onRetry(node) }] : []),
         ...(hasImage || hasVideo || isText ? [{ id: "saveAsset", title: "加入我的资产", label: "存资产", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
         ...(hasImage || hasVideo || hasAudio ? [{ id: "download", title: hasAudio ? "下载音频" : hasVideo ? "下载视频" : "下载图片", label: "下载", icon: <Download className="size-4" />, onClick: () => onDownload(node) }] : []),
+        ...(hasVideo ? [{ id: "captureFrame", title: "从视频截取图片帧", label: "截取帧", icon: <Camera className="size-4" />, active: frameMenuOpen, onClick: () => setFrameMenuOpen((current) => !current) }] : []),
         ...(canOpenDialog ? [{ id: "edit", title: isText ? "打开 AI 文本处理" : "编辑", label: isText ? "AI处理" : "编辑", icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "editText", title: "编辑文本内容", label: "编辑内容", icon: <Pencil className="size-4" />, onClick: () => onEditText(node) }] : []),
         ...(isText ? [{ id: "generateMedia", title: "从文本生成媒体", label: "生成媒体", icon: <ImageIcon className="size-4" />, active: mediaMenuOpen, onClick: () => setMediaMenuOpen((current) => !current) }] : []),
@@ -187,7 +193,7 @@ export function CanvasNodeHoverToolbar({
                 style={{ left, top, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item, boxShadow: "0 8px 24px rgba(0,0,0,.18)" }}
                 onMouseEnter={() => onKeep(node.id)}
                 onMouseLeave={() => {
-                    if (!imageToolSettingsOpen) onLeave();
+                    if (!imageToolSettingsOpen && !frameMenuOpen) onLeave();
                 }}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -199,6 +205,9 @@ export function CanvasNodeHoverToolbar({
                     <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-black/5 dark:hover:bg-white/10" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "image"); }}><ImageIcon className="size-3.5" />图片</button>
                     <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-black/5 dark:hover:bg-white/10" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "audio"); }}><Music2 className="size-3.5" />配音</button>
                     <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-black/5 dark:hover:bg-white/10" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "video"); }}><Video className="size-3.5" />视频</button>
+                </div> : null}
+                {hasVideo && frameMenuOpen ? <div className="absolute right-0 top-10 z-40 min-w-[136px] rounded-lg border p-1 text-xs shadow-xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
+                    {(["first", "last", "current"] as const).map((kind) => <button key={kind} type="button" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition hover:bg-black/5 dark:hover:bg-white/10" onClick={() => { setFrameMenuOpen(false); onCaptureVideoFrame?.(node, kind); }}><Camera className="size-3.5 opacity-70" />{kind === "first" ? "截取首帧" : kind === "last" ? "截取尾帧" : "截取当前帧"}</button>)}
                 </div> : null}
                 {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} /> : null}
             </div>

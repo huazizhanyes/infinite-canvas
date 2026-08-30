@@ -4,6 +4,12 @@ import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ViewportTransform } from "@/types/canvas";
 
+const CANVAS_WHEEL_NATIVE_SCROLL_SELECTOR = "[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown";
+
+export function shouldZoomCanvasForWheel(nativeScrollTarget: boolean, ctrlKey: boolean, metaKey: boolean) {
+    return ctrlKey || metaKey || !nativeScrollTarget;
+}
+
 type InfiniteCanvasProps = {
     containerRef: React.RefObject<HTMLDivElement | null>;
     viewport: ViewportTransform;
@@ -138,7 +144,8 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
 
     const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
         const target = event.target instanceof Element ? event.target : null;
-        if (target?.closest("[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
+        const nativeScrollTarget = Boolean(target?.closest(CANVAS_WHEEL_NATIVE_SCROLL_SELECTOR));
+        if (!shouldZoomCanvasForWheel(nativeScrollTarget, event.ctrlKey, event.metaKey)) return;
 
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
@@ -272,10 +279,11 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
         const container = containerRef.current;
         if (!container) return;
 
-        // 阻止画布滚动导致页面滚动;但浮层(创建菜单/弹窗等)内允许原生滚动
+        // 普通滚轮保留编辑区/浮层的原生滚动；修饰键滚轮始终交给画布，避免触发网页缩放。
         const preventWheelScroll = (event: WheelEvent) => {
             const target = event.target instanceof Element ? event.target : null;
-            if (target?.closest("[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
+            const nativeScrollTarget = Boolean(target?.closest(CANVAS_WHEEL_NATIVE_SCROLL_SELECTOR));
+            if (!shouldZoomCanvasForWheel(nativeScrollTarget, event.ctrlKey, event.metaKey)) return;
             event.preventDefault();
         };
         container.addEventListener("wheel", preventWheelScroll, { passive: false });
@@ -290,7 +298,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             style={{ background: theme.canvas.background }}
             onPointerDown={handlePointerDown}
             onDoubleClick={handleDoubleClick}
-            onWheel={handleWheel}
+            onWheelCapture={handleWheel}
             onContextMenu={onContextMenu}
             onDragOver={(event) => event.preventDefault()}
             onDrop={onDrop}
