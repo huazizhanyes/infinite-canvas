@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Group, Image as ImageIcon, Maximize2, Music2, Pause, Play, Plus, Puzzle, RefreshCw, Search, Star, Video, Volume2, VolumeX, X } from "lucide-react";
+import { ChevronRight, Group, Image as ImageIcon, Maximize2, Music2, Pause, Play, Plus, Puzzle, RefreshCw, Search, Star, Upload, Video, Volume2, VolumeX, X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -11,6 +11,8 @@ import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textare
 import { CanvasNodeType, type CanvasNodeData, type Position } from "@/types/canvas";
 import type { CanvasNodeContext, CanvasPluginHost } from "@/types/canvas-plugin";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { canvasNodeStackClass } from "@/lib/canvas/canvas-node-presentation";
+import { pauseOtherCanvasMedia } from "@/lib/canvas/canvas-media-playback";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
@@ -30,6 +32,7 @@ type CanvasNodeProps = {
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
     isConnecting: boolean;
+    connectionHoverPoint?: Position;
     hideConnectionHandles?: boolean;
     editRequestNonce?: number;
     showPanel: boolean;
@@ -62,6 +65,10 @@ type CanvasNodeProps = {
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
+    onRetryOriginal?: (node: CanvasNodeData) => void;
+    onRetryMedia?: (node: CanvasNodeData) => void;
+    onUpload?: () => void;
+    mediaUploadProgress?: number;
     onViewImage?: (node: CanvasNodeData) => void;
     onVideoMetadata?: (nodeId: string, width: number, height: number) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
@@ -86,6 +93,8 @@ type NodeContentRendererProps = {
     onStopEditing: () => void;
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
+    onRetryOriginal?: (node: CanvasNodeData) => void;
+    onUpload?: () => void;
     onVideoMetadata?: (nodeId: string, width: number, height: number) => void;
     onToggleBatch?: () => void;
     groupChildCount: number;
@@ -100,6 +109,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     isFocusRelated,
     isConnectionTarget,
     isConnecting,
+    connectionHoverPoint,
     hideConnectionHandles = false,
     editRequestNonce = 0,
     showPanel,
@@ -131,6 +141,10 @@ export const CanvasNode = React.memo(function CanvasNode({
     onToggleBatch,
     onSetBatchPrimary,
     onRetry,
+    onRetryOriginal,
+    onRetryMedia,
+    onUpload,
+    mediaUploadProgress,
     onViewImage,
     onVideoMetadata,
     onContextMenu,
@@ -306,6 +320,13 @@ export const CanvasNode = React.memo(function CanvasNode({
     }, [handleResizeMove, handleResizeUp]);
 
     const uiScale = Math.max(scale, 0.05);
+    const connectionFocus = isConnectionTarget && connectionHoverPoint
+        ? {
+              x: Math.max(-1, Math.min(1, (connectionHoverPoint.x - data.position.x - data.width / 2) / Math.max(data.width / 2, 1))),
+              y: Math.max(-1, Math.min(1, (connectionHoverPoint.y - data.position.y - data.height / 2) / Math.max(data.height / 2, 1))),
+          }
+        : null;
+    const connectionDepthTransform = connectionFocus ? ` perspective(${650 / uiScale}px) translateZ(${18 / uiScale}px) rotateX(${-connectionFocus.y * 6.5}deg) rotateY(${connectionFocus.x * 7.5}deg) scale(1.035)` : "";
     const groupColor = data.metadata?.groupColor || "#7c3aed";
     const shellBorderColor = isGroup
         ? isGroupDropTarget || isActive ? selectionWhite : `${groupColor}aa`
@@ -319,17 +340,24 @@ export const CanvasNode = React.memo(function CanvasNode({
             : isRelated && !isBatchChild
                 ? `0 0 0 ${1 / uiScale}px ${theme.node.muted}33, 0 ${8 / uiScale}px ${24 / uiScale}px rgba(0,0,0,.10)`
                 : "";
+    const connectionElevation = isConnectionTarget
+        ? `0 0 0 ${2 / uiScale}px ${theme.node.activeStroke}c8, 0 ${30 / uiScale}px ${74 / uiScale}px rgba(0,0,0,.38), 0 0 ${44 / uiScale}px ${theme.node.activeStroke}7a`
+        : "";
 
     return (
         <div
             data-node-id={data.id}
             data-canvas-no-zoom={data.type === CanvasNodeType.Text ? true : undefined}
-            className={`node-element group/node absolute flex select-none flex-col transition-shadow duration-200 ${isGroup ? "z-[5]" : isSelected ? "z-50" : "z-10"}`}
+            className={`node-element group/node absolute flex select-none flex-col ${canvasNodeStackClass(isGroup, isConnectionTarget, showPanel)}`}
             style={{
-                transform: `translate(${data.position.x}px, ${data.position.y}px)`,
+                transform: `translate(${data.position.x}px, ${data.position.y}px)${connectionDepthTransform}`,
+                transformOrigin: "center center",
+                transformStyle: "preserve-3d",
                 width: data.width,
                 height: data.height,
-                transition: "box-shadow 200ms ease",
+                transition: "transform 180ms cubic-bezier(.2,.8,.2,1), filter 180ms ease",
+                filter: isConnectionTarget ? `drop-shadow(0 ${10 / uiScale}px ${24 / uiScale}px rgba(0,0,0,.32)) drop-shadow(0 0 ${22 / uiScale}px ${theme.node.activeStroke}66)` : undefined,
+                willChange: isConnectionTarget ? "transform" : undefined,
                 contain: "layout style",
             }}
             onMouseEnter={() => {
@@ -445,7 +473,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                     borderRadius: `${8 / uiScale}px`,
                     borderColor: shellBorderColor,
                     borderStyle: isGroup ? "dashed" : "solid",
-                    boxShadow: [shellOutline, shellElevation].filter(Boolean).join(", ") || undefined,
+                    boxShadow: [shellOutline, shellElevation, connectionElevation].filter(Boolean).join(", ") || undefined,
+                    transition: "box-shadow 180ms ease",
                 }}
                 onMouseDown={(event) => onMouseDown(event, data.id)}
                 onDoubleClick={(event) => {
@@ -468,6 +497,15 @@ export const CanvasNode = React.memo(function CanvasNode({
                     setIsEditingContent(true);
                 }}
             >
+                {connectionFocus ? (
+                    <div
+                        className="pointer-events-none absolute inset-0 z-20 rounded-[inherit]"
+                        style={{
+                            background: `radial-gradient(circle at ${(connectionFocus.x + 1) * 50}% ${(connectionFocus.y + 1) * 50}%, ${theme.node.activeStroke}42 0%, ${theme.node.activeStroke}18 28%, transparent 64%)`,
+                            boxShadow: `inset 0 0 ${38 / uiScale}px ${theme.node.activeStroke}38`,
+                        }}
+                    />
+                ) : null}
                 <div
                     className={`relative flex h-full w-full items-center justify-center rounded-[inherit] ${isBatchRoot ? "overflow-visible" : "overflow-hidden"}`}
                     style={
@@ -500,11 +538,16 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onOpenPanel={onOpenPanel}
                         onStopEditing={() => setIsEditingContent(false)}
                         onRetry={onRetry}
+                        onRetryOriginal={onRetryOriginal}
+                        onUpload={onUpload}
                         onVideoMetadata={onVideoMetadata}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
                         groupChildCount={groupChildCount}
                         onGroupColorChange={(color) => onGroupColorChange(data.id, color)}
                     />
+                    {isUploadableMediaNode(data) && data.metadata?.content && data.metadata.mediaStatus && data.metadata.mediaStatus !== "synced" ? (
+                        <MediaUploadOverlay node={data} progress={mediaUploadProgress} onRetry={onRetryMedia} />
+                    ) : null}
                 </div>
 
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
@@ -566,7 +609,7 @@ function NodeContent(props: NodeContentRendererProps) {
         }
     }
     if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
-    if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
+    if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onRetryOriginal={props.onRetryOriginal} />;
 
     const Renderer = nodeContentRenderers[props.node.type as keyof typeof nodeContentRenderers];
     if (Renderer) return <Renderer {...props} />;
@@ -637,23 +680,21 @@ function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" |
     );
 }
 
-function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry">) {
+function ErrorContent({ node, theme, onRetry, onRetryOriginal }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry" | "onRetryOriginal">) {
+    const canRetryOriginal = node.type === CanvasNodeType.Video && node.metadata?.videoProvider === "canvas-video" && Boolean(node.metadata.videoTaskId);
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-2 px-4 text-center" style={{ transform: `scale(${imageContentScale(node)})` }}>
             <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || "生成失败"}</div>
-            <button
-                type="button"
-                className="inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition hover:bg-white/5"
-                style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
-                onClick={(event) => {
-                    event.stopPropagation();
-                    onRetry?.(node);
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-            >
-                <RefreshCw className="size-3.5" />
-                重试
-            </button>
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+                {canRetryOriginal ? (
+                    <button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition hover:bg-white/5" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onClick={(event) => { event.stopPropagation(); onRetryOriginal?.(node); }} onMouseDown={(event) => event.stopPropagation()}>
+                        <RefreshCw className="size-3.5" />重试原任务
+                    </button>
+                ) : null}
+                <button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition hover:bg-white/5" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onClick={(event) => { event.stopPropagation(); onRetry?.(node); }} onMouseDown={(event) => event.stopPropagation()}>
+                    <RefreshCw className="size-3.5" />{canRetryOriginal ? "按当前画布重新生成" : "重试"}
+                </button>
+            </div>
         </div>
     );
 }
@@ -780,13 +821,13 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     );
 }
 
-function EmptyImageContent({ theme, scale, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch }: NodeContentRendererProps) {
+function EmptyImageContent({ theme, scale, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, onUpload }: NodeContentRendererProps) {
     const content = (
         <div className="flex h-full w-full flex-col items-center justify-center gap-2" style={{ color: theme.node.placeholder, transform: `scale(${screenUiScale(scale)})` }}>
             <div className="flex size-10 items-center justify-center rounded-lg" style={{ background: theme.toolbar.activeBg }}>
                 <ImageIcon className="size-5 opacity-35" />
             </div>
-            <span className="text-[11px] opacity-65">空图片节点</span>
+            <button type="button" data-canvas-no-zoom className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium opacity-75 transition hover:opacity-100" style={{ background: theme.toolbar.activeBg, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onUpload?.(); }}><Upload className="size-3.5" />上传图片</button>
         </div>
     );
     if (isBatchRoot)
@@ -798,7 +839,7 @@ function EmptyImageContent({ theme, scale, isBatchRoot, batchCount, batchExpande
     return content;
 }
 
-function VideoNodeContent({ node, theme, scale, onVideoMetadata }: NodeContentRendererProps) {
+function VideoNodeContent({ node, theme, scale, onVideoMetadata, onUpload }: NodeContentRendererProps) {
     const [loadError, setLoadError] = useState(false);
     const [reloadKey, setReloadKey] = useState(0);
     const [playing, setPlaying] = useState(false);
@@ -823,7 +864,7 @@ function VideoNodeContent({ node, theme, scale, onVideoMetadata }: NodeContentRe
                 <div className="flex size-10 items-center justify-center rounded-lg" style={{ background: theme.toolbar.activeBg }}>
                     <Video className="size-5 opacity-35" />
                 </div>
-                <span className="text-[11px] opacity-65">空视频节点</span>
+                <button type="button" data-canvas-no-zoom className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium opacity-75 transition hover:opacity-100" style={{ background: theme.toolbar.activeBg, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onUpload?.(); }}><Upload className="size-3.5" />上传视频</button>
             </div>
         );
     }
@@ -865,6 +906,7 @@ function VideoNodeContent({ node, theme, scale, onVideoMetadata }: NodeContentRe
             <video
                 key={reloadKey}
                 ref={videoRef}
+                data-canvas-exclusive-media
                 src={node.metadata.content}
                 preload="metadata"
                 playsInline
@@ -877,7 +919,10 @@ function VideoNodeContent({ node, theme, scale, onVideoMetadata }: NodeContentRe
                 }}
                 onDurationChange={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
                 onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-                onPlay={() => setPlaying(true)}
+                onPlay={(event) => {
+                    pauseOtherCanvasMedia(event.currentTarget);
+                    setPlaying(true);
+                }}
                 onPause={() => setPlaying(false)}
                 onEnded={() => setPlaying(false)}
                 onVolumeChange={(event) => setMuted(event.currentTarget.muted || event.currentTarget.volume === 0)}
@@ -912,6 +957,27 @@ function VideoNodeContent({ node, theme, scale, onVideoMetadata }: NodeContentRe
     );
 }
 
+function isUploadableMediaNode(node: CanvasNodeData) {
+    return node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video;
+}
+
+function MediaUploadOverlay({ node, progress, onRetry }: { node: CanvasNodeData; progress?: number; onRetry?: (node: CanvasNodeData) => void }) {
+    const status = node.metadata?.mediaStatus;
+    const failed = status === "failed" || status === "missing";
+    const label = status === "confirming" ? "正在确认…" : failed ? "上传失败" : `上传中（${Math.max(0, Math.min(100, Math.round(progress || 0)))}%）…`;
+    return (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-2 rounded-[inherit] bg-black/65 px-5 text-center text-white backdrop-blur-[2px]" data-canvas-no-zoom role="status" aria-live="polite">
+            <span className="text-[13px] font-semibold">{label}</span>
+            {failed ? (
+                <>
+                    <span className="max-w-full truncate text-[10px] text-white/65" title={node.metadata?.errorDetails}>{node.metadata?.errorDetails || "请检查网络后重试"}</span>
+                    <button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/25 bg-white/10 px-2.5 text-[11px] font-medium transition hover:bg-white/20" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRetry?.(node); }}><RefreshCw className="size-3.5" />重试上传</button>
+                </>
+            ) : null}
+        </div>
+    );
+}
+
 function formatVideoTime(value: number) {
     const seconds = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
     const minutes = Math.floor(seconds / 60);
@@ -941,7 +1007,7 @@ function AudioNodeContent({ node, theme, scale }: NodeContentRendererProps) {
                 <Music2 className="size-4 shrink-0" />
                 <span className="truncate">{node.metadata?.audioMode === "design" ? "VoxCPM 音色设计" : node.metadata?.sourceType === "tts" ? (node.metadata.audioEngine ? `${node.metadata.audioEngine === "voxcpm2" ? "VoxCPM2" : "Speech"} 配音` : "生成音频") : "上传音频"}</span>
             </div>
-            <audio src={node.metadata.content} controls className="w-full" data-canvas-no-zoom />
+            <audio src={node.metadata.content} controls className="w-full" data-canvas-no-zoom data-canvas-exclusive-media onPlay={(event) => pauseOtherCanvasMedia(event.currentTarget)} />
         </div>
     );
 }
@@ -963,16 +1029,38 @@ function ImageContent({
     batchRecovering: boolean;
     onToggleBatch?: () => void;
 }) {
+    const source = node.metadata?.content || "";
+    const [imageState, setImageState] = useState<{ source: string; status: "loading" | "loaded" | "error"; reloadKey: number }>({ source: "", status: "loading", reloadKey: 0 });
+    const loadState = imageState.source === source ? imageState.status : "loading";
     return (
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
-            <div className="h-full w-full overflow-hidden rounded-[8px]">
+            <div className="relative h-full w-full overflow-hidden rounded-[8px] bg-black/20">
                 <img
-                    src={node.metadata!.content!}
+                    key={`${source}:${imageState.source === source ? imageState.reloadKey : 0}`}
+                    src={source}
                     alt={node.title}
                     draggable={false}
                     onDragStart={(event) => event.preventDefault()}
-                    className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
+                    onLoad={() => setImageState((current) => ({ source, status: "loaded", reloadKey: current.source === source ? current.reloadKey : 0 }))}
+                    onError={() => setImageState((current) => ({ source, status: "error", reloadKey: current.source === source ? current.reloadKey : 0 }))}
+                    className={`pointer-events-none block h-full w-full select-none transition-opacity duration-150 ${loadState === "loaded" ? "opacity-100" : "opacity-0"} ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
                 />
+                {loadState !== "loaded" ? (
+                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/65 px-5 text-center text-white backdrop-blur-[2px]" data-canvas-no-zoom role="status" aria-live="polite">
+                        {loadState === "loading" ? (
+                            <>
+                                <RefreshCw className="size-5 animate-spin opacity-70" />
+                                <span className="text-[12px] font-medium">图片加载中…</span>
+                            </>
+                        ) : (
+                            <>
+                                <ImageIcon className="size-5 opacity-60" />
+                                <span className="text-[12px] font-medium">图片加载失败</span>
+                                <button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/25 bg-white/10 px-2.5 text-[11px] font-medium transition hover:bg-white/20" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setImageState((current) => ({ source, status: "loading", reloadKey: current.reloadKey + 1 })); }}><RefreshCw className="size-3.5" />重新加载</button>
+                            </>
+                        )}
+                    </div>
+                ) : null}
             </div>
         </BatchFrame>
     );

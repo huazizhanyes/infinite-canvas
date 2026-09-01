@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
 import { App, Button, Tag } from "antd";
-import { Download, FolderPlus, GripVertical, ImagePlus, LoaderCircle, RotateCcw, Save, TriangleAlert, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Download, FolderPlus, GripVertical, ImagePlus, Link2, LoaderCircle, RefreshCw, RotateCcw, Save, TriangleAlert, Unlink, Upload, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
@@ -10,16 +10,19 @@ import { generationImageMetadata } from "@/lib/canvas/asset-extraction-layout";
 import { ASSET_IMAGE_STATE_CHANGED_EVENT } from "@/lib/canvas/asset-storyboard";
 import { canvasBillingApi } from "@/services/api/canvas-billing";
 import { canvasScriptApi } from "@/services/api/canvas-script";
-import { uploadImage } from "@/services/image-storage";
+import { requestEdit } from "@/services/api/image";
+import { resolvePersistedImageUrl, syncStoredImage, uploadImage } from "@/services/image-storage";
 import { getDataUrlByteSize } from "@/lib/image-utils";
+import { inheritedScriptAssetImageMetadata } from "@/lib/canvas/script-asset-snapshot";
 import { useAssetStore, type ImageAsset } from "@/stores/use-asset-store";
-import { modelOptionName } from "@/stores/use-config-store";
+import { modelOptionName, useEffectiveConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType } from "@/types/canvas";
 import type { CanvasNodeContext } from "@/types/canvas-plugin";
 
 export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
     const { message } = App.useApp();
+    const config = useEffectiveConfig();
     const connection = useUserStore((state) => state.connection);
     const assets = useAssetStore((state) => state.assets);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -32,6 +35,10 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
     const [saving, setSaving] = useState(false);
     const [previewOpen, setPreviewOpen] = useState(false);
     const [previewScale, setPreviewScale] = useState(1);
+    const [snapshotUrl, setSnapshotUrl] = useState("");
+    const [snapshotBusy, setSnapshotBusy] = useState(false);
+    const [uploading, setUploading] = useState(false);
+    const [syncing, setSyncing] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const ctxRef = useRef(ctx);
     const resumedBatchRef = useRef<string | undefined>(undefined);
@@ -41,6 +48,7 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
     ctxRef.current = ctx;
     const imageStatus = ctx.node.metadata?.scriptAssetImageStatus || "idle";
     const generating = ["queued", "pending", "running", "generating", "processing"].includes(imageStatus);
+    const snapshot = ctx.node.metadata?.scriptAssetSourceSnapshot;
 
     useEffect(() => setName(ctx.node.title), [ctx.node.title]);
     useEffect(() => setDescription(ctx.node.metadata?.scriptAssetVisualDescription || ""), [ctx.node.metadata?.scriptAssetVisualDescription]);
@@ -52,14 +60,14 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
     useEffect(() => {
         const metadata = ctx.node.metadata;
         const content = metadata?.content;
-        if (!content || metadata?.mediaId || archivingRef.current === content || failedContentRef.current === content) return;
+        if (!content || metadata?.mediaId || metadata?.scriptAssetImageOrigin === "inherited" || archivingRef.current === content || failedContentRef.current === content) return;
         archivingRef.current = content;
         void uploadImage(content)
-            .then((uploaded) => {
+            .then(async (uploaded) => {
                 const mediaStatus = uploaded.mediaStatus || (uploaded.mediaId ? "synced" : "failed");
                 if (mediaStatus === "failed") failedContentRef.current = uploaded.url;
                 else failedContentRef.current = null;
-                ctxRef.current.updateMetadata({
+                await ctxRef.current.persistMetadata({
                     content: uploaded.url,
                     storageKey: uploaded.storageKey,
                     mediaId: uploaded.mediaId,
@@ -68,16 +76,30 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
                     naturalHeight: uploaded.height,
                     bytes: uploaded.bytes,
                     mimeType: uploaded.mimeType,
+                    errorDetails: mediaStatus === "failed" ? "图片已保存在本机，但云端同步失败，请重试" : undefined,
                 });
                 archivingRef.current = null;
             })
-            .catch((error) => {
+            .catch(async (error) => {
                 // 保留当前内容和本地 storageKey；失败状态由 failedContentRef 阻止自动重试。
                 failedContentRef.current = content;
                 archivingRef.current = null;
-                ctxRef.current.updateMetadata({ mediaStatus: "failed", errorDetails: readError(error) });
+                await ctxRef.current.persistMetadata({ mediaStatus: "failed", errorDetails: readError(error) });
             });
     }, [ctx.node.metadata?.content, ctx.node.metadata?.mediaId]);
+    useEffect(() => {
+        if (!snapshot) {
+            setSnapshotUrl("");
+            return;
+        }
+        let canceled = false;
+        void resolvePersistedImageUrl(snapshot.sourceMediaId, snapshot.sourceStorageKey, snapshot.sourceImageUrl).then((url) => {
+            if (!canceled) setSnapshotUrl(url || snapshot.sourceImageUrl);
+        });
+        return () => {
+            canceled = true;
+        };
+    }, [snapshot]);
     useEffect(() => {
         if (!previewOpen) return;
         const closeOnEscape = (event: KeyboardEvent) => {
@@ -145,7 +167,7 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
                 outputFormat: "png",
             });
             if (!quote.canSubmit) throw new Error("图片余额不足，请先充值或调整账户权益");
-            ctx.updateMetadata({ content: undefined, storageKey: undefined, mediaId: undefined, mediaStatus: undefined, naturalWidth: undefined, naturalHeight: undefined, bytes: undefined, mimeType: undefined });
+            ctx.updateMetadata({ content: undefined, storageKey: undefined, mediaId: undefined, mediaStatus: undefined, naturalWidth: undefined, naturalHeight: undefined, bytes: undefined, mimeType: undefined, scriptAssetImageOrigin: undefined });
             const batch = await canvasScriptApi.generateAssets(connection, scriptSetId, [{ assetId }], requestId, selectedModel ? modelOptionName(selectedModel) : undefined, quote.quoteToken);
             resumedBatchRef.current = batch.id;
             const initial = batch.images[0];
@@ -158,8 +180,9 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
             });
             const image = completed.images[0];
             if (!image?.imageUrl) throw new Error(image?.error || "图片生成失败");
-            await archiveGeneratedImage(image.imageUrl, generationImageMetadata(image, completed.id));
-            message.success("资产图片已生成");
+            const synced = await archiveGeneratedImage(image.imageUrl, generationImageMetadata(image, completed.id));
+            if (synced) message.success("资产图片已生成并同步到云端");
+            else message.warning("资产图片已生成并保存在本机，云端同步失败，请点击重试");
         } catch (error) {
             const reason = readError(error);
             ctx.updateMetadata({ scriptAssetImageStatus: "failed", errorDetails: reason });
@@ -172,37 +195,65 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
             message.warning("请选择图片文件");
             return;
         }
+        setUploading(true);
         try {
             const uploaded = await uploadImage(file);
-            failedContentRef.current = null;
-            ctx.updateMetadata({
+            const synced = Boolean(uploaded.mediaId && uploaded.mediaStatus === "synced");
+            failedContentRef.current = synced ? null : uploaded.url;
+            await ctx.persistMetadata({
                 content: uploaded.url,
                 storageKey: uploaded.storageKey,
                 mediaId: uploaded.mediaId,
-                mediaStatus: uploaded.mediaStatus || (uploaded.mediaId ? "synced" : "failed"),
+                mediaStatus: synced ? "synced" : "failed",
                 naturalWidth: uploaded.width,
                 naturalHeight: uploaded.height,
                 bytes: uploaded.bytes,
                 mimeType: uploaded.mimeType,
                 scriptAssetImageStatus: "success",
-                errorDetails: undefined,
+                scriptAssetImageOrigin: "local",
+                errorDetails: synced ? undefined : "图片已保存在本机，但云端同步失败，请重试",
             });
-            message.success("资产图片已上传");
+            if (synced) message.success("资产图片已上传并同步到云端");
+            else message.warning("图片已保存在本机，云端同步失败，请点击重试");
         } catch (error) {
-            ctx.updateMetadata({ mediaStatus: "failed", errorDetails: readError(error) });
             message.error(readError(error));
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    const retryImageSync = async () => {
+        const storageKey = ctx.node.metadata?.storageKey;
+        if (!storageKey || syncing) {
+            if (!storageKey) message.error("本地图片已丢失，请重新上传");
+            return;
+        }
+        setSyncing(true);
+        ctx.updateMetadata({ mediaStatus: "uploading", errorDetails: undefined });
+        try {
+            const synced = await syncStoredImage(storageKey);
+            failedContentRef.current = null;
+            await ctx.persistMetadata({ content: synced.url, mediaId: synced.mediaId, mediaStatus: "synced", errorDetails: undefined });
+            message.success("图片已同步到云端");
+        } catch (error) {
+            const reason = readError(error);
+            await ctx.persistMetadata({ mediaStatus: "failed", errorDetails: reason });
+            message.error(reason);
+        } finally {
+            setSyncing(false);
         }
     };
 
     const archiveGeneratedImage = async (imageUrl: string, metadata: ReturnType<typeof generationImageMetadata>) => {
-        if (!imageUrl || ctxRef.current.node.metadata?.mediaId || archivingRef.current === imageUrl || failedContentRef.current === imageUrl) return;
+        if (!imageUrl || archivingRef.current === imageUrl || failedContentRef.current === imageUrl) return false;
+        if (ctxRef.current.node.metadata?.mediaId) return true;
         archivingRef.current = imageUrl;
         try {
             const uploaded = await uploadImage(imageUrl);
             const mediaStatus = uploaded.mediaStatus || (uploaded.mediaId ? "synced" : "failed");
             if (mediaStatus === "failed") failedContentRef.current = uploaded.url;
             else failedContentRef.current = null;
-            ctxRef.current.updateMetadata({
+            await ctxRef.current.persistMetadata({
                 ...metadata,
                 content: uploaded.url,
                 storageKey: uploaded.storageKey,
@@ -212,14 +263,92 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
                 naturalHeight: uploaded.height,
                 bytes: uploaded.bytes,
                 mimeType: uploaded.mimeType,
+                scriptAssetImageOrigin: "local",
+                errorDetails: mediaStatus === "failed" ? "图片已保存在本机，但云端同步失败，请重试" : undefined,
             });
+            return mediaStatus === "synced";
         } catch (error) {
             failedContentRef.current = imageUrl;
-            ctxRef.current.updateMetadata({ ...metadata, mediaStatus: "failed", errorDetails: readError(error) });
+            await ctxRef.current.persistMetadata({ ...metadata, mediaStatus: "failed", errorDetails: readError(error) });
             throw error;
         } finally {
             archivingRef.current = null;
         }
+    };
+
+    const useSnapshotDirectly = async () => {
+        if (!snapshot || snapshotBusy) return;
+        setSnapshotBusy(true);
+        try {
+            const content = snapshotUrl || (await resolvePersistedImageUrl(snapshot.sourceMediaId, snapshot.sourceStorageKey, snapshot.sourceImageUrl));
+            if (!content) throw new Error("参考图片已不可用");
+            await ctx.persistMetadata(inheritedScriptAssetImageMetadata(snapshot, content));
+            message.success("已使用连线时的图片快照");
+        } catch (error) {
+            message.error(readError(error));
+        } finally {
+            setSnapshotBusy(false);
+        }
+    };
+
+    const generateFromSnapshot = async () => {
+        if (!snapshot || snapshotBusy || generating) return;
+        if (!prompt.trim()) {
+            message.warning("请先填写目标资产的生图提示词");
+            return;
+        }
+        setSnapshotBusy(true);
+        ctx.updateMetadata({ scriptAssetImageStatus: "generating", errorDetails: undefined });
+        try {
+            if (name !== ctx.node.title || description !== ctx.node.metadata?.scriptAssetVisualDescription || prompt !== ctx.node.metadata?.scriptAssetImagePrompt) {
+                const saved = await save();
+                if (!saved) throw new Error("资产描述保存失败");
+            }
+            const source = ctx.getNode(ctx.node.metadata?.assetExtractionNodeId || "");
+            const sourceMeta = source?.metadata;
+            const selectedModel = sourceMeta?.assetExtractionImageModel || ctx.node.metadata?.assetExtractionImageModel || config.imageModel;
+            const referenceUrl = snapshotUrl || (await resolvePersistedImageUrl(snapshot.sourceMediaId, snapshot.sourceStorageKey, snapshot.sourceImageUrl));
+            if (!referenceUrl) throw new Error("参考图片已不可用");
+            const generationConfig = {
+                ...config,
+                model: selectedModel,
+                imageModel: selectedModel,
+                count: "1",
+                size: imageSizeForAspect(sourceMeta?.assetExtractionAspectRatio || "16:9"),
+                quality: sourceMeta?.assetExtractionImageQuality || "standard",
+            };
+            const result = await requestEdit(generationConfig, prompt, [{ id: snapshot.sourceNodeId, name: `${snapshot.sourceTitle}.png`, type: snapshot.mimeType || "image/png", dataUrl: referenceUrl, storageKey: snapshot.sourceStorageKey }]).then((items) => items[0]);
+            if (!result?.dataUrl) throw new Error("图片生成失败");
+            const uploaded = await uploadImage(result.dataUrl);
+            failedContentRef.current = uploaded.mediaId ? null : uploaded.url;
+            await ctx.persistMetadata({
+                content: uploaded.url,
+                storageKey: uploaded.storageKey,
+                mediaId: uploaded.mediaId,
+                mediaStatus: uploaded.mediaStatus || (uploaded.mediaId ? "synced" : "failed"),
+                naturalWidth: uploaded.width,
+                naturalHeight: uploaded.height,
+                bytes: uploaded.bytes,
+                mimeType: uploaded.mimeType,
+                scriptAssetImageStatus: "success",
+                scriptAssetImageOrigin: "derived",
+                errorDetails: uploaded.mediaId ? undefined : "图片已保存在本机，但云端同步失败，请重试",
+            });
+            if (uploaded.mediaId) message.success("已基于快照生成新资产图");
+            else message.warning("新资产图已保存在本机，云端同步失败，请点击重试");
+        } catch (error) {
+            const reason = readError(error);
+            ctx.updateMetadata({ scriptAssetImageStatus: "failed", errorDetails: reason });
+            message.error(reason);
+        } finally {
+            setSnapshotBusy(false);
+        }
+    };
+
+    const clearSnapshot = () => {
+        ctx.updateMetadata({ scriptAssetSourceSnapshot: undefined });
+        setSnapshotUrl("");
+        message.success("参考快照已清除");
     };
 
     const stopCanvasInteraction = (event: SyntheticEvent) => event.stopPropagation();
@@ -245,7 +374,7 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
                 dataUrl,
                 storageKey: metadata.storageKey,
                 mediaId: metadata.mediaId,
-                mediaStatus: metadata.mediaStatus,
+                mediaStatus: metadata.mediaStatus === "confirming" ? "uploading" : metadata.mediaStatus,
                 width: metadata.naturalWidth || ctx.node.width,
                 height: metadata.naturalHeight || ctx.node.height,
                 bytes: metadata.bytes || getDataUrlByteSize(dataUrl),
@@ -318,36 +447,63 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
                 <Button size="small" icon={<Save className="size-3.5" />} loading={saving} onMouseDown={stopCanvasInteraction} onPointerDown={stopCanvasInteraction} onClick={() => void save()}>保存描述</Button>
             </section>
 
-            <section className="relative grid min-h-0 place-items-center overflow-hidden" style={{ background: ctx.theme.node.fill }}>
-                {ctx.node.metadata?.content ? (
-                    <button type="button" className="h-full w-full cursor-grab active:cursor-grabbing" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => { event.stopPropagation(); setPreviewOpen(true); }} aria-label={`拖动${ctx.node.title}节点，双击查看大图`}>
-                        <img src={ctx.node.metadata.content} alt={ctx.node.title} className="h-full w-full object-contain" draggable={false} />
-                    </button>
-                ) : generating ? (
-                    <div className="flex flex-col items-center gap-2 text-xs" style={{ color: ctx.theme.node.muted }}><LoaderCircle className="size-7 animate-spin" /><span>正在生成图片</span></div>
-                ) : imageStatus === "failed" ? (
-                    <div className="flex max-w-[80%] flex-col items-center gap-2 text-center text-xs text-red-500"><TriangleAlert className="size-7" /><span>{ctx.node.metadata?.errorDetails || "图片生成失败"}</span></div>
-                ) : (
-                    <div className="flex flex-col items-center gap-3 text-xs" style={{ color: ctx.theme.node.muted }} onMouseDown={stopCanvasInteraction} onPointerDown={stopCanvasInteraction}>
-                        <ImagePlus className="size-8 opacity-50" />
-                        <span>还没有资产图片</span>
-                        <div className="flex items-center gap-2">
-                            <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>上传图片</Button>
-                            <Button type="primary" size="small" icon={<ImagePlus className="size-3.5" />} onClick={() => void generate()}>生成资产图</Button>
+            <section className="relative flex min-h-0 flex-col overflow-hidden" style={{ background: ctx.theme.node.fill }}>
+                {snapshot ? (
+                    <div className="grid h-[78px] shrink-0 gap-1 border-b p-2" style={{ borderColor: ctx.theme.node.stroke, background: ctx.theme.node.panel }} onMouseDown={stopCanvasInteraction} onPointerDown={stopCanvasInteraction}>
+                        <div className="flex min-w-0 items-center gap-2">
+                            <div className="size-8 shrink-0 overflow-hidden rounded border" style={{ borderColor: ctx.theme.node.stroke }}>
+                                {snapshotUrl ? <img src={snapshotUrl} alt={snapshot.sourceTitle} className="h-full w-full object-cover" /> : <Link2 className="m-1.5 size-4 opacity-50" />}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <div className="truncate text-[10px]" style={{ color: ctx.theme.node.muted }}>参考快照 · {snapshot.sourceTitle}</div>
+                            </div>
+                            <Button type="text" size="small" icon={<Unlink className="size-3.5" />} title="清除参考" aria-label="清除参考" onClick={clearSnapshot} />
+                        </div>
+                        <div className="grid grid-cols-2 gap-1">
+                            <Button size="small" icon={<Link2 className="size-3.5" />} loading={snapshotBusy} onClick={() => void useSnapshotDirectly()}>直接使用</Button>
+                            <Button size="small" icon={<WandSparkles className="size-3.5" />} loading={snapshotBusy || generating} onClick={() => void generateFromSnapshot()}>基于此图生成</Button>
                         </div>
                     </div>
-                )}
-                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void uploadAssetImage(file); }} />
-                <div className="absolute bottom-3 right-3 flex items-center gap-1.5" onMouseDown={stopCanvasInteraction}>
-                    {ctx.node.metadata?.content ? <>
-                        <Button size="small" icon={<Upload className="size-3.5" />} title="替换图片" aria-label="替换图片" onClick={() => fileInputRef.current?.click()} />
-                        <Button size="small" icon={<Download className="size-3.5" />} title="下载图片" aria-label="下载图片" onClick={downloadImage} />
-                        <Button size="small" icon={<FolderPlus className="size-3.5" />} title="保存到我的资产" aria-label="保存到我的资产" onClick={saveToMyAssets} />
-                        <Button size="small" icon={<ImagePlus className="size-3.5" />} title="创建图片节点" aria-label="创建图片节点" onClick={createImageNode} />
-                    </> : null}
-                    {ctx.node.metadata?.content || imageStatus === "failed" ? <Button type="primary" size="small" icon={generating ? <LoaderCircle className="size-3.5 animate-spin" /> : <ImagePlus className="size-3.5" />} loading={generating} onClick={() => void generate()}>
-                        {ctx.node.metadata?.content ? "重新生成" : "重试"}
-                    </Button> : null}
+                ) : null}
+                <div className="relative grid min-h-0 flex-1 place-items-center overflow-hidden">
+                    {ctx.node.metadata?.content && ["uploading", "failed"].includes(ctx.node.metadata?.mediaStatus || "") ? (
+                        <div className="absolute left-2 top-2 z-10 flex items-center gap-1" onMouseDown={stopCanvasInteraction} onPointerDown={stopCanvasInteraction}>
+                            <Tag color={ctx.node.metadata?.mediaStatus === "failed" ? "warning" : "processing"} className="m-0">
+                                {ctx.node.metadata?.mediaStatus === "failed" ? "云端未同步" : "正在同步"}
+                            </Tag>
+                            {ctx.node.metadata?.mediaStatus === "failed" ? <Button size="small" icon={<RefreshCw className="size-3.5" />} loading={syncing} title="重试云端同步" aria-label="重试云端同步" onClick={() => void retryImageSync()} /> : null}
+                        </div>
+                    ) : null}
+                    {ctx.node.metadata?.content ? (
+                        <button type="button" className="h-full w-full cursor-grab active:cursor-grabbing" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => { event.stopPropagation(); setPreviewOpen(true); }} aria-label={`拖动${ctx.node.title}节点，双击查看大图`}>
+                            <img src={ctx.node.metadata.content} alt={ctx.node.title} className="h-full w-full object-contain" draggable={false} />
+                        </button>
+                    ) : generating ? (
+                        <div className="flex flex-col items-center gap-2 text-xs" style={{ color: ctx.theme.node.muted }}><LoaderCircle className="size-7 animate-spin" /><span>正在生成图片</span></div>
+                    ) : imageStatus === "failed" ? (
+                        <div className="flex max-w-[80%] flex-col items-center gap-2 text-center text-xs text-red-500"><TriangleAlert className="size-7" /><span>{ctx.node.metadata?.errorDetails || "图片生成失败"}</span></div>
+                    ) : (
+                        <div className="flex flex-col items-center gap-3 text-xs" style={{ color: ctx.theme.node.muted }} onMouseDown={stopCanvasInteraction} onPointerDown={stopCanvasInteraction}>
+                            <ImagePlus className="size-8 opacity-50" />
+                            <span>还没有资产图片</span>
+                            <div className="flex items-center gap-2">
+                                <Button size="small" icon={<Upload className="size-3.5" />} loading={uploading} onClick={() => fileInputRef.current?.click()}>上传图片</Button>
+                                <Button type="primary" size="small" icon={<ImagePlus className="size-3.5" />} onClick={() => void generate()}>生成资产图</Button>
+                            </div>
+                        </div>
+                    )}
+                    <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void uploadAssetImage(file); }} />
+                    <div className="absolute bottom-3 right-3 flex items-center gap-1.5" onMouseDown={stopCanvasInteraction}>
+                        {ctx.node.metadata?.content ? <>
+                            <Button size="small" icon={<Upload className="size-3.5" />} loading={uploading} title="替换图片" aria-label="替换图片" onClick={() => fileInputRef.current?.click()} />
+                            <Button size="small" icon={<Download className="size-3.5" />} title="下载图片" aria-label="下载图片" onClick={downloadImage} />
+                            <Button size="small" icon={<FolderPlus className="size-3.5" />} title="保存到我的资产" aria-label="保存到我的资产" onClick={saveToMyAssets} />
+                            <Button size="small" icon={<ImagePlus className="size-3.5" />} title="创建图片节点" aria-label="创建图片节点" onClick={createImageNode} />
+                        </> : null}
+                        {ctx.node.metadata?.content || imageStatus === "failed" ? <Button type="primary" size="small" icon={generating ? <LoaderCircle className="size-3.5 animate-spin" /> : <ImagePlus className="size-3.5" />} loading={generating} onClick={() => void generate()}>
+                            {ctx.node.metadata?.content ? "重新生成" : "重试"}
+                        </Button> : null}
+                    </div>
                 </div>
             </section>
         </div>

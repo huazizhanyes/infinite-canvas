@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Clapperboard, LoaderCircle, Square } from "lucide-react";
+import type { CSSProperties } from "react";
+import { ArrowUp, AudioLines, Clapperboard, LoaderCircle, Sparkles, Square } from "lucide-react";
 import { Button, Dropdown, Segmented, Select, Tag, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -17,9 +18,10 @@ import { useUserStore } from "@/stores/use-user-store";
 import { canvasBillingApi, canvasCompactQuoteLabel, type CanvasBillingQuote } from "@/services/api/canvas-billing";
 import { isCanvasVideoModel } from "@/services/api/canvas-video";
 import { CanvasQuoteDisplay } from "./canvas-quote-display";
-import { isNonInterruptibleVideoGeneration } from "@/lib/canvas/canvas-generation-policy";
+import { isNonInterruptibleVideoGeneration, videoModelSelectionPatch } from "@/lib/canvas/canvas-generation-policy";
 import { CanvasConnectionPreviewStrip } from "./canvas-connection-preview-strip";
 import { appendCanvasConnectionMention, removeCanvasConnectionMention, type CanvasConnectionPreview } from "@/lib/canvas/canvas-connection-previews";
+import { canvasPromptCharacterWarning, countCanvasPromptCharacters } from "@/lib/canvas/canvas-prompt-character-count";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 export type CanvasNodeGenerationOptions = { operation?: CanvasTextOperation; sourceScope?: "full" | "selection"; skipConfirmation?: boolean; audioMode?: "synthesis" | "design" };
@@ -81,6 +83,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const [quoteError, setQuoteError] = useState("");
     const quoteEligible = mode === "image" || mode === "video" || (mode === "audio" && !isVoiceDesign && Boolean(prompt.trim()));
     const activeReferences = activeGenerationReferences(mode, prompt, mentionReferences);
+    const promptCharacterCount = mode === "video" ? countCanvasPromptCharacters(prompt) : 0;
+    const promptCharacterWarning = mode === "video" ? canvasPromptCharacterWarning(videoCapabilities?.channel, promptCharacterCount) : null;
 
     useEffect(() => {
         const savedPrompt = savedComposerPrompt(node, isEditingExistingContent);
@@ -208,7 +212,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 const nextQuality = nextCapabilities?.qualities.length && !nextCapabilities.qualities.some((item) => item.quality === config.vquality)
                                     ? nextCapabilities.qualities[0].quality
                                     : undefined;
-                                onConfigChange(node.id, { model, ...(nextQuality ? { vquality: nextQuality } : {}) });
+                                onConfigChange(node.id, videoModelSelectionPatch(model, nextQuality));
                             }}
                             capability="video"
                             compactVideo
@@ -247,8 +251,18 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         <Segmented
                             size="small"
                             className="canvas-media-mode-segmented"
+                            style={{
+                                "--canvas-mode-bg": theme.node.fill,
+                                "--canvas-mode-border": theme.toolbar.border,
+                                "--canvas-mode-active-bg": theme.toolbar.activeBg,
+                                "--canvas-mode-text": theme.node.muted,
+                                "--canvas-mode-active-text": theme.node.text,
+                            } as CSSProperties}
                             value={audioMode}
-                            options={[{ value: "synthesis", label: "音频合成" }, { value: "design", label: "音色设计" }]}
+                            options={[
+                                { value: "synthesis", label: <span className="inline-flex items-center gap-1.5"><AudioLines className="size-3.5" />音频合成</span> },
+                                { value: "design", label: <span className="inline-flex items-center gap-1.5"><Sparkles className="size-3.5" />音色设计</span> },
+                            ]}
                             onChange={(value) => onConfigChange(node.id, { audioMode: value as "synthesis" | "design", ...(value === "design" ? { audioFormat: "wav" } : {}) })}
                         />
                         {isVoiceDesign ? (
@@ -317,8 +331,15 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 className={`thin-scrollbar w-full resize-none border-0 outline-none ${isMediaComposer ? "rounded-none bg-transparent px-1 pb-3 pt-1 text-[15px] leading-6" : "rounded-md px-3.5 py-2.5 text-[13px] leading-5"} ${mode === "video" ? "h-40 min-h-40" : mode === "image" ? "h-36 min-h-36" : mode === "audio" ? "h-28 min-h-28" : "h-20 min-h-20"}`}
                 style={{ background: isMediaComposer ? "transparent" : theme.node.fill, color: theme.node.text }}
                 placeholder={isVoiceDesign ? "描述想要的音色，例如：年轻、温柔、略带沙哑的女声" : mode === "text" && isEditingExistingContent ? textAction === "custom" ? "输入自定义处理要求" : "可选：补充处理要求" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
-                expandedFooter={mode === "image" || mode === "video" ? renderComposerToolbar(true) : undefined}
+                expandedFooter={mode === "video" ? (
+                    <>
+                        <PromptCharacterCount count={promptCharacterCount} color={theme.node.muted} warning={promptCharacterWarning} />
+                        {renderComposerToolbar(true)}
+                    </>
+                ) : mode === "image" ? renderComposerToolbar(true) : undefined}
             />
+
+            {mode === "video" ? <PromptCharacterCount count={promptCharacterCount} color={theme.node.muted} warning={promptCharacterWarning} /> : null}
 
             {mode === "text" && isEditingExistingContent ? <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <Select size="small" value={textAction} onChange={(value) => setTextAction(value as CanvasTextOperation)} options={TEXT_ACTIONS.map((item) => ({ value: item.value, label: item.label }))} />
@@ -329,6 +350,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             {renderComposerToolbar()}
         </div>
     );
+}
+
+function PromptCharacterCount({ count, color, warning }: { count: number; color: string; warning: string | null }) {
+    return <div className="flex h-4 shrink-0 items-center justify-end whitespace-nowrap px-1 text-[10px] font-medium tabular-nums" style={{ color: warning ? "#f59e0b" : color, opacity: warning ? 0.9 : 0.65 }} aria-label={warning || `提示词字数 ${count}`} aria-live="polite">{warning || `${count} 字`}</div>;
 }
 
 function buildQuotePayload(config: AiConfig, mode: CanvasNodeGenerationMode, node: CanvasNodeData, prompt: string, references: CanvasResourceReference[]) {

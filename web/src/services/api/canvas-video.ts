@@ -5,6 +5,7 @@ import { imageToDataUrl } from "@/services/image-storage";
 import { buildApiUrl, modelOptionName, normalizeVideoDuration, resolveModelRequestConfig, videoCapabilitiesOf, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import type { CanvasMediaReferenceSlot } from "@/types/canvas";
 
 export type CanvasVideoTask = {
     id: string;
@@ -46,6 +47,7 @@ export type CanvasVideoTask = {
     canCancel?: boolean;
     queuePosition?: number | null;
     internalStatus?: string;
+    retryOfTaskId?: string | null;
 };
 
 export type CanvasVideoTaskEvent = {
@@ -94,6 +96,7 @@ type CreateInput = {
     referenceImages?: ReferenceImage[];
     referenceVideos?: ReferenceVideo[];
     referenceAudios?: ReferenceAudio[];
+    references?: CanvasMediaReferenceSlot[];
 };
 import { canvasBillingApi } from "./canvas-billing";
 import { useUserStore } from "@/stores/use-user-store";
@@ -110,6 +113,8 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
     const referenceImages = input.referenceImages || [];
     const referenceVideos = input.referenceVideos || [];
     const referenceAudios = input.referenceAudios || [];
+    const references = input.references || buildMediaReferenceSlots(referenceImages, referenceVideos, referenceAudios);
+    if (references.some((reference) => reference.status !== "ready" || !reference.mediaId)) throw new Error("部分参考素材尚未上传完成，请等待上传成功后再生成");
     if (referenceImages.length > capabilities.inputImagesMax) throw new Error(`参考图片最多 ${capabilities.inputImagesMax} 张`);
     if (referenceVideos.length > capabilities.inputVideosMax) throw new Error(`参考视频最多 ${capabilities.inputVideosMax} 个`);
     if (referenceAudios.length > capabilities.inputAudiosMax) throw new Error(`参考音频最多 ${capabilities.inputAudiosMax} 个`);
@@ -120,9 +125,14 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
     assertReferenceCount(referenceVideos.length, modeRule?.inputVideosMin, modeRule?.inputVideosMax, "参考视频");
     assertReferenceCount(referenceAudios.length, modeRule?.inputAudiosMin, modeRule?.inputAudiosMax, "参考音频");
 
-    const imageAssetIds = await uploadAssets(requestConfig, "image", referenceImages, signal);
-    const videoAssetIds = await uploadAssets(requestConfig, "video", referenceVideos, signal);
-    const audioAssetIds = await uploadAssets(requestConfig, "audio", referenceAudios, signal);
+    const structuredMediaIds = new Set(references.map((reference) => reference.mediaId));
+    const legacyImages = referenceImages.filter((reference) => !reference.mediaId || !structuredMediaIds.has(reference.mediaId));
+    const legacyVideos = referenceVideos.filter((reference) => !reference.mediaId || !structuredMediaIds.has(reference.mediaId));
+    const legacyAudios = referenceAudios.filter((reference) => !reference.mediaId || !structuredMediaIds.has(reference.mediaId));
+    if ([...legacyImages, ...legacyVideos, ...legacyAudios].some((reference) => reference.storageKey)) throw new Error("部分参考素材尚未上传完成，请等待上传成功后再生成");
+    const imageAssetIds = await uploadAssets(requestConfig, "image", legacyImages, signal);
+    const videoAssetIds = await uploadAssets(requestConfig, "video", legacyVideos, signal);
+    const audioAssetIds = await uploadAssets(requestConfig, "audio", legacyAudios, signal);
     if (typeof window !== "undefined" && window.localStorage.getItem("canvas.debug.references") === "1") {
         console.log("[Canvas] uploaded asset order", {
             imageSourceIds: referenceImages.map((reference) => reference.id),
@@ -146,6 +156,7 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
         feature: "canvas.video.generate", requestId: input.clientRequestId,
         modelId: modelOptionName(config.model || config.videoModel), prompt: input.prompt,
         aspectRatio, quality, duration, mode, imageAssetIds, videoAssetIds, audioAssetIds,
+        references,
         parameters: config.videoParameters || {},
     };
     const quote = await canvasBillingApi.quote(connection, quotePayload, signal);
@@ -164,6 +175,7 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
             imageAssetIds,
             videoAssetIds,
             audioAssetIds,
+            references,
             parameters: config.videoParameters || {},
             pricingVersion,
             quoteToken: quote.quoteToken,
@@ -188,6 +200,39 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
         }
         throw new Error(readCanvasVideoError(error, "视频任务创建失败"));
     }
+}
+
+export async function retryCanvasVideoTask(config: AiConfig, taskId: string, clientRequestId: string, signal?: AbortSignal) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
+    try {
+        const response = await axios.post<CanvasVideoTask>(canvasVideoUrl(requestConfig, `/tasks/${encodeURIComponent(taskId)}/retry`), {
+            clientRequestId,
+        }, { headers: canvasVideoHeaders(requestConfig), signal });
+        window.dispatchEvent(new CustomEvent("canvas-video-balance-changed"));
+        return response.data;
+    } catch (error) {
+        if (axios.isAxiosError(error) && ["VIDEO_CREDIT_INSUFFICIENT", "WALLET_INSUFFICIENT"].includes((error.response?.data as any)?.code)) {
+            const payload = error.response?.data as any;
+            window.dispatchEvent(new CustomEvent("canvas-video-recharge-required", { detail: payload }));
+            throw new CanvasVideoApiError("WALLET_INSUFFICIENT", "AI 钱包余额不足，请充值后重试", payload);
+        }
+        throw new Error(readCanvasVideoError(error, "原任务重试失败"));
+    }
+}
+
+function buildMediaReferenceSlots(images: ReferenceImage[], videos: ReferenceVideo[], audios: ReferenceAudio[]): CanvasMediaReferenceSlot[] {
+    return [
+        ...images.map((reference) => ({ reference, mediaType: "image" as const })),
+        ...videos.map((reference) => ({ reference, mediaType: "video" as const })),
+        ...audios.map((reference) => ({ reference, mediaType: "audio" as const })),
+    ].flatMap(({ reference, mediaType }, order): CanvasMediaReferenceSlot[] => reference.mediaId ? [{
+        slotId: `${mediaType}:${reference.id}`,
+        sourceNodeId: reference.id,
+        mediaId: reference.mediaId,
+        mediaType,
+        order,
+        status: "ready",
+    }] : []);
 }
 
 export async function listCanvasVideoTasks(config: AiConfig, params: Record<string, unknown> = {}, signal?: AbortSignal) {
@@ -297,13 +342,6 @@ export function canvasVideoResult(task: CanvasVideoTask): CanvasVideoStoredResul
     };
 }
 
-export class CanvasVideoApiError extends Error {
-    constructor(public readonly code: string, message: string, public readonly details?: Record<string, unknown>) {
-        super(message);
-        this.name = "CanvasVideoApiError";
-    }
-}
-
 async function uploadAssets(
     config: AiConfig,
     kind: "image" | "video" | "audio",
@@ -317,10 +355,7 @@ async function uploadAssets(
         form.append("kind", kind);
         form.append("file", file);
         try {
-            const response = await axios.post<{ assetId: string }>(canvasVideoUrl(config, "/assets"), form, {
-                headers: canvasVideoHeaders(config),
-                signal,
-            });
+            const response = await axios.post<{ assetId: string }>(canvasVideoUrl(config, "/assets"), form, { headers: canvasVideoHeaders(config), signal });
             if (!response.data.assetId) throw new Error("素材上传接口未返回 assetId");
             ids.push(response.data.assetId);
         } catch (error) {
@@ -333,8 +368,7 @@ async function uploadAssets(
 async function referenceFile(reference: ReferenceImage | ReferenceVideo | ReferenceAudio, kind: "image" | "video" | "audio") {
     let blob: Blob | null = null;
     if (kind === "image") {
-        const image = reference as ReferenceImage;
-        const url = await imageToDataUrl(image);
+        const url = await imageToDataUrl(reference as ReferenceImage);
         if (url) blob = await fetch(url).then((response) => response.blob());
     } else {
         const media = reference as ReferenceVideo | ReferenceAudio;
@@ -347,6 +381,13 @@ async function referenceFile(reference: ReferenceImage | ReferenceVideo | Refere
     if (!blob?.size) throw new Error(`${kindLabel(kind)}读取失败，请重新上传后重试`);
     const fallbackType = kind === "image" ? "image/png" : kind === "video" ? "video/mp4" : "audio/mpeg";
     return new File([blob], reference.name || `reference.${extensionForMime(blob.type || fallbackType)}`, { type: blob.type || fallbackType });
+}
+
+export class CanvasVideoApiError extends Error {
+    constructor(public readonly code: string, message: string, public readonly details?: Record<string, unknown>) {
+        super(message);
+        this.name = "CanvasVideoApiError";
+    }
 }
 
 function assertReferenceCount(value: number, min: number | undefined, max: number | undefined, label: string) {

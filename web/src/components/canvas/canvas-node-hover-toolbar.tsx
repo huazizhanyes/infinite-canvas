@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Camera, Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
+import { Camera, CopyPlus, Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
@@ -38,6 +38,7 @@ type CanvasNodeHoverToolbarProps = {
     onReversePrompt: (node: CanvasNodeData) => void;
     onRetry: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
+    onDuplicate: (node: CanvasNodeData) => void;
     onDelete: (node: CanvasNodeData) => void;
     extraTools?: CanvasNodeToolbarItem[];
 };
@@ -77,6 +78,7 @@ export function CanvasNodeHoverToolbar({
     onReversePrompt,
     onRetry,
     onToggleFreeResize,
+    onDuplicate,
     onDelete,
     extraTools = [],
 }: CanvasNodeHoverToolbarProps) {
@@ -114,7 +116,7 @@ export function CanvasNodeHoverToolbar({
 
     const activeNode = node;
     const left = viewport.x + (node.position.x + node.width / 2) * viewport.k;
-    const top = viewport.y + node.position.y * viewport.k - 10;
+    const top = viewport.y + node.position.y * viewport.k - 38;
     const isImage = node.type === CanvasNodeType.Image;
     const isVideo = node.type === CanvasNodeType.Video;
     const isAudio = node.type === CanvasNodeType.Audio;
@@ -122,6 +124,7 @@ export function CanvasNodeHoverToolbar({
     const hasVideo = isVideo && Boolean(node.metadata?.content);
     const hasAudio = isAudio && Boolean(node.metadata?.content);
     const isText = node.type === CanvasNodeType.Text;
+    const canDuplicate = node.type !== CanvasNodeType.AssetExtraction && node.type !== CanvasNodeType.ScriptAsset;
     const canOpenDialog = isText || hasImage || isVideo;
     const canRetry = node.metadata?.status === "error";
     const quickImageToolIdSet = new Set(quickImageToolIds);
@@ -201,6 +204,7 @@ export function CanvasNodeHoverToolbar({
                 {toolbarTools.map((tool) => (
                     <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} />
                 ))}
+                {canDuplicate ? <ToolbarAction id="duplicate" title="创建节点副本并保留连线" label="创建副本" icon={<CopyPlus className="size-4" />} onClick={() => onDuplicate(node)} showLabel={showImageToolLabels} /> : null}
                 {isText && mediaMenuOpen ? <div className="absolute bottom-10 right-0 z-40 min-w-[132px] rounded-lg border p-1 text-xs shadow-xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
                     <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-black/5 dark:hover:bg-white/10" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "image"); }}><ImageIcon className="size-3.5" />图片</button>
                     <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-black/5 dark:hover:bg-white/10" onClick={() => { setMediaMenuOpen(false); onGenerateMedia?.(node, "audio"); }}><Music2 className="size-3.5" />配音</button>

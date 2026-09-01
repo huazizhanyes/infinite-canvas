@@ -17,9 +17,10 @@ const TYPE_ORDER = { character: 0, scene: 1, prop: 2 } as const;
 
 export type AssetGenerationTarget = { assetId: string; variantId?: string };
 
-export function buildAssetGenerationTargets(assets: ScriptAsset[], episodeId?: string, includeAll = false): AssetGenerationTarget[] {
+export function buildAssetGenerationTargets(assets: ScriptAsset[], episodeId?: string, includeAll = false, filledAssetIds: ReadonlySet<string> = new Set()): AssetGenerationTarget[] {
     const targets: AssetGenerationTarget[] = [];
     assets.forEach((asset) => {
+        if (filledAssetIds.has(asset.id)) return;
         if (includeAll) {
             if (!asset.image?.imageUrl) targets.push({ assetId: asset.id });
             asset.variants.filter((variant) => !variant.image?.imageUrl).forEach((variant) => targets.push({ assetId: asset.id, variantId: variant.id }));
@@ -87,7 +88,7 @@ export function buildAssetExtractionOps(source: CanvasNodeData, assets: ScriptAs
             y: source.position.y + block * (blockHeight + ASSET_BLOCK_GAP) + row * (ASSET_NODE_HEIGHT + ASSET_NODE_GAP),
         };
         const hasNewImage = Boolean(displayImage?.imageUrl && displayImage?.id && displayImage.id !== existing?.metadata?.scriptAssetImageId);
-        const shouldHydrateImage = Boolean(displayImage?.imageUrl && (!existing?.metadata?.mediaId || hasNewImage) && (existing?.metadata?.mediaStatus !== "failed" || hasNewImage));
+        const shouldHydrateImage = Boolean(displayImage?.imageUrl && (!existing?.metadata?.content || hasNewImage) && (existing?.metadata?.mediaStatus !== "failed" || hasNewImage));
         const metadata: CanvasNodeMetadata = {
             ...existing?.metadata,
             assetExtractionNodeId: source.id,
@@ -107,7 +108,7 @@ export function buildAssetExtractionOps(source: CanvasNodeData, assets: ScriptAs
             assetExtractionImageModel: source.metadata?.assetExtractionImageModel,
             assetExtractionAspectRatio: source.metadata?.assetExtractionAspectRatio,
             assetExtractionImageQuality: source.metadata?.assetExtractionImageQuality,
-            ...(shouldHydrateImage ? { content: displayImage?.imageUrl, mediaId: undefined, storageKey: undefined, mediaStatus: undefined } : {}),
+            ...(shouldHydrateImage ? { content: displayImage?.imageUrl, mediaId: undefined, storageKey: undefined, mediaStatus: undefined, scriptAssetImageOrigin: "local" } : {}),
         };
         if (existing) {
             ops.push({ type: "update_node", id, patch: { title: asset.name, ...(options.repack ? { position, width: ASSET_NODE_WIDTH, height: ASSET_NODE_HEIGHT } : {}) }, metadata });
@@ -156,6 +157,7 @@ export function generationImageMetadata(image: ScriptGenerationImage, batchId?: 
         scriptAssetImageBatchId: batchId,
         scriptAssetImageTaskId: image.taskId,
         scriptAssetImageStatus: image.status,
+        ...(image.imageUrl ? { scriptAssetImageOrigin: "local" as const } : {}),
         errorDetails: failed ? image.error || "图片生成失败" : undefined,
         ...(image.imageUrl ? { content: image.imageUrl } : {}),
     };

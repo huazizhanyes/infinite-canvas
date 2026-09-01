@@ -23,10 +23,57 @@ export type CanvasBillingQuote = {
             cycleMonth: string;
         };
     };
-    breakdown: Record<string, unknown> & { billingUnit?: "SECOND" | "TASK"; tierCode?: "NORMAL" | "SILVER" | "GOLD" | "DIAMOND"; normalUnitPriceMicros?: string; tierUnitPriceMicros?: string; requestedSeconds?: string; originalAmountMicros?: string; savingsMicros?: string; payableAmountMicros?: string };
+    breakdown: Record<string, unknown> & { billingUnit?: "SECOND" | "TASK"; tierCode?: "NORMAL" | "SILVER" | "GOLD" | "DIAMOND"; normalUnitPriceMicros?: string; tierUnitPriceMicros?: string; requestedSeconds?: string; originalAmountMicros?: string; savingsMicros?: string; payableAmountMicros?: string; modelDisplayName?: string; promotionFree?: boolean; promotionLabel?: string; promotionEndsAt?: string };
 };
 
 export type CanvasWalletPlan = { id: string; name: string; amount: string | number; pay_amount_fen?: string; wallet_amount_micros?: string; description?: string };
+
+export type CanvasVideoLedgerRow = {
+    taskId: string;
+    clientRequestId: string;
+    status: string;
+    publicStatus: string;
+    model: string;
+    modelDisplayName: string;
+    mode: string;
+    aspectRatio: string;
+    quality: string;
+    duration: number;
+    outputDuration?: number | null;
+    promptPreview?: string;
+    parameters?: Record<string, unknown>;
+    referenceCounts?: { images: number; videos: number; audios: number };
+    billingStatus: string;
+    billingUnit?: "SECOND" | "TASK";
+    tierCode?: "NORMAL" | "SILVER" | "GOLD" | "DIAMOND" | null;
+    pricingVersion?: number;
+    normalUnitPriceMicros?: string;
+    selectedUnitPriceMicros?: string;
+    originalAmountMicros?: string;
+    savingsMicros?: string;
+    quotedAmountMicros: string;
+    chargedAmountMicros: string;
+    releasedAmountMicros?: string | null;
+    balanceAfterMicros?: string | null;
+    promotionFree?: boolean;
+    promotionLabel?: string | null;
+    promotionEndsAt?: string | null;
+    createdAt: string;
+    updatedAt?: string;
+    submitStartedAt?: string | null;
+    completedAt?: string | null;
+    settledAt?: string | null;
+    refundedAt?: string | null;
+    error?: { code?: string; message?: string } | null;
+};
+
+export type CanvasVideoLedger = {
+    total: number;
+    page: number;
+    limit: number;
+    summary: { availableMicros: string; reservedMicros: string; totalSpentMicros: string };
+    list: CanvasVideoLedgerRow[];
+};
 
 export type AiRechargePackage = {
     id: string;
@@ -94,8 +141,8 @@ export const canvasBillingApi = {
         return data;
     },
     async videoLedger(connection: UserAssetConnection, params: { page?: number; limit?: number; taskId?: string } = {}) {
-        const { data } = await axios.get(`${base(connection)}/video/billing/ledger`, { headers: headers(connection), params });
-        return data as { total: number; page: number; limit: number; summary: { availableMicros: string; reservedMicros: string; totalSpentMicros: string }; list: Array<Record<string, any>> };
+        const { data } = await axios.get<CanvasVideoLedger>(`${base(connection)}/video/billing/ledger`, { headers: headers(connection), params });
+        return data;
     },
     async plans(connection: UserAssetConnection) {
         const { data } = await axios.get<{ items?: CanvasWalletPlan[] }>(`${base(connection)}/wallet/plans`, { headers: headers(connection) });
@@ -143,6 +190,7 @@ export function formatCnyMicros(value: string | number, prefix = "最高 ") {
 
 export function canvasQuoteLabel(quote: CanvasBillingQuote) {
     const benefits = quote.benefitAllocation || [];
+    if (quote.breakdown?.promotionFree) return String(quote.breakdown.promotionLabel || "限时免费");
     if (quote.maximumAmountMicros === "0" && benefits.some((item) => item.type === "ai_text_free")) return "永久免费使用";
     if (quote.maximumAmountMicros === "0" && benefits.some((item) => item.type === "super_text_free")) return "超级会员免费";
     if (quote.maximumAmountMicros === "0" && benefits.length) return "权益额度抵扣";
@@ -152,6 +200,7 @@ export function canvasQuoteLabel(quote: CanvasBillingQuote) {
 export function canvasCompactQuoteLabel(quote: CanvasBillingQuote) {
     const units = Math.max(0, Number(quote.breakdown?.requestUnits || 0));
     const benefits = quote.benefitAllocation || [];
+    if (quote.breakdown?.promotionFree) return "限时免费";
     if (quote.maximumAmountMicros === "0" && benefits.some((item) => item.type === "ai_text_free")) return "永久免费使用";
     if (quote.maximumAmountMicros === "0" && benefits.some((item) => item.type === "super_text_free")) return "免费";
     if (quote.maximumAmountMicros === "0" && benefits.length) return "本次免费";

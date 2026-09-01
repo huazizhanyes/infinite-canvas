@@ -22,12 +22,12 @@ export async function captureVideoFrame(video: HTMLVideoElement, kind: CanvasVid
     await ensureVideoMetadata(video);
     if (!video.videoWidth || !video.videoHeight) throw new Error("无法读取视频画面尺寸");
 
-    const captureSource = kind === "current" ? video : getCaptureVideo(video);
+    const captureSource = getCaptureVideo(video);
 
     try {
         await ensureVideoMetadata(captureSource);
         const captureTime = videoFrameCaptureTime(kind, captureSource.duration, video.currentTime);
-        if (kind !== "current") await seekVideo(captureSource, captureTime);
+        await seekVideo(captureSource, captureTime);
         const canvas = document.createElement("canvas");
         canvas.width = captureSource.videoWidth;
         canvas.height = captureSource.videoHeight;
@@ -37,7 +37,7 @@ export async function captureVideoFrame(video: HTMLVideoElement, kind: CanvasVid
         const blob = await canvasToBlob(canvas);
         return { blob, time: captureTime, width: canvas.width, height: canvas.height };
     } catch (error) {
-        if (captureSource !== video) discardCaptureVideo(captureSource);
+        discardCaptureVideo(captureSource);
         if (error instanceof DOMException && error.name === "SecurityError") throw new Error("视频源不允许跨域截帧，请重新上传视频后再试");
         throw error;
     }
@@ -52,10 +52,10 @@ function getCaptureVideo(source: HTMLVideoElement) {
         return cached;
     }
     const video = document.createElement("video");
+    video.crossOrigin = "anonymous";
     video.preload = "auto";
     video.muted = true;
     video.playsInline = true;
-    if (source.crossOrigin) video.crossOrigin = source.crossOrigin;
     video.src = src;
     video.load();
     captureVideos.set(src, video);

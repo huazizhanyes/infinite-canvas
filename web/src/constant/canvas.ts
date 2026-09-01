@@ -21,7 +21,7 @@ export const NODE_SPECS = {
     [CanvasNodeType.Video]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.Video], metadata: { content: "", status: "idle" } },
     [CanvasNodeType.Audio]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.Audio], metadata: { content: "", status: "idle" } },
     [CanvasNodeType.Group]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.Group], metadata: { status: "idle" } },
-    [CanvasNodeType.AssetExtraction]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.AssetExtraction], metadata: { status: "idle", content: "", assetExtractionStatus: "idle", assetExtractionVisualStyle: "3D漫风格", assetExtractionAspectRatio: "16:9", assetExtractionImageQuality: "standard" } },
+    [CanvasNodeType.AssetExtraction]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.AssetExtraction], metadata: { status: "idle", content: "", assetExtractionRecordName: "未命名", assetExtractionStatus: "idle", assetExtractionVisualStyle: "3D漫风格", assetExtractionAspectRatio: "16:9", assetExtractionImageQuality: "standard" } },
     [CanvasNodeType.ScriptAsset]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.ScriptAsset], metadata: { status: "idle", scriptAssetImageStatus: "idle" } },
     [CanvasNodeType.AssetStoryboard]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.AssetStoryboard], metadata: { status: "idle" } },
 } satisfies Record<CanvasNodeType, CanvasNodeSpec>;

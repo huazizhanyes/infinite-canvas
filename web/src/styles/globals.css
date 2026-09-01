@@ -773,20 +773,43 @@
 
     .canvas-media-mode-segmented.ant-segmented {
         flex: 0 0 auto;
-        background: transparent;
-        border: 1px solid rgba(120, 113, 108, 0.24);
-        border-radius: 8px;
-        padding: 2px;
+        height: 36px;
+        background: var(--canvas-mode-bg);
+        border: 1px solid var(--canvas-mode-border);
+        border-radius: 9px;
+        padding: 3px;
+        box-shadow: none;
     }
 
     .canvas-media-mode-segmented.ant-segmented .ant-segmented-item {
         border-radius: 6px;
         min-height: 30px;
+        color: var(--canvas-mode-text);
+        transition: background-color 160ms ease, color 160ms ease;
     }
 
     .canvas-media-mode-segmented.ant-segmented .ant-segmented-item-label {
-        line-height: 30px;
-        padding-inline: 9px;
+        display: flex;
+        height: 28px;
+        align-items: center;
+        line-height: 28px;
+        padding-inline: 10px;
+        font-size: 12px;
+        font-weight: 500;
+    }
+
+    .canvas-media-mode-segmented.ant-segmented .ant-segmented-thumb,
+    .canvas-media-mode-segmented.ant-segmented .ant-segmented-item-selected {
+        background: var(--canvas-mode-active-bg);
+        box-shadow: none;
+    }
+
+    .canvas-media-mode-segmented.ant-segmented .ant-segmented-item-selected {
+        color: var(--canvas-mode-active-text);
+    }
+
+    .canvas-media-mode-segmented.ant-segmented .ant-segmented-item:not(.ant-segmented-item-selected):hover {
+        color: var(--canvas-mode-active-text);
     }
 
     @container (max-width: 520px) {

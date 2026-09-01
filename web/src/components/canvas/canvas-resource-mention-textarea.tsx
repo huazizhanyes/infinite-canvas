@@ -7,7 +7,7 @@ import { ChevronRight, FileText, FolderOpen, Image as ImageIcon, Maximize2, Musi
 import { canvasThemes } from "@/lib/canvas-theme";
 import { isImeComposing, isPlainEnterKey } from "@/lib/keyboard-event";
 import { useThemeStore } from "@/stores/use-theme-store";
-import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { parseCanvasResourceMentionTokens, serializeCanvasResourceMention, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 
 type MentionState = {
     start: number;
@@ -593,14 +593,40 @@ function MentionPlaceholderText({ value }: { value: string }) {
 }
 
 function richEditorHtml(value: string, references: CanvasResourceReference[]) {
+    const tokens = parseCanvasResourceMentionTokens(value);
+    if (tokens.length) {
+        let html = "";
+        let cursor = 0;
+        tokens.forEach((token) => {
+            html += legacyRichEditorHtml(value.slice(cursor, token.start), references);
+            const reference = references.find((item) => item.nodeId === token.nodeId);
+            html += reference && reference.active
+                ? mentionTokenHtml(reference)
+                : missingMentionTokenHtml(token.nodeId, reference?.label || token.label);
+            cursor = token.end;
+        });
+        return html + legacyRichEditorHtml(value.slice(cursor), references);
+    }
+    return legacyRichEditorHtml(value, references);
+}
+
+function legacyRichEditorHtml(value: string, references: CanvasResourceReference[]) {
     const labels = references.filter((item) => item.active).map((item) => item.label).sort((left, right) => right.length - left.length);
     if (!labels.length) return escapeHtml(value);
     const parts = value.split(new RegExp(`(@?(?:${labels.map(escapeRegExp).join("|")}))`, "g"));
     return parts.map((part) => {
         const reference = references.find((item) => item.label === (part.startsWith("@") ? part.slice(1) : part) && item.active);
         if (!reference) return escapeHtml(part);
-        return `<span contenteditable="false" data-mention-id="${escapeAttribute(reference.id)}" data-mention-label="${escapeAttribute(reference.label)}" title="${escapeAttribute(reference.title || reference.label)}" class="${mentionTokenClassName}">${mentionPreviewHtml(reference)}<span class="${mentionTokenLabelClassName}">${escapeHtml(reference.label)}</span></span>`;
+        return mentionTokenHtml(reference);
     }).join("");
+}
+
+function mentionTokenHtml(reference: CanvasResourceReference) {
+    return `<span contenteditable="false" data-mention-id="${escapeAttribute(reference.nodeId)}" data-mention-label="${escapeAttribute(reference.label)}" title="${escapeAttribute(reference.title || reference.label)}" class="${mentionTokenClassName}">${mentionPreviewHtml(reference)}<span class="${mentionTokenLabelClassName}">${escapeHtml(reference.label)}</span></span>`;
+}
+
+function missingMentionTokenHtml(nodeId: string, label: string) {
+    return `<span contenteditable="false" data-mention-id="${escapeAttribute(nodeId)}" data-mention-label="${escapeAttribute(label)}" title="引用已失效" class="${mentionTokenClassName} !bg-red-500/15 !text-red-400"><span class="${mentionTokenLabelClassName}">${escapeHtml(label)}（引用已失效）</span></span>`;
 }
 
 const mentionTokenClassName = "mx-0.5 inline-flex max-w-[240px] min-w-0 select-none items-center gap-1 rounded-md bg-[#2f80ff]/16 px-1 align-middle text-[13px] font-medium leading-7 text-[#2f80ff]";
@@ -617,7 +643,7 @@ function insertRichMention(editor: HTMLElement, range: Range, reference: CanvasR
     range.deleteContents();
     const token = document.createElement("span");
     token.contentEditable = "false";
-    token.dataset.mentionId = reference.id;
+    token.dataset.mentionId = reference.nodeId;
     token.dataset.mentionLabel = reference.label;
     token.title = reference.title || reference.label;
     token.className = mentionTokenClassName;
@@ -644,7 +670,7 @@ function serializeEditor(editor: HTMLElement) {
 function serializeEditorNode(node: Node): string {
     if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
     if (!(node instanceof HTMLElement)) return Array.from(node.childNodes).map(serializeEditorNode).join("");
-    if (node.dataset.mentionId) return `@${node.dataset.mentionLabel || node.lastElementChild?.textContent || node.textContent || ""}`;
+    if (node.dataset.mentionId) return serializeCanvasResourceMention(node.dataset.mentionId, node.dataset.mentionLabel || node.lastElementChild?.textContent || node.textContent || "");
     if (node.tagName === "BR") return "\n";
     const content = Array.from(node.childNodes).map(serializeEditorNode).join("");
     return node !== node.ownerDocument?.body && (node.tagName === "DIV" || node.tagName === "P") ? `${content}\n` : content;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createModelChannel, encodeChannelModel, normalizeChannelModels, normalizeVideoDuration, videoCapabilitiesOf, type VideoModelCapabilities } from "./use-config-store";
+import { createModelChannel, encodeChannelModel, modelIconOf, normalizeChannelModels, normalizeVideoDuration, videoCapabilitiesOf, visibleCanvasVideoModes, type VideoModelCapabilities } from "./use-config-store";
 import { defaultConfig } from "./use-config-store";
 
 describe("backend video model capabilities", () => {
@@ -28,6 +28,18 @@ describe("backend video model capabilities", () => {
         const config = { ...defaultConfig, channels: [channel], models: [encodeChannelModel(channel.id, "opaque-model-id")] };
 
         expect(videoCapabilitiesOf(config, encodeChannelModel(channel.id, "opaque-model-id"))).toEqual(videoCapabilities);
+    });
+
+    it("preserves the server-provided video model icon for the picker", () => {
+        const value = encodeChannelModel("sucai", "seedance-2.0");
+        const channel = createModelChannel({ id: "sucai", models: [{ name: "seedance-2.0", capability: "video", icon: "clapperboard", iconUrl: "https://cdn.example.com/seedance.svg" }] });
+        const config = { ...defaultConfig, channels: [channel], models: [value] };
+
+        expect(modelIconOf(config, value)).toEqual({ capability: "video", icon: "clapperboard", iconUrl: "https://cdn.example.com/seedance.svg" });
+    });
+
+    it("temporarily hides first-frame and first-last-frame generation modes", () => {
+        expect(visibleCanvasVideoModes(["text2video", "image2video", "frames2video", "first-frame-to-video"])).toEqual(["text2video", "image2video"]);
     });
 
     it("never normalizes a generated duration below five seconds", () => {

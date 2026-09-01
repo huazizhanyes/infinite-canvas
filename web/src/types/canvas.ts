@@ -28,6 +28,22 @@ export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
 export type CanvasTextOperation = "continue" | "polish" | "expand" | "shorten" | "summarize" | "translate" | "custom";
 
+export type ScriptAssetImageSnapshot = {
+    sourceNodeId: string;
+    sourceAssetId?: string;
+    sourceImageId?: string;
+    sourceStorageKey?: string;
+    sourceMediaId?: string;
+    sourceImageUrl: string;
+    sourceTitle: string;
+    sourceType: "character" | "scene" | "prop";
+    mimeType?: string;
+    width?: number;
+    height?: number;
+    bytes?: number;
+    capturedAt: number;
+};
+
 export type AssetStoryboardShot = {
     id: string;
     index: number;
@@ -110,6 +126,8 @@ export type CanvasNodeMetadata = {
     references?: string[];
     /** Stable canvas resource node order for media inputs. */
     referenceOrder?: string[];
+    /** Immutable media identities submitted with the most recent generation. */
+    referenceSlots?: CanvasMediaReferenceSlot[];
     /** Exact image reference node ids used by the most recent upstream submission. */
     submittedReferenceOrder?: string[];
     submittedReferenceLabelMap?: Record<string, string>;
@@ -126,7 +144,7 @@ export type CanvasNodeMetadata = {
     imageBatchExpanded?: boolean;
     storageKey?: string;
     mediaId?: string;
-    mediaStatus?: "uploading" | "synced" | "missing" | "failed";
+    mediaStatus?: "uploading" | "confirming" | "synced" | "missing" | "failed";
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
@@ -149,6 +167,7 @@ export type CanvasNodeMetadata = {
     scriptAssetImageTaskId?: string;
     scriptAssetGroupType?: "character" | "scene" | "prop";
     assetExtractionNodeId?: string;
+    assetExtractionRecordName?: string;
     assetExtractionEpisodeId?: string;
     assetExtractionRunId?: string;
     assetExtractionStatus?: "idle" | "analyzing" | "success" | "error";
@@ -178,6 +197,8 @@ export type CanvasNodeMetadata = {
     scriptAssetVisualDescription?: string;
     scriptAssetImagePrompt?: string;
     scriptAssetImageStatus?: string;
+    scriptAssetSourceSnapshot?: ScriptAssetImageSnapshot;
+    scriptAssetImageOrigin?: "local" | "inherited" | "derived";
     scriptAssetStale?: boolean;
     scriptAssetLayoutSlot?: number;
     scriptAssetEpisodeIds?: string[];
@@ -203,6 +224,15 @@ export type CanvasConnection = {
     id: string;
     fromNodeId: string;
     toNodeId: string;
+};
+
+export type CanvasMediaReferenceSlot = {
+    slotId: string;
+    sourceNodeId: string;
+    mediaId: string | null;
+    mediaType: "image" | "video" | "audio";
+    order: number;
+    status: "ready" | "uploading" | "failed" | "missing";
 };
 
 export type CanvasAssistantReference = {

@@ -142,4 +142,9 @@ describe("buildAssetGenerationTargets", () => {
         item.variants[0].image = { id: "img-v2", imageUrl: "https://example.test/v2.png", status: "success", selected: true };
         expect(buildAssetGenerationTargets([item], "ep-2")).toEqual([]);
     });
+
+    it("跳过已直接复用或基于快照生成图片的本地资产节点", () => {
+        const missing = { ...asset("c1", "character", "林夏"), episodeIds: ["ep-1"], occurrences: [{ episodeId: "ep-1", matchStatus: "new" }] } satisfies ScriptAsset;
+        expect(buildAssetGenerationTargets([missing], "ep-1", false, new Set(["c1"]))).toEqual([]);
+    });
 });

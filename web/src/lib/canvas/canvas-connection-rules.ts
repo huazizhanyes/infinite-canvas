@@ -1,6 +1,6 @@
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type Position } from "@/types/canvas";
 
-export type CanvasConnectionIssue = "missing-node" | "self" | "group" | "incompatible" | "duplicate" | "reverse-duplicate" | "cycle";
+export type CanvasConnectionIssue = "missing-node" | "self" | "group" | "media-not-ready" | "incompatible" | "duplicate" | "reverse-duplicate" | "cycle";
 
 export type CanvasConnectionValidation =
     | { ok: true }
@@ -13,13 +13,14 @@ export function orientCanvasConnection(startNodeId: string, otherNodeId: string,
         : { fromNodeId: otherNodeId, toNodeId: startNodeId };
 }
 
-export function validateCanvasConnection(nodes: CanvasNodeData[], connections: CanvasConnection[], fromNodeId: string, toNodeId: string, options?: { allowIncompatible?: boolean }): CanvasConnectionValidation {
+export function validateCanvasConnection(nodes: CanvasNodeData[], connections: CanvasConnection[], fromNodeId: string, toNodeId: string, options?: { allowIncompatible?: boolean; allowUnavailableMedia?: boolean }): CanvasConnectionValidation {
     const nodeById = new Map(nodes.map((node) => [node.id, node]));
     const from = nodeById.get(fromNodeId);
     const to = nodeById.get(toNodeId);
     if (!from || !to) return invalid("missing-node", "连接节点不存在");
     if (from.id === to.id) return invalid("self", "节点不能连接自身");
     if (from.type === CanvasNodeType.Group || to.type === CanvasNodeType.Group) return invalid("group", "分组节点不能建立数据连接");
+    if (!options?.allowUnavailableMedia && from.metadata?.storageKey && from.metadata.mediaStatus !== "synced") return invalid("media-not-ready", "媒体尚未上传完成");
 
     const duplicate = connections.find((connection) => connection.fromNodeId === fromNodeId && connection.toNodeId === toNodeId);
     if (duplicate) return invalid("duplicate", "这两个节点已经连接");
@@ -39,7 +40,7 @@ export function appendValidCanvasConnections(nodes: CanvasNodeData[], connection
 /** Normalize persisted legacy graphs without guessing or reversing ambiguous edges. */
 export function normalizePersistedCanvasConnections(nodes: CanvasNodeData[], connections: CanvasConnection[]) {
     return connections.reduce<CanvasConnection[]>((current, connection) => {
-        return validateCanvasConnection(nodes, current, connection.fromNodeId, connection.toNodeId, { allowIncompatible: true }).ok ? [...current, connection] : current;
+        return validateCanvasConnection(nodes, current, connection.fromNodeId, connection.toNodeId, { allowIncompatible: true, allowUnavailableMedia: true }).ok ? [...current, connection] : current;
     }, []);
 }
 
@@ -63,10 +64,15 @@ function hasDirectedPath(connections: CanvasConnection[], startNodeId: string, t
 }
 
 function isCompatibleConnection(from: CanvasNodeData, to: CanvasNodeData) {
+    if (to.type === CanvasNodeType.ScriptAsset) {
+        if (from.type === CanvasNodeType.AssetExtraction) return true;
+        return from.type === CanvasNodeType.ScriptAsset && Boolean(from.metadata?.scriptAssetType) && from.metadata?.scriptAssetType === to.metadata?.scriptAssetType;
+    }
     return isCompatibleCanvasNodeTypes(from.type, to.type);
 }
 
 export function isCompatibleCanvasNodeTypes(fromType: CanvasNodeData["type"], toType: CanvasNodeData["type"]) {
+    if (toType === CanvasNodeType.ScriptAsset) return fromType === CanvasNodeType.AssetExtraction || fromType === CanvasNodeType.ScriptAsset;
     const outputKind = knownOutputKind(fromType);
     const acceptedKinds = knownAcceptedKinds(toType);
     return !outputKind || !acceptedKinds || acceptedKinds.includes(outputKind);
@@ -76,6 +82,20 @@ export function isCompatibleCanvasConnectionFromHandle(startType: CanvasNodeData
     return startHandleType === "source"
         ? isCompatibleCanvasNodeTypes(startType, otherType)
         : isCompatibleCanvasNodeTypes(otherType, startType);
+}
+
+export function canvasConnectionDropPriority(node: CanvasNodeData, point: Position, anchor: Position, scale: number, paddingPx = 32, handleRadiusPx = 16) {
+    const safeScale = Math.max(scale, 0.05);
+    const padding = paddingPx / safeScale;
+    const handleRadius = handleRadiusPx / safeScale;
+    const dx = point.x - anchor.x;
+    const dy = point.y - anchor.y;
+    const distance = dx * dx + dy * dy;
+    const hitsHandle = distance <= handleRadius * handleRadius;
+    const hitsInside = point.x >= node.position.x && point.x <= node.position.x + node.width && point.y >= node.position.y && point.y <= node.position.y + node.height;
+    const hitsExpanded = point.x >= node.position.x - padding && point.x <= node.position.x + node.width + padding && point.y >= node.position.y - padding && point.y <= node.position.y + node.height + padding;
+    if (!hitsExpanded) return null;
+    return (hitsHandle ? 0 : hitsInside ? 1 : 2) * 1_000_000_000_000 + distance;
 }
 
 function knownOutputKind(type: CanvasNodeData["type"]) {

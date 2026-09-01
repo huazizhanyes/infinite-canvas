@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CanvasNodeType } from "@/types/canvas";
-import { isNonInterruptibleVideoGeneration } from "./canvas-generation-policy";
+import { isNonInterruptibleVideoGeneration, videoModelSelectionPatch } from "./canvas-generation-policy";
 
 describe("isNonInterruptibleVideoGeneration", () => {
     it("locks a running video task", () => {
@@ -16,5 +16,12 @@ describe("isNonInterruptibleVideoGeneration", () => {
         expect(isNonInterruptibleVideoGeneration(CanvasNodeType.Image, true)).toBe(false);
         expect(isNonInterruptibleVideoGeneration(CanvasNodeType.Text, true)).toBe(false);
         expect(isNonInterruptibleVideoGeneration(CanvasNodeType.Audio, true)).toBe(false);
+    });
+});
+
+describe("videoModelSelectionPatch", () => {
+    it("resets every newly selected video model to five seconds", () => {
+        expect(videoModelSelectionPatch("video-model-b")).toEqual({ model: "video-model-b", seconds: "5" });
+        expect(videoModelSelectionPatch("video-model-c", "1080p")).toEqual({ model: "video-model-c", seconds: "5", vquality: "1080p" });
     });
 });

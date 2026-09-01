@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Result, Spin } from "antd";
 
-import { createModelChannel, encodeChannelModel, modelOptionsFromChannels, useConfigStore, rehydrateConfigForAccount } from "@/stores/use-config-store";
+import { createModelChannel, encodeChannelModel, modelOptionsFromChannels, useConfigStore, rehydrateConfigForAccount, visibleCanvasVideoModes } from "@/stores/use-config-store";
 import { initializeSucaiCanvasSync } from "@/services/sucai-canvas-sync";
 import { stopSucaiCanvasSync } from "@/services/sucai-canvas-sync";
 import { initializeCanvasAssetSync, stopCanvasAssetSync } from "@/services/canvas-asset-sync";
@@ -97,7 +97,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 qualities: Array.isArray(item.qualities) ? item.qualities : [],
                 aspectRatios: Array.isArray(item.aspect_ratios) ? item.aspect_ratios : [],
                 duration: item.duration || {},
-                modes: Array.isArray(item.modes) ? item.modes : [],
+                modes: visibleCanvasVideoModes(item.modes),
                 inputImagesMax: Number(item.input_images_max || 0),
                 inputVideosMax: Number(item.input_videos_max || 0),
                 inputAudiosMax: Number(item.input_audios_max || 0),
@@ -105,6 +105,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 modeRules: Array.isArray(item.modeRules || item.mode_rules) ? (item.modeRules || item.mode_rules) : [],
                 faceFriendly: Boolean(item.faceFriendly || item.face_friendly || item.channel === "59" && item.upstream_model === "minimax-h3"),
                 displayNotice: item.displayNotice || item.display_notice || null,
+                freePromotion: item.free_promotion || null,
             },
         });
         const refreshVideoPricing = () => {
@@ -159,7 +160,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 if (textModelValue) updateConfig("textModel", textModelValue);
                 if (videoModelValue) {
                     updateConfig("videoModel", videoModelValue);
-                    updateConfig("videoMode", videoModel.modes?.[0] || "text2video");
+                    updateConfig("videoMode", visibleCanvasVideoModes(videoModel.modes)[0] || "text2video");
                     updateConfig("size", videoModel.aspect_ratios?.[0] || "16:9");
                     updateConfig("vquality", videoModel.qualities?.[0]?.quality || "720p");
                     updateConfig("videoSeconds", String(videoModel.duration?.options?.[0] || videoModel.duration?.min || 5));

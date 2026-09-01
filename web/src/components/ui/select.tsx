@@ -64,8 +64,9 @@ function SelectContent({
   children,
   position = "item-aligned",
   align = "center",
+  hideScrollButtons = false,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content>) {
+}: React.ComponentProps<typeof SelectPrimitive.Content> & { hideScrollButtons?: boolean }) {
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -76,17 +77,18 @@ function SelectContent({
         align={align}
         {...props}
       >
-        <SelectScrollUpButton />
+        {!hideScrollButtons ? <SelectScrollUpButton /> : null}
         <SelectPrimitive.Viewport
           data-position={position}
           className={cn(
             "data-[position=popper]:h-(--radix-select-trigger-height) data-[position=popper]:w-full data-[position=popper]:min-w-(--radix-select-trigger-width)",
-            position === "popper" && ""
+            position === "popper" && "",
+            hideScrollButtons && "thin-scrollbar max-h-[18rem] overflow-y-auto"
           )}
         >
           {children}
         </SelectPrimitive.Viewport>
-        <SelectScrollDownButton />
+        {!hideScrollButtons ? <SelectScrollDownButton /> : null}
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
   )

@@ -8,6 +8,12 @@ import { localForageStorage } from "@/lib/localforage-storage";
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 export const MIN_VIDEO_DURATION_SECONDS = 5;
+const TEMPORARILY_HIDDEN_VIDEO_MODES = new Set(["frames2video", "first-frame-to-video"]);
+
+export function visibleCanvasVideoModes(modes: unknown): string[] {
+    if (!Array.isArray(modes)) return [];
+    return modes.map(String).filter((mode) => !TEMPORARILY_HIDDEN_VIDEO_MODES.has(mode));
+}
 
 export type VideoParameterOption = { value: string | number | boolean; label?: string };
 export type VideoParameterDefinition = {
@@ -55,6 +61,7 @@ export type VideoModelCapabilities = {
     modeRules?: VideoModeRule[];
     faceFriendly?: boolean;
     displayNotice?: string | null;
+    freePromotion?: { active: boolean; label: string; startsAt?: string | null; endsAt?: string | null } | null;
 };
 
 export function normalizeVideoDuration(value: string | number | undefined, range?: VideoModelCapabilities["duration"] | null) {

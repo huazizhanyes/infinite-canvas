@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildCanvasResourceReferences, buildNodeMentionReferences, mentionedCanvasResourceReferences, mergeCanvasReferenceOrder, normalizeCanvasResourceMentions } from "@/lib/canvas/canvas-resource-references";
+import { buildCanvasResourceReferences, buildNodeMentionReferences, mentionedCanvasResourceReferences, mergeCanvasReferenceOrder, migrateCanvasResourceMentions, missingCanvasResourceMentions, normalizeCanvasResourceMentions, plainCanvasResourceMentions, remapCanvasResourceMentionNodeIds, serializeCanvasResourceMention } from "@/lib/canvas/canvas-resource-references";
 import type { Asset } from "@/stores/use-asset-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 
@@ -27,6 +27,36 @@ describe("normalizeCanvasResourceMentions", () => {
         const repaired = normalizeCanvasResourceMentions("男主声音参考音频@♫@♫@♪@音频1 继续生成", audioReferences);
         expect(repaired).toBe("男主声音参考音频@音频1 继续生成");
         expect(normalizeCanvasResourceMentions(repaired, audioReferences)).toBe(repaired);
+    });
+
+    it("keeps persisted node ids while exposing a clean upstream prompt", () => {
+        const token = serializeCanvasResourceMention("image-b", "图片2");
+        expect(normalizeCanvasResourceMentions(`${token} 转身`, references)).toBe(`${token} 转身`);
+        expect(plainCanvasResourceMentions(`${token} 转身`)).toBe("@图片2 转身");
+    });
+
+    it("migrates an unambiguous legacy mention to its immutable node id", () => {
+        expect(migrateCanvasResourceMentions("@图片2 转身", [
+            { nodeId: "image-a", label: "图片1", active: true },
+            { nodeId: "image-b", label: "图片2", active: true },
+        ])).toBe(`${serializeCanvasResourceMention("image-b", "图片2")} 转身`);
+    });
+
+    it("migrates legacy mentions around an existing immutable mention", () => {
+        const existing = serializeCanvasResourceMention("image-a", "图片1");
+        expect(migrateCanvasResourceMentions(`${existing} 看向@图片2`, [
+            { nodeId: "image-a", label: "图片1", active: true },
+            { nodeId: "image-b", label: "图片2", active: true },
+        ])).toBe(`${existing} 看向${serializeCanvasResourceMention("image-b", "图片2")}`);
+    });
+
+    it("remaps copied structured mentions and preserves external references", () => {
+        const copied = serializeCanvasResourceMention("image-a", "图片1");
+        const external = serializeCanvasResourceMention("image-b", "图片2");
+
+        expect(remapCanvasResourceMentionNodeIds(`${copied} 追着 ${external}`, new Map([["image-a", "copy-a"]]))).toBe(
+            `${serializeCanvasResourceMention("copy-a", "图片1")} 追着 ${external}`,
+        );
     });
 });
 
@@ -110,6 +140,22 @@ describe("buildNodeMentionReferences", () => {
         const references = buildNodeMentionReferences(target, [target, ...images], connections);
 
         expect(mentionedCanvasResourceReferences("@图片10 出现", references).map((reference) => reference.nodeId)).toEqual(["image-10"]);
+    });
+
+    it("does not rebind a persisted middle mention after its source node is deleted", () => {
+        const target: CanvasNodeData = { id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 240, metadata: { referenceOrder: ["a", "b", "c"] } };
+        const image = (id: string): CanvasNodeData => ({ id, type: CanvasNodeType.Image, title: id, position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: `blob:${id}` } });
+        const nodesAfterDeletion = [target, image("a"), image("c")];
+        const connections = [
+            { id: "a", fromNodeId: "a", toNodeId: "video" },
+            { id: "c", fromNodeId: "c", toNodeId: "video" },
+        ];
+        const currentReferences = buildNodeMentionReferences(target, nodesAfterDeletion, connections);
+        const prompt = `${serializeCanvasResourceMention("b", "图片2")} 向前走`;
+
+        expect(currentReferences.map((reference) => [reference.label, reference.nodeId])).toEqual([["图片1", "a"], ["图片2", "c"]]);
+        expect(mentionedCanvasResourceReferences(prompt, currentReferences)).toEqual([]);
+        expect(missingCanvasResourceMentions(prompt, currentReferences)).toEqual([expect.objectContaining({ nodeId: "b", label: "图片2" })]);
     });
 
     it("prefers a restored local image over an expired asset cover", () => {

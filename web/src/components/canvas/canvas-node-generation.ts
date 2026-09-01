@@ -2,7 +2,7 @@ import type { AiTextMessage } from "@/services/api/image";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
-import { getGenerationResourceNodes, mentionedCanvasResourceReferences } from "@/lib/canvas/canvas-resource-references";
+import { getGenerationResourceNodes, mentionedCanvasResourceReferences, missingCanvasResourceMentions, plainCanvasResourceMentions, resolveCanvasResourceMentionLabels } from "@/lib/canvas/canvas-resource-references";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import type { CanvasGraphIndex } from "@/lib/canvas/canvas-graph-index";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
@@ -61,9 +61,10 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     const referenceVideos = inputs.map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
     const referenceAudios = inputs.map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
     const submission = targetNode?.type === CanvasNodeType.Video ? buildVideoSubmissionPrompt(prompt, inputs, mentionReferences) : { prompt, selectedNodeIds: [], ignoredLabels: [], labelMapping: {} };
+    const plainPrompt = plainCanvasResourceMentions(prompt);
 
     return {
-        prompt: upstreamText ? `${prompt}\n\n${upstreamText}` : prompt,
+        prompt: upstreamText ? `${plainPrompt}\n\n${upstreamText}` : plainPrompt,
         submissionPrompt: upstreamText ? `${submission.prompt}\n\n${upstreamText}` : submission.prompt,
         referenceImages,
         referenceVideos,
@@ -95,6 +96,7 @@ function buildMentionGenerationInputs(prompt: string, references: CanvasResource
                         type: reference.mimeType || "image/png",
                         dataUrl: reference.previewUrl || "",
                         storageKey: reference.storageKey,
+                        ...(reference.mediaId ? { mediaId: reference.mediaId } : {}),
                     },
                     label: reference.label,
                 }];
@@ -110,6 +112,7 @@ function buildMentionGenerationInputs(prompt: string, references: CanvasResource
                         type: reference.mimeType || "video/mp4",
                         url: reference.previewUrl || "",
                         storageKey: reference.storageKey,
+                        ...(reference.mediaId ? { mediaId: reference.mediaId } : {}),
                         bytes: reference.bytes,
                         width: reference.width,
                         height: reference.height,
@@ -131,8 +134,9 @@ function buildVideoSubmissionPrompt(prompt: string, inputs: NodeGenerationInput[
         if (label) labelMapping[label] = imageReferenceLabel(index);
     });
     const ignoredLabels = mentionedCanvasResourceReferences(prompt, references)
-        .filter((reference) => reference.kind === "image" && !reference.active)
+        .filter((reference) => reference.kind !== "text" && !reference.active)
         .map((reference) => reference.label);
+    ignoredLabels.push(...missingCanvasResourceMentions(prompt, references).map((mention) => mention.label));
     return {
         prompt: rewriteVideoImageMentions(prompt, references, labelMapping, new Set(ignoredLabels)),
         selectedNodeIds,
@@ -144,16 +148,17 @@ function buildVideoSubmissionPrompt(prompt: string, inputs: NodeGenerationInput[
 function rewriteVideoImageMentions(prompt: string, references: CanvasResourceReference[], labelMapping: Record<string, string>, ignoredLabels: Set<string>) {
     const byLabel = new Map(references.filter((reference) => reference.kind === "image").map((reference) => [reference.label, reference]));
     const labels = [...byLabel.keys()].sort((left, right) => right.length - left.length);
+    const resolvedPrompt = resolveCanvasResourceMentionLabels(prompt, references);
     let result = "";
-    for (let index = 0; index < prompt.length;) {
-        if (prompt[index] !== "@") {
-            result += prompt[index];
+    for (let index = 0; index < resolvedPrompt.length;) {
+        if (resolvedPrompt[index] !== "@") {
+            result += resolvedPrompt[index];
             index += 1;
             continue;
         }
-        const label = labels.find((candidate) => prompt.startsWith(candidate, index + 1) && isMentionBoundary(prompt[index + candidate.length + 1]));
+        const label = labels.find((candidate) => resolvedPrompt.startsWith(candidate, index + 1) && isMentionBoundary(resolvedPrompt[index + candidate.length + 1]));
         if (!label) {
-            result += prompt[index];
+            result += resolvedPrompt[index];
             index += 1;
             continue;
         }
@@ -205,6 +210,74 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
     return { ...context, referenceImages: await Promise.all(context.referenceImages.map(async (image) => ({ ...image, dataUrl: await imageToDataUrl(image) }))) };
 }
 
+export function restoreVideoGenerationSnapshot(
+    context: NodeGenerationContext,
+    prompt: string,
+    metadata: CanvasNodeData["metadata"],
+    snapshotImages: ReferenceImage[],
+): NodeGenerationContext {
+    if (!snapshotImages.length || !metadata) return context;
+    const submittedOrder = metadata.submittedReferenceOrder || [];
+    const entries = Object.entries(metadata.submittedReferenceLabelMap || {})
+        .map(([label, upstreamLabel]) => ({ label, index: imageLabelIndex(upstreamLabel) }))
+        .filter((entry) => entry.index >= 0 && entry.index < snapshotImages.length)
+        .sort((left, right) => left.index - right.index);
+    const mentionedEntries = entries.filter((entry) => hasReferenceMention(prompt, entry.label));
+
+    if (!mentionedEntries.length) {
+        const unchangedPrompt = prompt.trim() === String(metadata.composerContent ?? metadata.prompt ?? "").trim();
+        if (context.referenceImages.length || !unchangedPrompt || !metadata.submissionPrompt) return context;
+        return {
+            ...context,
+            submissionPrompt: metadata.submissionPrompt,
+            referenceImages: snapshotImages,
+            imageCount: snapshotImages.length,
+            selectedReferenceNodeIds: snapshotImages.map((_, index) => submittedOrder[index] || `snapshot:${index}`),
+            referenceLabelMapping: metadata.submittedReferenceLabelMap || {},
+        };
+    }
+
+    const liveImages = new Map(context.selectedReferenceNodeIds.map((id, index) => [id, context.referenceImages[index]]));
+    const selected = mentionedEntries.map((entry) => {
+        const nodeId = submittedOrder[entry.index] || `snapshot:${entry.index}`;
+        return { label: entry.label, nodeId, image: liveImages.get(nodeId) || snapshotImages[entry.index] };
+    });
+    const selectedIds = new Set(selected.map((entry) => entry.nodeId));
+    context.selectedReferenceNodeIds.forEach((nodeId, index) => {
+        if (!selectedIds.has(nodeId) && context.referenceImages[index]) selected.push({ label: "", nodeId, image: context.referenceImages[index] });
+    });
+    const labelMapping = Object.fromEntries(selected.map((entry, index) => entry.label ? [entry.label, imageReferenceLabel(index)] : []).filter((entry) => entry.length));
+    return {
+        ...context,
+        submissionPrompt: rewriteSnapshotMentions(context.prompt, labelMapping),
+        referenceImages: selected.map((entry) => entry.image),
+        imageCount: selected.length,
+        selectedReferenceNodeIds: selected.map((entry) => entry.nodeId),
+        ignoredReferenceLabels: [],
+        referenceLabelMapping: { ...context.referenceLabelMapping, ...labelMapping },
+    };
+}
+
+function imageLabelIndex(value: string) {
+    const match = /^图片(\d+)$/.exec(String(value || ""));
+    return match ? Number(match[1]) - 1 : -1;
+}
+
+function hasReferenceMention(prompt: string, label: string) {
+    const index = prompt.indexOf(`@${label}`);
+    return index >= 0 && isMentionBoundary(prompt[index + label.length + 1]);
+}
+
+function rewriteSnapshotMentions(prompt: string, mapping: Record<string, string>) {
+    return Object.keys(mapping).sort((left, right) => right.length - left.length).reduce((value, label) => (
+        value.replace(new RegExp(`@${escapeRegExp(label)}(?!\\d)`, "g"), `@${mapping[label]}`)
+    ), prompt);
+}
+
+function escapeRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function readNodeTextInput(node: CanvasNodeData) {
     if (node.type === CanvasNodeType.Text) return node.metadata?.content || node.metadata?.prompt || "";
     return node.metadata?.prompt || "";
@@ -220,6 +293,7 @@ function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
         type: node.metadata.mimeType || "image/png",
         dataUrl: node.metadata.content,
         storageKey: node.metadata.storageKey,
+        ...(node.metadata.mediaId ? { mediaId: node.metadata.mediaId } : {}),
     };
 }
 
@@ -231,6 +305,7 @@ function readReferenceVideo(node: CanvasNodeData): ReferenceVideo | null {
         type: node.metadata.mimeType || "video/mp4",
         url: node.metadata.content,
         storageKey: node.metadata.storageKey,
+        ...(node.metadata.mediaId ? { mediaId: node.metadata.mediaId } : {}),
         bytes: node.metadata.bytes,
         width: node.metadata.naturalWidth,
         height: node.metadata.naturalHeight,

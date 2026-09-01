@@ -68,7 +68,7 @@ export const ConnectionPath = memo(function ConnectionPath({
                 data-connection-id={connection.id}
                 d={pathD}
                 stroke="transparent"
-                strokeWidth="16"
+                strokeWidth="20"
                 fill="none"
                 style={{ cursor: "pointer", pointerEvents: "stroke" }}
                 onClick={handleSelect}
@@ -109,11 +109,22 @@ export function ActiveConnectionPath({ node, handle, mouseWorld, target }: { nod
     const endX = handle.handleType === "source" ? mouseWorld.x : node.position.x;
     const endY = handle.handleType === "source" ? mouseWorld.y : node.position.y + node.height / 2;
     const snappedStartX = handle.handleType === "target" && target ? target.position.x + target.width : startX;
-    const snappedStartY = handle.handleType === "target" && target ? target.position.y + target.height / 2 : startY;
+    const snappedStartY = handle.handleType === "target" && target ? connectionTouchY(target, mouseWorld.y) : startY;
     const snappedEndX = handle.handleType === "source" && target ? target.position.x : endX;
-    const snappedEndY = handle.handleType === "source" && target ? target.position.y + target.height / 2 : endY;
+    const snappedEndY = handle.handleType === "source" && target ? connectionTouchY(target, mouseWorld.y) : endY;
     const distance = Math.abs(snappedEndX - snappedStartX);
     const pathD = `M ${snappedStartX} ${snappedStartY} C ${snappedStartX + distance * 0.5} ${snappedStartY}, ${snappedEndX - distance * 0.5} ${snappedEndY}, ${snappedEndX} ${snappedEndY}`;
 
-    return <path d={pathD} stroke={theme.node.activeStroke} strokeWidth="2" fill="none" strokeDasharray="5,5" />;
+    return (
+        <g style={{ pointerEvents: "none" }}>
+            <path d={pathD} stroke={theme.node.activeStroke} strokeWidth="11" strokeOpacity="0.16" fill="none" strokeLinecap="round" style={{ filter: `blur(5px) drop-shadow(0 0 8px ${theme.node.activeStroke})` }} />
+            <path d={pathD} stroke={theme.node.activeStroke} strokeWidth="3.2" strokeOpacity="0.95" fill="none" strokeLinecap="round" />
+            <path d={pathD} stroke="#ffffff" strokeWidth="1.1" strokeOpacity="0.72" fill="none" strokeLinecap="round" />
+        </g>
+    );
+}
+
+function connectionTouchY(node: CanvasNodeData, pointerY: number) {
+    const inset = Math.min(20, node.height / 4);
+    return Math.max(node.position.y + inset, Math.min(node.position.y + node.height - inset, pointerY));
 }

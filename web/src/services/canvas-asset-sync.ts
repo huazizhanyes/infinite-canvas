@@ -121,7 +121,7 @@ async function flushPendingAssets() {
         ...assets.map(async (asset) => {
             try {
                 const prepared = await prepareAssetForUpload(asset);
-                await canvasAssetsApi.save(currentConnection, prepared);
+                await canvasAssetsApi.save(currentConnection, toRemoteAsset(prepared));
                 if (prepared !== asset) applyPreparedAsset(prepared);
             } catch (error) {
                 saved = false;
@@ -165,6 +165,21 @@ function applyPreparedAsset(asset: Asset) {
     useAssetStore.getState().replaceAssets(current.map((item) => item.id === asset.id ? asset : item));
     applyingRemoteState = false;
     previousAssets.set(asset.id, asset);
+}
+
+function toRemoteAsset(asset: Asset): Asset {
+    if (asset.kind === "text") return asset;
+    const coverUrl = isBrowserOnlyUrl(asset.coverUrl) ? "" : asset.coverUrl;
+    if (asset.kind === "image") {
+        const { storageKey: _storageKey, ...data } = asset.data;
+        return { ...asset, coverUrl, data: { ...data, dataUrl: "" } };
+    }
+    const { storageKey: _storageKey, ...data } = asset.data;
+    return { ...asset, coverUrl, data: { ...data, url: "" } };
+}
+
+function isBrowserOnlyUrl(value?: string) {
+    return !value || value.startsWith("blob:") || value.startsWith("data:");
 }
 
 async function hydrateRemoteAssets(assets: Array<ImageAsset | VideoAsset>) {

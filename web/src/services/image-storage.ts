@@ -62,6 +62,16 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
     return { ...local, url, ...(remote?.mediaId ? { mediaId: remote.mediaId } : {}), mediaStatus: remote?.mediaStatus || "failed" };
 }
 
+export async function syncStoredImage(storageKey: string) {
+    const blob = await store.getItem<Blob>(storageKey);
+    if (!blob) throw new Error("本地图片已丢失，请重新上传");
+    const remote = await uploadCanvasMedia(blob, "image");
+    if (!remote?.mediaId) throw new Error("云端图片同步不可用，请稍后重试");
+    const localUrl = await resolveImageUrl(storageKey, "");
+    const url = await resolveCanvasMediaUrl(remote.mediaId, localUrl);
+    return { url, storageKey, mediaId: remote.mediaId, mediaStatus: "synced" as const };
+}
+
 export async function resolveImageUrl(storageKey?: string, fallback = "") {
     if (!storageKey) return fallback;
     const cached = objectUrls.get(storageKey);

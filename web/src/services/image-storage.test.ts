@@ -22,7 +22,7 @@ vi.mock("@/services/object-url-cache", () => ({ cacheObjectUrl: vi.fn(() => "blo
 vi.mock("@/lib/canvas-account-scope", () => ({ getCanvasStorageScopeId: () => "1", getCanvasSessionEpoch: () => 7 }));
 vi.mock("@/services/canvas-media", () => mocks);
 
-import { storeImageLocally, uploadImage } from "@/services/image-storage";
+import { storeImageLocally, syncStoredImage, uploadImage } from "@/services/image-storage";
 
 describe("image OSS persistence", () => {
     beforeEach(() => {
@@ -50,5 +50,21 @@ describe("image OSS persistence", () => {
         expect(image.url).toMatch(/^https:\/\/oss\.example\.com\//);
         expect(image.mediaId).toBe("media-1");
         expect(image.mediaStatus).toBe("synced");
+    });
+
+    it("retries remote sync from the existing IndexedDB image", async () => {
+        await storeImageLocally(new Blob(["image"], { type: "image/png" }));
+        mocks.uploadCanvasMedia.mockResolvedValue({ mediaId: "media-2", mediaStatus: "synced" });
+        mocks.resolveCanvasMediaUrl.mockResolvedValue("https://oss.example.com/canvas/media-2.png?signature=test");
+
+        const image = await syncStoredImage("image:u1:test-image");
+
+        expect(mocks.uploadCanvasMedia).toHaveBeenCalledWith(expect.any(Blob), "image");
+        expect(image).toEqual(expect.objectContaining({ storageKey: "image:u1:test-image", mediaId: "media-2", mediaStatus: "synced" }));
+    });
+
+    it("reports a missing local image instead of creating a broken cloud record", async () => {
+        await expect(syncStoredImage("image:u1:missing")).rejects.toThrow("本地图片已丢失");
+        expect(mocks.uploadCanvasMedia).not.toHaveBeenCalled();
     });
 });

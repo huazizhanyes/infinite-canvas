@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { buildNodeGenerationContext } from "./canvas-node-generation";
+import { buildNodeGenerationContext, restoreVideoGenerationSnapshot } from "./canvas-node-generation";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
-import { buildNodeMentionReferences, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { buildNodeMentionReferences, serializeCanvasResourceMention, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import type { ImageAsset } from "@/stores/use-asset-store";
 
 const target: CanvasNodeData = {
@@ -92,6 +92,17 @@ describe("buildNodeGenerationContext asset mentions", () => {
         const context = buildNodeGenerationContext(video.id, [video, ...images], connections, "@图片1 作为唯一参考", references);
 
         expect(context.referenceImages.map((image) => image.id)).toEqual(["a"]);
+    });
+
+    it("blocks a deleted structured mention instead of rebinding it to the next image", () => {
+        const video: CanvasNodeData = { ...target, id: "video", type: CanvasNodeType.Video, title: "视频", metadata: { referenceOrder: ["a", "b", "c"] } };
+        const images = ["a", "c"].map((id) => ({ ...target, id, title: id.toUpperCase(), metadata: { content: `blob:${id}`, mimeType: "image/png" } }));
+        const connections = images.map((image) => ({ id: `line-${image.id}`, fromNodeId: image.id, toNodeId: video.id }));
+        const references = buildNodeMentionReferences(video, [video, ...images], connections);
+        const context = buildNodeGenerationContext(video.id, [video, ...images], connections, `${serializeCanvasResourceMention("b", "图片2")} 转身`, references);
+
+        expect(context.referenceImages).toEqual([]);
+        expect(context.ignoredReferenceLabels).toEqual(["图片2"]);
     });
 
     it("does not upload a connected video unless the video prompt mentions it", () => {
@@ -201,5 +212,30 @@ describe("buildNodeGenerationContext asset mentions", () => {
         const references = buildNodeMentionReferences(target, [target], [], undefined, [image("one"), image("two")]);
 
         expect(references.filter((reference) => reference.source === "user-asset").map((reference) => reference.label)).toEqual(["资产·秦墨·1", "资产·秦墨·2"]);
+    });
+
+    it("restores missing submitted video references while preserving edited prompt mentions", () => {
+        const video: CanvasNodeData = {
+            ...target,
+            id: "video",
+            type: CanvasNodeType.Video,
+            metadata: {
+                composerContent: "@图片3 追着 @图片1 跑，@图片4 回头",
+                submittedReferenceOrder: ["image-3", "image-1", "image-4"],
+                submittedReferenceLabelMap: { 图片3: "图片1", 图片1: "图片2", 图片4: "图片3" },
+                submittedImageReferences: ["blob:3", "blob:1", "blob:4"],
+                submissionPrompt: "@图片1 追着 @图片2 跑，@图片3 回头",
+            },
+        };
+        const context = buildNodeGenerationContext(video.id, [video], [], "@图片3 快速追着 @图片4 回头", []);
+        const restored = restoreVideoGenerationSnapshot(context, "@图片3 快速追着 @图片4 回头", video.metadata, [
+            { id: "0", name: "3.png", type: "image/png", dataUrl: "blob:3" },
+            { id: "1", name: "1.png", type: "image/png", dataUrl: "blob:1" },
+            { id: "2", name: "4.png", type: "image/png", dataUrl: "blob:4" },
+        ]);
+
+        expect(restored.referenceImages.map((image) => image.dataUrl)).toEqual(["blob:3", "blob:4"]);
+        expect(restored.selectedReferenceNodeIds).toEqual(["image-3", "image-4"]);
+        expect(restored.submissionPrompt).toBe("@图片1 快速追着 @图片2 回头");
     });
 });

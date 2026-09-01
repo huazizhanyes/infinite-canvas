@@ -13,6 +13,7 @@ export function buildNodeContext(host: CanvasPluginHost, node: CanvasNodeData, t
         scale,
         isSelected,
         updateMetadata: (patch) => host.updateMetadata(node.id, patch),
+        persistMetadata: (patch) => host.persistMetadata(node.id, patch),
         updateNode: (patch) => host.updateNode(node.id, patch),
         getNode: (id) => host.getNode(id),
         getNodes: () => host.getNodes(),

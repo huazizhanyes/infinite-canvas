@@ -35,7 +35,8 @@ function QuoteDetails({ quote, state, label, error }: CanvasQuoteDisplayProps) {
         const yuan = (micros?: string) => `¥${(Number(micros || 0) / 1_000_000).toFixed(2)}`;
         return (
             <div className="min-w-56 space-y-1 py-0.5 text-[11px] leading-4" style={{ color: "#f8fafc" }}>
-                <div className="font-semibold text-slate-100">MiniMax H3 · {tierLabels[videoTier]}</div>
+                <div className="font-semibold text-slate-100">{quote.breakdown.modelDisplayName || "视频模型"} · {tierLabels[videoTier]}</div>
+                {quote.breakdown.promotionFree ? <div className="font-semibold text-emerald-300">{quote.breakdown.promotionLabel || "限时免费"}{quote.breakdown.promotionEndsAt ? ` · ${formatEndTime(quote.breakdown.promotionEndsAt)}结束` : ""}</div> : null}
                 <div>专属单价：<strong className="font-bold text-amber-300">{yuan(quote.breakdown.tierUnitPriceMicros)}</strong>/秒</div>
                 <div>请求时长：{quote.breakdown.requestedSeconds || 0} 秒</div>
                 <div>普通原价：<strong className="font-bold text-amber-300">{yuan(quote.breakdown.originalAmountMicros)}</strong></div>
@@ -54,4 +55,10 @@ function QuoteDetails({ quote, state, label, error }: CanvasQuoteDisplayProps) {
             <div className="pt-1 opacity-80">本次生成 {requested} 张，优先抵扣 {deducted} 张。</div>
         </div>
     );
+}
+
+function formatEndTime(value: string) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 }

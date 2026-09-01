@@ -61,6 +61,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
+                hideScrollButtons
                 className="z-[1200] w-72 max-w-[calc(100vw-24px)] rounded-lg border border-border/70 bg-popover p-1 text-xs shadow-xl"
                 position="popper"
                 align="start"
@@ -94,12 +95,14 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
 function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
     const video = videoCapabilitiesOf(config, model);
     if (video) {
-        const label = `${video.displayName}${video.faceFriendly ? " · 不卡人脸" : ""}`;
+        const name = `${video.displayBaseName || video.displayName}${video.faceFriendly ? " · 不卡人脸" : ""}`;
+        const suffix = video.displaySuffix?.trim();
         return (
-            <span className="flex min-w-0 items-start gap-2 py-1">
-                <ModelIcon config={config} model={model} />
+            <span className="flex min-w-0 items-center gap-3 py-1" title={video.displayName}>
+                <ModelIcon config={config} model={model} large />
                 <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{label}</span>
+                    <span className="block truncate font-medium leading-5">{name}</span>
+                    {video.freePromotion?.active ? <span className="mt-0.5 block truncate text-[11px] font-medium leading-4 text-emerald-500">{video.freePromotion.label || "限时免费"}</span> : suffix ? <span className="mt-0.5 block truncate text-[11px] leading-4 opacity-55">{suffix}</span> : null}
                 </span>
             </span>
         );
@@ -112,7 +115,7 @@ function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
     );
 }
 
-function ModelIcon({ config, model }: { config: AiConfig; model: string }) {
+function ModelIcon({ config, model, large = false }: { config: AiConfig; model: string; large?: boolean }) {
     const metadata = modelIconOf(config, model);
     const fallbackUrls = resolveModelIcons(modelOptionName(model));
     const candidates = Array.from(new Set([metadata?.iconUrl, ...fallbackUrls].filter((url): url is string => Boolean(url))));
@@ -120,9 +123,10 @@ function ModelIcon({ config, model }: { config: AiConfig; model: string }) {
     const url = candidates.find((candidate) => !failedUrls.includes(candidate));
 
     useEffect(() => setFailedUrls([]), [model, metadata?.iconUrl]);
-    if (url) return <img src={url} alt="" className={`size-4 shrink-0 object-contain ${fallbackUrls.includes(url) ? "dark:invert" : ""}`} onError={() => setFailedUrls((current) => (current.includes(url) ? current : [...current, url]))} />;
+    const sizeClass = large ? "size-6" : "size-4";
+    if (url) return <img src={url} alt="" className={`${sizeClass} shrink-0 object-contain ${fallbackUrls.includes(url) ? "dark:invert" : ""}`} onError={() => setFailedUrls((current) => (current.includes(url) ? current : [...current, url]))} />;
     const Icon = namedModelIcon(metadata?.icon) || capabilityIcon(metadata?.capability);
-    return <Icon className="size-4 shrink-0 opacity-70" />;
+    return <Icon className={`${sizeClass} shrink-0 opacity-70`} />;
 }
 
 function resolveModelIcons(model: string) {

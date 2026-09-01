@@ -5,7 +5,8 @@ import { saveAs } from "file-saver";
 
 import { useCopyText } from "@/hooks/use-copy-text";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
-import { uploadImage } from "@/services/image-storage";
+import { storeImageLocally } from "@/services/image-storage";
+import { MAX_ASSET_IMAGE_BYTES } from "@/services/canvas-media";
 import { cn } from "@/lib/utils";
 import { assetPreviewUrl, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
@@ -122,20 +123,22 @@ export default function AssetsPage() {
             editingAsset ? updateAsset(editingAsset.id, asset) : addAsset(asset);
         }
 
-        message.success(editingAsset ? "资产已更新" : "资产已保存");
+        message.success(values.kind === "image" ? (editingAsset ? "资产已更新，正在同步到云端" : "资产已保存，正在同步到云端") : editingAsset ? "资产已更新" : "资产已保存");
         setIsAssetOpen(false);
     };
 
     const readCoverFile = async (file?: File) => {
         if (!file) return;
+        if (!validateImageFileSize(file, message.error)) return;
         const dataUrl = await readFileAsDataUrl(file);
         form.setFieldValue("coverUrl", dataUrl);
     };
 
     const readImageFile = async (file?: File) => {
         if (!file || !file.type.startsWith("image/")) return;
-        const image = await uploadImage(file);
-        const draft = { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType };
+        if (!validateImageFileSize(file, message.error)) return;
+        const image = await storeImageLocally(file);
+        const draft = { dataUrl: image.url, storageKey: image.storageKey, mediaStatus: image.mediaStatus, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType };
         setImageDraft(draft);
         if (!form.getFieldValue("coverUrl")) form.setFieldValue("coverUrl", draft.dataUrl);
         if (!form.getFieldValue("title")) form.setFieldValue("title", file.name);
@@ -431,6 +434,7 @@ function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { as
                         </div>
                         <Tag className="m-0 shrink-0 text-[11px]">{asset.kind === "image" ? "图片" : asset.kind === "video" ? "视频" : "文本"}</Tag>
                     </div>
+                    {asset.kind !== "text" ? <AssetSyncStatus status={asset.data.mediaStatus} /> : null}
                     <Typography.Paragraph type="secondary" ellipsis={{ rows: 3 }} className="!mb-0 !mt-2 !text-xs !leading-5">
                         {summary}
                     </Typography.Paragraph>
@@ -488,6 +492,7 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
                         </Typography.Title>
                         <Space size={[4, 4]} wrap>
                             <Tag>{asset.kind === "image" ? "图片" : asset.kind === "video" ? "视频" : "文本"}</Tag>
+                            {asset.kind !== "text" ? <AssetSyncStatus status={asset.data.mediaStatus} compact /> : null}
                             {(asset.tags || []).map((tag) => (
                                 <Tag key={tag}>{tag}</Tag>
                             ))}
@@ -538,4 +543,19 @@ function assetSummary(asset: Asset) {
 
 function assetSearchText(asset: Asset) {
     return [asset.title, asset.source || "", asset.note || "", (asset.tags || []).join(" "), asset.kind === "text" ? asset.data.content : asset.data.mimeType].join(" ").toLowerCase();
+}
+
+function AssetSyncStatus({ status, compact = false }: { status?: "uploading" | "synced" | "missing" | "failed"; compact?: boolean }) {
+    const option = status === "synced"
+        ? { color: "success", label: "已同步" }
+        : status === "failed" || status === "missing"
+          ? { color: "warning", label: "同步失败" }
+          : { color: "processing", label: "同步中" };
+    return <Tag color={option.color} className={compact ? "m-0" : "!mb-0 !mt-2 text-[11px]"}>{option.label}</Tag>;
+}
+
+function validateImageFileSize(file: File, showError: (content: string) => void) {
+    if (file.size <= MAX_ASSET_IMAGE_BYTES) return true;
+    showError(`图片大小不能超过 20MB，当前文件为 ${formatBytes(file.size)}`);
+    return false;
 }

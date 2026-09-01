@@ -28,10 +28,89 @@ export type CanvasResourceReference = {
     active: boolean;
 };
 
+export type CanvasResourceMentionToken = { start: number; end: number; nodeId: string; label: string };
+
+const CANVAS_REFERENCE_TOKEN = /@\[([^\]]+)\]\(canvas-ref:([^)]+)\)/g;
+
+export function serializeCanvasResourceMention(nodeId: string, label: string) {
+    return `@[${label}](canvas-ref:${encodeURIComponent(nodeId)})`;
+}
+
+export function remapCanvasResourceMentionNodeIds(prompt: string, nodeIdMap: ReadonlyMap<string, string>) {
+    return prompt.replace(CANVAS_REFERENCE_TOKEN, (token, label, encodedId) => {
+        const nodeId = nodeIdMap.get(decodeMentionId(encodedId));
+        return nodeId ? serializeCanvasResourceMention(nodeId, label) : token;
+    });
+}
+
+export function parseCanvasResourceMentionTokens(prompt: string): CanvasResourceMentionToken[] {
+    return Array.from(prompt.matchAll(CANVAS_REFERENCE_TOKEN)).map((match) => ({
+        start: match.index || 0,
+        end: (match.index || 0) + match[0].length,
+        nodeId: decodeMentionId(match[2]),
+        label: match[1],
+    }));
+}
+
+export function plainCanvasResourceMentions(prompt: string) {
+    return prompt.replace(CANVAS_REFERENCE_TOKEN, (_token, label) => `@${label}`);
+}
+
+export function resolveCanvasResourceMentionLabels(prompt: string, references: Pick<CanvasResourceReference, "nodeId" | "label">[]) {
+    const labels = new Map(references.map((reference) => [reference.nodeId, reference.label]));
+    return prompt.replace(CANVAS_REFERENCE_TOKEN, (_token, savedLabel, encodedId) => `@${labels.get(decodeMentionId(encodedId)) || savedLabel}`);
+}
+
+export function missingCanvasResourceMentions(prompt: string, references: Pick<CanvasResourceReference, "nodeId">[]) {
+    const existing = new Set(references.map((reference) => reference.nodeId));
+    return parseCanvasResourceMentionTokens(prompt).filter((mention) => !existing.has(mention.nodeId));
+}
+
+export function migrateCanvasResourceMentions(prompt: string, references: Pick<CanvasResourceReference, "nodeId" | "label" | "active">[]) {
+    if (!prompt) return prompt;
+    const active = references.filter((reference) => reference.active).sort((left, right) => right.label.length - left.label.length);
+    const tokens = parseCanvasResourceMentionTokens(prompt);
+    if (!tokens.length) return migrateLegacyMentionSegment(prompt, active);
+    let result = "";
+    let cursor = 0;
+    tokens.forEach((token) => {
+        result += migrateLegacyMentionSegment(prompt.slice(cursor, token.start), active);
+        result += prompt.slice(token.start, token.end);
+        cursor = token.end;
+    });
+    return result + migrateLegacyMentionSegment(prompt.slice(cursor), active);
+}
+
+function migrateLegacyMentionSegment(prompt: string, active: Pick<CanvasResourceReference, "nodeId" | "label">[]) {
+    let result = "";
+    for (let index = 0; index < prompt.length;) {
+        const reference = prompt[index] === "@"
+            ? active.find((item) => prompt.startsWith(item.label, index + 1) && isMentionBoundary(prompt[index + item.label.length + 1]))
+            : undefined;
+        if (!reference) {
+            result += prompt[index];
+            index += 1;
+            continue;
+        }
+        result += serializeCanvasResourceMention(reference.nodeId, reference.label);
+        index += reference.label.length + 1;
+    }
+    return result;
+}
+
 /** Restore mention markers for prompts saved by older editor versions. */
 export function normalizeCanvasResourceMentions(prompt: string, references: Pick<CanvasResourceReference, "label" | "active">[]) {
     const activeLabels = references.filter((reference) => reference.active).map((reference) => reference.label);
-    return normalizeReferenceMentions(removeLegacyAudioMentionGlyphs(prompt, activeLabels), activeLabels);
+    const tokens = parseCanvasResourceMentionTokens(prompt);
+    if (!tokens.length) return normalizeReferenceMentions(removeLegacyAudioMentionGlyphs(prompt, activeLabels), activeLabels);
+    let result = "";
+    let cursor = 0;
+    tokens.forEach((token) => {
+        result += normalizeReferenceMentions(removeLegacyAudioMentionGlyphs(prompt.slice(cursor, token.start), activeLabels), activeLabels);
+        result += prompt.slice(token.start, token.end);
+        cursor = token.end;
+    });
+    return result + normalizeReferenceMentions(removeLegacyAudioMentionGlyphs(prompt.slice(cursor), activeLabels), activeLabels);
 }
 
 function removeLegacyAudioMentionGlyphs(prompt: string, labels: string[]) {
@@ -66,19 +145,33 @@ export function buildNodeMentionReferences(node: CanvasNodeData, nodes: CanvasNo
 }
 
 export function mentionedCanvasResourceReferences(prompt: string, references: CanvasResourceReference[]) {
+    const byNodeId = new Map(references.filter((reference) => reference.source === "canvas").map((reference) => [reference.nodeId, reference]));
     const byLabel = new Map(references.filter((reference) => reference.source === "canvas").map((reference) => [reference.label, reference]));
     const labels = [...byLabel.keys()].sort((left, right) => right.length - left.length);
+    const occurrences: Array<{ position: number; reference: CanvasResourceReference }> = parseCanvasResourceMentionTokens(prompt).flatMap((mention) => {
+        const reference = byNodeId.get(mention.nodeId);
+        return reference ? [{ position: mention.start, reference }] : [];
+    });
+    const legacyPrompt = prompt.replace(CANVAS_REFERENCE_TOKEN, (token) => " ".repeat(token.length));
+    for (let index = 0; index < legacyPrompt.length; index += 1) {
+        if (legacyPrompt[index] !== "@") continue;
+        const label = labels.find((candidate) => legacyPrompt.startsWith(candidate, index + 1) && isMentionBoundary(legacyPrompt[index + candidate.length + 1]));
+        const reference = label ? byLabel.get(label) : undefined;
+        if (reference) occurrences.push({ position: index, reference });
+    }
+    occurrences.sort((left, right) => left.position - right.position);
     const mentioned: CanvasResourceReference[] = [];
     const seen = new Set<string>();
-    for (let index = 0; index < prompt.length; index += 1) {
-        if (prompt[index] !== "@") continue;
-        const label = labels.find((candidate) => prompt.startsWith(candidate, index + 1) && isMentionBoundary(prompt[index + candidate.length + 1]));
-        const reference = label ? byLabel.get(label) : undefined;
+    for (const { reference } of occurrences) {
         if (!reference || seen.has(reference.nodeId)) continue;
         seen.add(reference.nodeId);
         mentioned.push(reference);
     }
     return mentioned;
+}
+
+function decodeMentionId(value: string) {
+    try { return decodeURIComponent(value); } catch { return value; }
 }
 
 export function getMentionResourceNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], graphIndex?: CanvasGraphIndex) {
@@ -94,6 +187,12 @@ export function getGenerationResourceNodes(nodeId: string, nodes: CanvasNodeData
     const ownInputs = getContextResourceNodes(nodeId, index);
     if (ownInputs.length) return ownInputs;
     return [];
+}
+
+export function cloneIncomingCanvasConnections(sourceNodeId: string, targetNodeId: string, connections: CanvasConnection[], createId: () => string) {
+    return connections
+        .filter((connection) => connection.toNodeId === sourceNodeId && connection.fromNodeId !== targetNodeId)
+        .map((connection) => ({ id: createId(), fromNodeId: connection.fromNodeId, toNodeId: targetNodeId }));
 }
 
 /**
@@ -203,6 +302,7 @@ function labelUserAssets(assets: Asset[]) {
             title: asset.title,
             previewUrl,
             storageKey: asset.data.storageKey,
+            mediaId: asset.data.mediaId,
             mimeType: asset.data.mimeType,
             width: asset.data.width,
             height: asset.data.height,

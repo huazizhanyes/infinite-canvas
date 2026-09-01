@@ -65,5 +65,40 @@ describe("captureVideoFrame", () => {
         await captureVideoFrame(source, "last");
 
         expect(createdVideos).toHaveLength(1);
+        expect(createdVideos[0].crossOrigin).toBe("anonymous");
+    });
+
+    it("captures the current frame through the CORS-safe decoder instead of the visible player", async () => {
+        const drawImage = vi.fn();
+        class FakeVideo {
+            readyState = 2;
+            videoWidth = 1280;
+            videoHeight = 720;
+            duration = 5;
+            currentSrc = "https://media.example.com/current.mp4";
+            src = this.currentSrc;
+            crossOrigin = "";
+            currentTime = 2.4;
+            addEventListener() {}
+            removeEventListener() {}
+            removeAttribute() {}
+            load() {}
+        }
+        let captureVideo: FakeVideo | undefined;
+        vi.stubGlobal("HTMLMediaElement", { HAVE_METADATA: 1, HAVE_CURRENT_DATA: 2 });
+        vi.stubGlobal("window", { setTimeout, clearTimeout });
+        vi.stubGlobal("document", {
+            createElement: (tag: string) => {
+                if (tag === "video") return captureVideo = new FakeVideo();
+                return { width: 0, height: 0, getContext: () => ({ drawImage }), toBlob: (callback: (blob: Blob) => void) => callback(new Blob(["frame"], { type: "image/png" })) };
+            },
+        });
+
+        const visibleVideo = new FakeVideo() as unknown as HTMLVideoElement;
+        await captureVideoFrame(visibleVideo, "current");
+
+        expect(captureVideo?.crossOrigin).toBe("anonymous");
+        expect(drawImage).toHaveBeenCalledWith(captureVideo, 0, 0, 1280, 720);
+        expect(drawImage).not.toHaveBeenCalledWith(visibleVideo, 0, 0, 1280, 720);
     });
 });

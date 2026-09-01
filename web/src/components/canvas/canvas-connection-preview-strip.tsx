@@ -18,7 +18,7 @@ export function CanvasConnectionPreviewStrip({ items, onMention, onRemove, onFoc
 
     return (
         <div className="thin-scrollbar flex min-h-14 max-w-full items-center gap-2 overflow-x-auto overflow-y-hidden pb-2 pr-1" data-canvas-no-zoom>
-            {items.map((item, index) => (
+            {items.map((item) => (
                 <Popover
                     key={item.connectionId}
                     trigger="hover"
@@ -39,8 +39,8 @@ export function CanvasConnectionPreviewStrip({ items, onMention, onRemove, onFoc
                         }}
                     >
                         <ConnectionPreviewMedia item={item} />
-                        <span className="pointer-events-none absolute left-1 top-1 grid size-4 place-items-center rounded-full bg-black/75 text-[10px] font-semibold leading-none text-white">
-                            {index + 1}
+                        <span className="pointer-events-none absolute left-1 top-1 max-w-[calc(100%-0.5rem)] truncate rounded bg-black/75 px-1 py-0.5 text-[9px] font-semibold leading-none text-white transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
+                            {item.label}
                         </span>
                         <button
                             type="button"

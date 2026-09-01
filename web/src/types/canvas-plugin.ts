@@ -27,6 +27,7 @@ export type CanvasNodeContext = {
     isSelected: boolean; // 该节点当前是否被选中(用于按需启用 iframe 交互等)
     // 自身数据
     updateMetadata: (patch: CanvasNodeMetadata) => void;
+    persistMetadata: (patch: CanvasNodeMetadata) => Promise<void>;
     updateNode: (patch: Partial<Pick<CanvasNodeData, "title" | "width" | "height">>) => void;
     // 图访问
     getNode: (id: string) => CanvasNodeData | null;
@@ -58,6 +59,7 @@ export type CanvasPluginHost = {
     getDownstream: (nodeId: string) => CanvasNodeData[];
     updateNode: (nodeId: string, patch: Partial<Pick<CanvasNodeData, "title" | "width" | "height">>) => void;
     updateMetadata: (nodeId: string, patch: CanvasNodeMetadata) => void;
+    persistMetadata: (nodeId: string, patch: CanvasNodeMetadata) => Promise<void>;
     applyOps: (ops: CanvasAgentOp[]) => void;
 };
 
