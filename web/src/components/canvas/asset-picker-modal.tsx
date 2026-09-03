@@ -3,11 +3,14 @@ import { Empty, Input, Modal, Pagination, Tag } from "antd";
 import { Images, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { resolveImageUrl } from "@/services/image-storage";
+import { resolvePersistedImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { assetPreviewUrl, useAssetStore, type Asset, type AssetKind } from "@/stores/use-asset-store";
 
-export type InsertAssetPayload = { kind: "text"; content: string; title: string } | { kind: "image"; dataUrl: string; title: string; storageKey?: string } | { kind: "video"; url: string; title: string; storageKey?: string; width?: number; height?: number };
+export type InsertAssetPayload =
+    | { kind: "text"; content: string; title: string }
+    | { kind: "image"; dataUrl: string; title: string; storageKey?: string; mediaId?: string; width?: number; height?: number; bytes?: number; mimeType?: string }
+    | { kind: "video"; url: string; title: string; storageKey?: string; mediaId?: string; width?: number; height?: number };
 
 type Props = {
     open: boolean;
@@ -84,10 +87,10 @@ function MyAssetsTab({ defaultKind, onInsert }: { defaultKind: AssetKind | "all"
             onInsert({ kind: "text", content: asset.data.content, title: asset.title });
         } else if (asset.kind === "video") {
             const url = await resolveMediaUrl(asset.data.storageKey, asset.data.url);
-            onInsert({ kind: "video", url, storageKey: asset.data.storageKey, title: asset.title, width: asset.data.width, height: asset.data.height });
+            onInsert({ kind: "video", url, storageKey: asset.data.storageKey, mediaId: asset.data.mediaId, title: asset.title, width: asset.data.width, height: asset.data.height });
         } else {
-            const dataUrl = await resolveImageUrl(asset.data.storageKey, asset.data.dataUrl || asset.coverUrl);
-            onInsert({ kind: "image", dataUrl, storageKey: asset.data.storageKey, title: asset.title });
+            const resolved = await resolvePersistedImage(asset.data.mediaId, asset.data.storageKey, asset.data.dataUrl || asset.coverUrl);
+            onInsert({ kind: "image", dataUrl: resolved.url, storageKey: resolved.storageKey, mediaId: asset.data.mediaId, title: asset.title, width: asset.data.width, height: asset.data.height, bytes: asset.data.bytes, mimeType: asset.data.mimeType });
         }
     };
 

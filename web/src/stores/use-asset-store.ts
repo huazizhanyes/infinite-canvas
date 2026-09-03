@@ -4,7 +4,7 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
 import { accountScopedKey } from "@/lib/canvas-account-scope";
-import { cleanupUnusedImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { cleanupUnusedImages, resolvePersistedImage, uploadImage } from "@/services/image-storage";
 import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
 
 export type AssetKind = "text" | "image" | "video";
@@ -47,17 +47,17 @@ const assetStorage: PersistStorage<AssetStore> = {
             parsed.state.assets.map(async (asset) => {
                 if (asset.kind === "video" && asset.data.storageKey) return { ...asset, data: { ...asset.data, url: await resolveMediaUrl(asset.data.storageKey, asset.data.url) } };
                 if (asset.kind !== "image") return asset;
-                if (asset.data.storageKey) {
-                    const localUrl = await resolveImageUrl(asset.data.storageKey, "");
+                if (asset.data.storageKey || asset.data.mediaId) {
+                    const resolved = await resolvePersistedImage(asset.data.mediaId, asset.data.storageKey, asset.data.dataUrl || asset.coverUrl);
                     return {
                         ...asset,
-                        coverUrl: localUrl || asset.coverUrl,
-                        data: { ...asset.data, dataUrl: localUrl || asset.data.dataUrl },
+                        coverUrl: resolved.url || asset.coverUrl,
+                        data: { ...asset.data, storageKey: resolved.storageKey || asset.data.storageKey, dataUrl: resolved.url || asset.data.dataUrl },
                     };
                 }
                 if (!asset.data.dataUrl.startsWith("data:image/")) return asset;
                 const image = await uploadImage(asset.data.dataUrl);
-                return { ...asset, coverUrl: asset.coverUrl.startsWith("data:image/") ? image.url : asset.coverUrl, data: { ...asset.data, dataUrl: image.url, storageKey: image.storageKey, bytes: image.bytes, mimeType: image.mimeType } };
+                return { ...asset, coverUrl: asset.coverUrl.startsWith("data:image/") ? image.url : asset.coverUrl, data: { ...asset.data, dataUrl: image.url, storageKey: image.storageKey, mediaId: image.mediaId, mediaStatus: image.mediaStatus, bytes: image.bytes, mimeType: image.mimeType } };
             }),
         );
         return parsed;

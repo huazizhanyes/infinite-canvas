@@ -194,8 +194,8 @@ const ASSET_GROUPS: { kind: AssetKind; label: string; icon: typeof Square }[] = 
 
 function buildInsertPayload(asset: Asset): InsertAssetPayload {
     if (asset.kind === "text") return { kind: "text", content: asset.data.content, title: asset.title };
-    if (asset.kind === "video") return { kind: "video", url: asset.data.url, storageKey: asset.data.storageKey, title: asset.title, width: asset.data.width, height: asset.data.height };
-    return { kind: "image", dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey, title: asset.title };
+    if (asset.kind === "video") return { kind: "video", url: asset.data.url, storageKey: asset.data.storageKey, mediaId: asset.data.mediaId, title: asset.title, width: asset.data.width, height: asset.data.height };
+    return { kind: "image", dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey, mediaId: asset.data.mediaId, title: asset.title, width: asset.data.width, height: asset.data.height, bytes: asset.data.bytes, mimeType: asset.data.mimeType };
 }
 
 function CanvasAssetsTab({ onInsert, theme }: { onInsert: (payload: InsertAssetPayload) => void; theme: CanvasTheme }) {

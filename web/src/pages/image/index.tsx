@@ -17,7 +17,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { requestEdit, requestGeneration } from "@/services/api/image";
-import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { deleteStoredImages, resolvePersistedImage, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import type { ReferenceImage } from "@/types/image";
@@ -26,6 +26,7 @@ type GeneratedImage = {
     id: string;
     dataUrl: string;
     storageKey?: string;
+    mediaId?: string;
     durationMs: number;
     width: number;
     height: number;
@@ -115,7 +116,7 @@ export default function ImagePage() {
         const nextReferences = await Promise.all(
             imageFiles.map(async (file) => {
                 const image = await uploadImage(file);
-                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
+                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, mediaId: image.mediaId };
             }),
         );
         setReferences((value) => [...value, ...nextReferences]);
@@ -132,7 +133,7 @@ export default function ImagePage() {
             const nextReferences = await Promise.all(
                 blobs.map(async (blob, index) => {
                     const image = await uploadImage(blob);
-                    return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
+                    return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, mediaId: image.mediaId };
                 }),
             );
             setReferences((value) => [...value, ...nextReferences]);
@@ -176,7 +177,7 @@ export default function ImagePage() {
             const logImages = await Promise.all(
                 successImages.map(async (image) => {
                     const stored = await uploadImage(image.dataUrl);
-                    return { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
+                    return { ...image, dataUrl: stored.url, storageKey: stored.storageKey, mediaId: stored.mediaId, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
                 }),
             );
             saveLog(
@@ -218,20 +219,22 @@ export default function ImagePage() {
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
-        const stored = await uploadImage(image.dataUrl);
-        setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
+        const stored = image.storageKey ? image : await uploadImage(image.dataUrl);
+        const dataUrl = "url" in stored ? stored.url : stored.dataUrl;
+        setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType || "image/png", dataUrl, storageKey: stored.storageKey, mediaId: stored.mediaId }]);
         message.success("已加入参考图");
     };
 
     const saveResultToAssets = async (image: GeneratedImage, index: number) => {
-        const stored = await uploadImage(image.dataUrl);
+        const stored = image.storageKey ? image : await uploadImage(image.dataUrl);
+        const dataUrl = "url" in stored ? stored.url : stored.dataUrl;
         addAsset({
             kind: "image",
             title: `生成结果 ${index + 1}`,
-            coverUrl: stored.url,
+            coverUrl: dataUrl,
             tags: [],
             source: "生图工作台",
-            data: { dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType },
+            data: { dataUrl, storageKey: stored.storageKey, mediaId: stored.mediaId, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType || "image/png" },
             metadata: { source: "image-page", prompt },
         });
         message.success("已加入我的资产");
@@ -241,8 +244,7 @@ export default function ImagePage() {
         if (payload.kind === "text") {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
-            const stored = await uploadImage(payload.dataUrl);
-            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
+            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "image/png", dataUrl: payload.dataUrl, storageKey: payload.storageKey, mediaId: payload.mediaId }]);
         } else {
             message.warning("生图工作台只能使用文本或图片资产");
         }
@@ -327,8 +329,8 @@ export default function ImagePage() {
         try {
             const image = await runGenerationSlot(index, snapshot);
             const stored = await uploadImage(image.dataUrl);
-            const logImage = { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
-            setResults((value) => updateResultAt(value, index, { image: { ...image, dataUrl: stored.url, storageKey: stored.storageKey } }));
+            const logImage = { ...image, dataUrl: stored.url, storageKey: stored.storageKey, mediaId: stored.mediaId, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
+            setResults((value) => updateResultAt(value, index, { image: { ...image, dataUrl: stored.url, storageKey: stored.storageKey, mediaId: stored.mediaId } }));
             saveLog(
                 buildLog({
                     prompt: snapshot.text,
@@ -746,16 +748,16 @@ async function readStoredLogs() {
 
 async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
     const references = await Promise.all(
-        (log.references || []).map(async (item) => ({
-            ...item,
-            dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
-        })),
+        (log.references || []).map(async (item) => {
+            const resolved = await resolvePersistedImage(item.mediaId, item.storageKey, item.dataUrl);
+            return { ...item, dataUrl: resolved.url, storageKey: resolved.storageKey || item.storageKey };
+        }),
     );
     const images = await Promise.all(
-        (log.images || []).map(async (item) => ({
-            ...item,
-            dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
-        })),
+        (log.images || []).map(async (item) => {
+            const resolved = await resolvePersistedImage(item.mediaId, item.storageKey, item.dataUrl);
+            return { ...item, dataUrl: resolved.url, storageKey: resolved.storageKey || item.storageKey };
+        }),
     );
     const config = normalizeLogConfig(log);
     return {

@@ -222,7 +222,23 @@ export const useCanvasStore = create<CanvasStore>()(
                     title: source.title || "导入画布",
                     createdAt: source.createdAt || now,
                     updatedAt: now,
-                    nodes: source.nodes || [],
+                    nodes: (source.nodes || []).map((node) => {
+                        if (!["asset-extraction", "script-asset"].includes(node.type)) return node;
+                        const metadata = { ...(node.metadata || {}) };
+                        if (node.type === "asset-extraction") {
+                            delete metadata.scriptSetId;
+                            delete metadata.scriptSetNodeId;
+                            delete metadata.assetExtractionEpisodeId;
+                            metadata.scriptSetRecoveryPending = true;
+                        } else {
+                            delete metadata.scriptSetId;
+                            delete metadata.scriptSetNodeId;
+                            delete metadata.scriptAssetId;
+                            delete metadata.scriptVariantId;
+                            delete metadata.assetExtractionNodeId;
+                        }
+                        return { ...node, metadata };
+                    }),
                     connections: source.connections || [],
                     chatSessions: source.chatSessions || [],
                     activeChatId: source.activeChatId || null,

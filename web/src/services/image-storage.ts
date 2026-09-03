@@ -18,8 +18,15 @@ export type UploadedImage = {
     mediaStatus?: "uploading" | "synced" | "failed";
 };
 
+export type ResolvedImage = {
+    url: string;
+    storageKey?: string;
+};
+
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "image_files" });
 const objectUrls = new Map<string, string>();
+const pendingResolutions = new Map<string, Promise<ResolvedImage>>();
+const failedMediaResolutions = new Set<string>();
 
 export async function migrateLegacyImageStorage(userId: string) {
     const mapping = new Map<string, string>();
@@ -58,8 +65,7 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
         remote = { mediaId: "", mediaStatus: "failed" };
     }
     if (epoch !== getCanvasSessionEpoch()) throw new Error("账号已切换，已忽略旧媒体请求");
-    const url = remote?.mediaId ? await resolveCanvasMediaUrl(remote.mediaId, local.url) : local.url;
-    return { ...local, url, ...(remote?.mediaId ? { mediaId: remote.mediaId } : {}), mediaStatus: remote?.mediaStatus || "failed" };
+    return { ...local, ...(remote?.mediaId ? { mediaId: remote.mediaId } : {}), mediaStatus: remote?.mediaStatus || "failed" };
 }
 
 export async function syncStoredImage(storageKey: string) {
@@ -68,8 +74,7 @@ export async function syncStoredImage(storageKey: string) {
     const remote = await uploadCanvasMedia(blob, "image");
     if (!remote?.mediaId) throw new Error("云端图片同步不可用，请稍后重试");
     const localUrl = await resolveImageUrl(storageKey, "");
-    const url = await resolveCanvasMediaUrl(remote.mediaId, localUrl);
-    return { url, storageKey, mediaId: remote.mediaId, mediaStatus: "synced" as const };
+    return { url: localUrl, storageKey, mediaId: remote.mediaId, mediaStatus: "synced" as const };
 }
 
 export async function resolveImageUrl(storageKey?: string, fallback = "") {
@@ -83,11 +88,34 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
 }
 
 export async function resolvePersistedImageUrl(mediaId?: string, storageKey?: string, fallback = "") {
-    if (mediaId) {
-        const remote = await resolveCanvasMediaUrl(mediaId, "");
-        if (remote) return remote;
+    return (await resolvePersistedImage(mediaId, storageKey, fallback)).url;
+}
+
+export async function resolvePersistedImage(mediaId?: string, storageKey?: string, fallback = "", forceRefresh = false): Promise<ResolvedImage> {
+    const localKey = normalizedImageStorageKey(storageKey, mediaId);
+    if (localKey && !forceRefresh) {
+        const localUrl = await resolveImageUrl(localKey, "");
+        if (localUrl) return { url: localUrl, storageKey: localKey };
     }
-    return resolveImageUrl(storageKey, fallback);
+    if (mediaId) {
+        if (failedMediaResolutions.has(mediaId) && !forceRefresh) return { url: fallback, storageKey: localKey };
+        if (forceRefresh) failedMediaResolutions.delete(mediaId);
+        const resolutionKey = `${forceRefresh ? "refresh" : "load"}:${localKey || mediaId}`;
+        const pending = pendingResolutions.get(resolutionKey);
+        if (pending) return pending;
+        const resolution = resolveRemoteImage(mediaId, localKey);
+        pendingResolutions.set(resolutionKey, resolution);
+        try {
+            return await resolution;
+        } finally {
+            if (pendingResolutions.get(resolutionKey) === resolution) pendingResolutions.delete(resolutionKey);
+        }
+    }
+    if (localKey) {
+        const localUrl = await resolveImageUrl(localKey, "");
+        if (localUrl) return { url: localUrl, storageKey: localKey };
+    }
+    return { url: fallback, storageKey: localKey };
 }
 
 export async function getImageBlob(storageKey: string) {
@@ -143,6 +171,42 @@ export function collectImageStorageKeys(value: unknown, keys = new Set<string>()
 
 function imageScopePrefix() {
     return `image:u${getCanvasStorageScopeId()}:`;
+}
+
+function normalizedImageStorageKey(storageKey?: string, mediaId?: string) {
+    if (storageKey?.startsWith(imageScopePrefix())) return storageKey;
+    if (!mediaId) return storageKey;
+    return `${imageScopePrefix()}media-${encodeURIComponent(mediaId)}`;
+}
+
+async function resolveRemoteImage(mediaId: string, storageKey?: string): Promise<ResolvedImage> {
+    const remoteUrl = await resolveCanvasMediaUrl(mediaId, "");
+    if (!remoteUrl) {
+        failedMediaResolutions.add(mediaId);
+        return { url: "", storageKey };
+    }
+    if (!storageKey) return { url: remoteUrl };
+    try {
+        const blob = await fetchImageBlob(remoteUrl);
+        return { url: await setImageBlob(storageKey, blob), storageKey };
+    } catch {
+        failedMediaResolutions.add(mediaId);
+        return { url: remoteUrl, storageKey };
+    }
+}
+
+async function fetchImageBlob(url: string) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error(`图片下载失败 (${response.status})`);
+        const blob = await response.blob();
+        if (!blob.size) throw new Error("图片内容为空");
+        return blob;
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
 function blobToDataUrl(blob: Blob) {

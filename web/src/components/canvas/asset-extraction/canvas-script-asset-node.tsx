@@ -317,7 +317,7 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
                 size: imageSizeForAspect(sourceMeta?.assetExtractionAspectRatio || "16:9"),
                 quality: sourceMeta?.assetExtractionImageQuality || "standard",
             };
-            const result = await requestEdit(generationConfig, prompt, [{ id: snapshot.sourceNodeId, name: `${snapshot.sourceTitle}.png`, type: snapshot.mimeType || "image/png", dataUrl: referenceUrl, storageKey: snapshot.sourceStorageKey }]).then((items) => items[0]);
+            const result = await requestEdit(generationConfig, prompt, [{ id: snapshot.sourceNodeId, name: `${snapshot.sourceTitle}.png`, type: snapshot.mimeType || "image/png", dataUrl: referenceUrl, storageKey: snapshot.sourceStorageKey, mediaId: snapshot.sourceMediaId }]).then((items) => items[0]);
             if (!result?.dataUrl) throw new Error("图片生成失败");
             const uploaded = await uploadImage(result.dataUrl);
             failedContentRef.current = uploaded.mediaId ? null : uploaded.url;

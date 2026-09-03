@@ -13,6 +13,7 @@ import type { CanvasNodeContext, CanvasPluginHost } from "@/types/canvas-plugin"
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { canvasNodeStackClass } from "@/lib/canvas/canvas-node-presentation";
 import { pauseOtherCanvasMedia } from "@/lib/canvas/canvas-media-playback";
+import { resolvePersistedImage } from "@/services/image-storage";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
@@ -1030,24 +1031,44 @@ function ImageContent({
     onToggleBatch?: () => void;
 }) {
     const source = node.metadata?.content || "";
-    const [imageState, setImageState] = useState<{ source: string; status: "loading" | "loaded" | "error"; reloadKey: number }>({ source: "", status: "loading", reloadKey: 0 });
-    const loadState = imageState.source === source ? imageState.status : "loading";
+    const requestRef = useRef(0);
+    const [imageState, setImageState] = useState<{ source: string; resolvedSource: string; status: "loading" | "loaded" | "error"; reloadKey: number; recoveries: number }>({ source: "", resolvedSource: "", status: "loading", reloadKey: 0, recoveries: 0 });
+    const currentState = imageState.source === source ? imageState : { source, resolvedSource: source, status: "loading" as const, reloadKey: 0, recoveries: 0 };
+    const resolveSource = useCallback(async (forceRefresh: boolean) => {
+        const request = ++requestRef.current;
+        setImageState((current) => ({ source, resolvedSource: current.source === source ? current.resolvedSource || source : source, status: "loading", reloadKey: current.source === source ? current.reloadKey : 0, recoveries: forceRefresh ? (current.source === source ? current.recoveries : 0) + 1 : 0 }));
+        const resolved = await resolvePersistedImage(node.metadata?.mediaId, node.metadata?.storageKey, source, forceRefresh);
+        if (request !== requestRef.current) return;
+        setImageState((current) => ({ source, resolvedSource: resolved.url || source, status: resolved.url ? "loading" : "error", reloadKey: current.reloadKey + 1, recoveries: current.recoveries }));
+    }, [node.metadata?.mediaId, node.metadata?.storageKey, source]);
+
+    useEffect(() => {
+        void resolveSource(false);
+        return () => {
+            requestRef.current += 1;
+        };
+    }, [resolveSource]);
+
+    const handleLoadError = () => {
+        setImageState((current) => ({ ...current, source, status: "error" }));
+    };
     return (
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
             <div className="relative h-full w-full overflow-hidden rounded-[8px] bg-black/20">
                 <img
-                    key={`${source}:${imageState.source === source ? imageState.reloadKey : 0}`}
-                    src={source}
+                    key={`${currentState.resolvedSource}:${currentState.reloadKey}`}
+                    src={currentState.resolvedSource}
                     alt={node.title}
                     draggable={false}
                     onDragStart={(event) => event.preventDefault()}
-                    onLoad={() => setImageState((current) => ({ source, status: "loaded", reloadKey: current.source === source ? current.reloadKey : 0 }))}
-                    onError={() => setImageState((current) => ({ source, status: "error", reloadKey: current.source === source ? current.reloadKey : 0 }))}
-                    className={`pointer-events-none block h-full w-full select-none transition-opacity duration-150 ${loadState === "loaded" ? "opacity-100" : "opacity-0"} ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
+                    decoding="async"
+                    onLoad={() => setImageState((current) => ({ ...current, source, status: "loaded" }))}
+                    onError={handleLoadError}
+                    className={`pointer-events-none block h-full w-full select-none transition-opacity duration-150 ${currentState.status === "loaded" ? "opacity-100" : "opacity-0"} ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
                 />
-                {loadState !== "loaded" ? (
+                {currentState.status !== "loaded" ? (
                     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/65 px-5 text-center text-white backdrop-blur-[2px]" data-canvas-no-zoom role="status" aria-live="polite">
-                        {loadState === "loading" ? (
+                        {currentState.status === "loading" ? (
                             <>
                                 <RefreshCw className="size-5 animate-spin opacity-70" />
                                 <span className="text-[12px] font-medium">图片加载中…</span>
@@ -1056,7 +1077,7 @@ function ImageContent({
                             <>
                                 <ImageIcon className="size-5 opacity-60" />
                                 <span className="text-[12px] font-medium">图片加载失败</span>
-                                <button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/25 bg-white/10 px-2.5 text-[11px] font-medium transition hover:bg-white/20" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setImageState((current) => ({ source, status: "loading", reloadKey: current.reloadKey + 1 })); }}><RefreshCw className="size-3.5" />重新加载</button>
+                                <button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/25 bg-white/10 px-2.5 text-[11px] font-medium transition hover:bg-white/20" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void resolveSource(true); }}><RefreshCw className="size-3.5" />重新加载</button>
                             </>
                         )}
                     </div>

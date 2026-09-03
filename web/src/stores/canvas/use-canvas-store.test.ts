@@ -52,6 +52,22 @@ describe("canvas project persistence", () => {
         expect(storage.has(projectKey(second.id))).toBe(false);
         expect(JSON.parse(storage.get(storeKey) || "null")).toEqual({ state: { projectIds: [first.id] } });
     });
+
+    it("detaches server-owned script sets when importing a project", async () => {
+        const { useCanvasStore } = await import("@/stores/canvas/use-canvas-store");
+        await useCanvasStore.persist.rehydrate();
+        const id = useCanvasStore.getState().importProject({
+            title: "导入",
+            nodes: [
+                { id: "extract", type: "asset-extraction", title: "提取", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { scriptSetId: "old-set", assetExtractionEpisodeId: "old-episode" } },
+                { id: "asset", type: "script-asset", title: "资产", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { scriptSetId: "old-set", scriptAssetId: "old-asset" } },
+            ],
+        });
+        const nodes = useCanvasStore.getState().projects.find((project) => project.id === id)?.nodes || [];
+        expect(nodes[0].metadata).toMatchObject({ scriptSetRecoveryPending: true });
+        expect(nodes[0].metadata?.scriptSetId).toBeUndefined();
+        expect(nodes[1].metadata?.scriptAssetId).toBeUndefined();
+    });
 });
 
 function createProject(id: string) {

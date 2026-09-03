@@ -159,6 +159,7 @@ export type CanvasNodeMetadata = {
     groupColor?: string;
     scriptSetId?: string;
     scriptSetNodeId?: string;
+    scriptSetRecoveryPending?: boolean;
     scriptSetExpanded?: boolean;
     scriptAssetId?: string;
     scriptVariantId?: string;
@@ -241,6 +242,7 @@ export type CanvasAssistantReference = {
     title: string;
     dataUrl?: string;
     storageKey?: string;
+    mediaId?: string;
     text?: string;
 };
 
@@ -248,6 +250,11 @@ export type CanvasAssistantImage = {
     id: string;
     dataUrl: string;
     storageKey?: string;
+    mediaId?: string;
+    mimeType?: string;
+    width?: number;
+    height?: number;
+    bytes?: number;
     prompt: string;
 };
 

@@ -10,7 +10,7 @@ import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/vide
 import { createCanvasVideoTask, isCanvasVideoModel, retryCanvasVideoTask, waitForCanvasVideoTask, type CanvasVideoStoredResult, type CanvasVideoTask } from "@/services/api/canvas-video";
 import { SHOW_AGENT_UI, SUCAI_INTEGRATION } from "@/constant/env";
 import { defaultConfig, modelOptionName, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
-import { getImageBlob, imageToDataUrl, resolveImageUrl, resolvePersistedImageUrl, storeImageLocally, uploadImage, type UploadedImage } from "@/services/image-storage";
+import { getImageBlob, imageToDataUrl, resolveImageUrl, resolvePersistedImage, resolvePersistedImageUrl, storeImageLocally, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { getMediaBlob, resolveMediaUrl, storeMediaFileLocally, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { resolveCanvasMediaUrl, uploadCanvasMedia } from "@/services/canvas-media";
 import { nanoid } from "nanoid";
@@ -1841,10 +1841,22 @@ function InfiniteCanvasPage() {
             const submittedReferenceLabelMap = node.metadata.submittedReferenceLabelMap
                 ? Object.fromEntries(Object.entries(node.metadata.submittedReferenceLabelMap).map(([id, label]) => [idMap.get(id) ?? id, label]))
                 : undefined;
+            const detachedScriptMetadata = [CanvasNodeType.AssetExtraction, CanvasNodeType.ScriptAsset].includes(node.type as CanvasNodeType)
+                ? {
+                    scriptSetId: undefined,
+                    scriptSetNodeId: undefined,
+                    scriptAssetId: undefined,
+                    scriptVariantId: undefined,
+                    assetExtractionNodeId: undefined,
+                    assetExtractionEpisodeId: undefined,
+                    ...(node.type === CanvasNodeType.AssetExtraction ? { scriptSetRecoveryPending: true } : {}),
+                }
+                : {};
             return {
                 ...node,
                 metadata: {
                     ...node.metadata,
+                    ...detachedScriptMetadata,
                     groupId: node.metadata.groupId ? idMap.get(node.metadata.groupId) : undefined,
                     referenceOrder: remapNodeIds(node.metadata.referenceOrder),
                     submittedReferenceOrder: remapNodeIds(node.metadata.submittedReferenceOrder),
@@ -2833,7 +2845,7 @@ function InfiniteCanvasPage() {
             unlockGenerationCompleteSound();
             const prompt = `只修改蒙版透明区域，其他区域保持不变。${userPrompt}`;
             const childId = nanoid();
-            const source = { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey };
+            const source = { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey, mediaId: node.metadata.mediaId };
             const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [source]);
             const childNode: CanvasNodeData = {
                 id: childId,
@@ -2918,7 +2930,7 @@ function InfiniteCanvasPage() {
             const title = buildAngleLabel(params);
             const prompt = buildAnglePrompt(params);
             const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [
-                { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey },
+                { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey, mediaId: node.metadata.mediaId },
             ]);
             const childNode: CanvasNodeData = {
                 id: childId,
@@ -2940,7 +2952,7 @@ function InfiniteCanvasPage() {
                 const image = await requestEdit(
                     generationConfig,
                     prompt,
-                    [{ id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey }],
+                    [{ id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey, mediaId: node.metadata.mediaId }],
                     undefined,
                     { signal: controller.signal },
                 ).then((items) => items[0]);
@@ -3197,7 +3209,7 @@ function InfiniteCanvasPage() {
                     const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content;
                     const sourceReference =
                         isImageNode && sourceNode?.metadata?.content
-                            ? [{ id: sourceNode.id, name: `${sourceNode.title || sourceNode.id}.png`, type: sourceNode.metadata.mimeType || "image/png", dataUrl: sourceNode.metadata.content, storageKey: sourceNode.metadata.storageKey }]
+                            ? [{ id: sourceNode.id, name: `${sourceNode.title || sourceNode.id}.png`, type: sourceNode.metadata.mimeType || "image/png", dataUrl: sourceNode.metadata.content, storageKey: sourceNode.metadata.storageKey, mediaId: sourceNode.metadata.mediaId }]
                             : [];
                     const referenceImages = sourceReference.length ? sourceReference : generationContext.referenceImages;
                     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
@@ -3926,7 +3938,11 @@ function InfiniteCanvasPage() {
 
     const insertAssistantImage = useCallback(
         async (image: CanvasAssistantImage) => {
-            const storedImage = image.storageKey ? { url: image.dataUrl, storageKey: image.storageKey, width: 1, height: 1, bytes: 0, mimeType: "image/png" } : await uploadImage(image.dataUrl);
+            const resolved = image.storageKey || image.mediaId ? await resolvePersistedImage(image.mediaId, image.storageKey, image.dataUrl) : null;
+            if (resolved && !resolved.url) throw new Error("图片内容不可用");
+            const storedImage = resolved
+                ? { url: resolved.url, storageKey: resolved.storageKey || image.storageKey || "", mediaId: image.mediaId, mediaStatus: image.mediaId ? "synced" as const : "uploading" as const, width: image.width || 1, height: image.height || 1, bytes: image.bytes || 0, mimeType: image.mimeType || "image/png" }
+                : await uploadImage(image.dataUrl);
             const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
             const config = fitNodeSize(meta.width, meta.height);
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
@@ -3982,12 +3998,12 @@ function InfiniteCanvasPage() {
                         position: { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 },
                         width: nextSize.width,
                         height: nextSize.height,
-                        metadata: { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height },
+                        metadata: { content: payload.url, storageKey: payload.storageKey, mediaId: payload.mediaId, mediaStatus: payload.mediaId ? "synced" : undefined, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height },
                     },
                 ]);
                 setSelectedNodeIds(new Set([id]));
             } else {
-                insertAssistantImage({ id: `asset-${Date.now()}`, prompt: payload.title, dataUrl: payload.dataUrl, storageKey: payload.storageKey });
+                insertAssistantImage({ id: `asset-${Date.now()}`, prompt: payload.title, dataUrl: payload.dataUrl, storageKey: payload.storageKey, mediaId: payload.mediaId, width: payload.width, height: payload.height, bytes: payload.bytes, mimeType: payload.mimeType });
             }
             setAssetPickerOpen(false);
         },
@@ -4832,8 +4848,10 @@ async function resolveReferenceImageUrls(urls: string[]) {
 }
 
 async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
-    const hydrated = await Promise.all(
-        nodes.map(async (node) => {
+    const hydrated = await mapWithConcurrency(
+        nodes,
+        6,
+        async (node) => {
             const content = node.metadata?.content;
             if (node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) {
                 if (node.metadata?.storageKey) {
@@ -4850,21 +4868,14 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
                 return node;
             }
             if (node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.ScriptAsset) return node;
-            if (node.metadata?.storageKey) {
-                const local = await getImageBlob(node.metadata.storageKey);
-                if (local?.size) {
-                    const localUrl = await resolveImageUrl(node.metadata.storageKey, content);
-                    return { ...node, metadata: { ...node.metadata, content: localUrl, mediaStatus: node.metadata.mediaId ? "synced" as const : node.metadata.mediaStatus } };
-                }
-            }
-            if (node.metadata?.mediaId) {
-                const resolved = await resolvePersistedImageUrl(node.metadata.mediaId, node.metadata.storageKey, content);
-                return resolved ? { ...node, metadata: { ...node.metadata, content: resolved } } : node;
+            if (node.metadata?.storageKey || node.metadata?.mediaId) {
+                const resolved = await resolvePersistedImage(node.metadata.mediaId, node.metadata.storageKey, content);
+                if (resolved.url) return { ...node, metadata: { ...node.metadata, content: resolved.url, storageKey: resolved.storageKey || node.metadata.storageKey, mediaStatus: node.metadata.mediaId ? "synced" as const : node.metadata.mediaStatus } };
             }
             if (!content) return node;
             if (!content.startsWith("data:image/")) return node;
             return { ...node, metadata: { ...node.metadata, ...imageMetadata(await storeImageLocally(content)) } };
-        }),
+        },
     );
     const nodeById = new Map(hydrated.map((node) => [node.id, node]));
     return hydrated.map((node) => {
@@ -4877,12 +4888,28 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
     });
 }
 
+async function mapWithConcurrency<T, R>(items: T[], limit: number, mapper: (item: T, index: number) => Promise<R>) {
+    const results = new Array<R>(items.length);
+    let nextIndex = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (nextIndex < items.length) {
+            const index = nextIndex++;
+            results[index] = await mapper(items[index], index);
+        }
+    });
+    await Promise.all(workers);
+    return results;
+}
+
 async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
-    const hydrateItem = async <T extends { dataUrl?: string; storageKey?: string }>(item: T) => {
-        if (item.storageKey) return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) };
+    const hydrateItem = async <T extends { dataUrl?: string; storageKey?: string; mediaId?: string }>(item: T) => {
+        if (item.storageKey || item.mediaId) {
+            const resolved = await resolvePersistedImage(item.mediaId, item.storageKey, item.dataUrl);
+            return { ...item, dataUrl: resolved.url, storageKey: resolved.storageKey || item.storageKey };
+        }
         if (item.dataUrl?.startsWith("data:image/")) {
             const image = await uploadImage(item.dataUrl);
-            return { ...item, dataUrl: image.url, storageKey: image.storageKey };
+            return { ...item, dataUrl: image.url, storageKey: image.storageKey, mediaId: image.mediaId };
         }
         return item;
     };

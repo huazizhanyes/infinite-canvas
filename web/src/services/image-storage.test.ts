@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
     uploadCanvasMedia: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock("@/services/object-url-cache", () => ({ cacheObjectUrl: vi.fn(() => "blo
 vi.mock("@/lib/canvas-account-scope", () => ({ getCanvasStorageScopeId: () => "1", getCanvasSessionEpoch: () => 7 }));
 vi.mock("@/services/canvas-media", () => mocks);
 
-import { storeImageLocally, syncStoredImage, uploadImage } from "@/services/image-storage";
+import { resolvePersistedImage, storeImageLocally, syncStoredImage, uploadImage } from "@/services/image-storage";
 
 describe("image OSS persistence", () => {
     beforeEach(() => {
@@ -30,6 +30,8 @@ describe("image OSS persistence", () => {
         mocks.resolveCanvasMediaUrl.mockReset();
         mocks.files.clear();
     });
+
+    afterEach(() => vi.unstubAllGlobals());
 
     it("returns the local preview without waiting for a remote upload", async () => {
         const image = await storeImageLocally(new Blob(["image"], { type: "image/png" }));
@@ -40,16 +42,59 @@ describe("image OSS persistence", () => {
         expect(mocks.uploadCanvasMedia).not.toHaveBeenCalled();
     });
 
-    it("returns the signed OSS URL after the remote upload succeeds", async () => {
+    it("keeps the local preview after the remote upload succeeds", async () => {
         mocks.uploadCanvasMedia.mockResolvedValue({ mediaId: "media-1", mediaStatus: "synced" });
-        mocks.resolveCanvasMediaUrl.mockResolvedValue("https://oss.example.com/canvas/media-1.png?signature=test");
 
         const image = await uploadImage(new Blob(["image"], { type: "image/png" }));
 
-        expect(mocks.resolveCanvasMediaUrl).toHaveBeenCalledWith("media-1", "blob:local-preview");
-        expect(image.url).toMatch(/^https:\/\/oss\.example\.com\//);
+        expect(mocks.resolveCanvasMediaUrl).not.toHaveBeenCalled();
+        expect(image.url).toBe("blob:local-preview");
         expect(image.mediaId).toBe("media-1");
         expect(image.mediaStatus).toBe("synced");
+    });
+
+    it("downloads a cloud image into the current device cache", async () => {
+        mocks.resolveCanvasMediaUrl.mockResolvedValue("https://oss.example.com/canvas/media-3.png?signature=fresh");
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["remote-image"], { type: "image/png" }), { status: 200 })));
+
+        const image = await resolvePersistedImage("media-3");
+
+        expect(image.url).toBe("blob:local-preview");
+        expect(image.storageKey).toBe("image:u1:media-media-3");
+        expect(mocks.files.get("image:u1:media-media-3")).toBeInstanceOf(Blob);
+    });
+
+    it("deduplicates concurrent downloads for the same cloud image", async () => {
+        mocks.resolveCanvasMediaUrl.mockResolvedValue("https://oss.example.com/canvas/media-4.png?signature=fresh");
+        const fetchMock = vi.fn(async () => new Response(new Blob(["remote-image"], { type: "image/png" }), { status: 200 }));
+        vi.stubGlobal("fetch", fetchMock);
+
+        const [first, second] = await Promise.all([resolvePersistedImage("media-4"), resolvePersistedImage("media-4")]);
+
+        expect(first.url).toBe("blob:local-preview");
+        expect(second.url).toBe("blob:local-preview");
+        expect(mocks.resolveCanvasMediaUrl).toHaveBeenCalledTimes(1);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not repeatedly request a media record that is already missing", async () => {
+        mocks.resolveCanvasMediaUrl.mockResolvedValue("");
+
+        await expect(resolvePersistedImage("missing-media")).resolves.toEqual({ url: "", storageKey: "image:u1:media-missing-media" });
+        await expect(resolvePersistedImage("missing-media")).resolves.toEqual({ url: "", storageKey: "image:u1:media-missing-media" });
+
+        expect(mocks.resolveCanvasMediaUrl).toHaveBeenCalledTimes(1);
+    });
+
+    it("allows an explicit reload to retry a previously missing media record", async () => {
+        mocks.resolveCanvasMediaUrl.mockResolvedValueOnce("").mockResolvedValueOnce("https://oss.example.com/recovered.png");
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["remote-image"], { type: "image/png" }), { status: 200 })));
+
+        await resolvePersistedImage("reload-media");
+        const recovered = await resolvePersistedImage("reload-media", undefined, "", true);
+
+        expect(recovered.url).toBe("blob:local-preview");
+        expect(mocks.resolveCanvasMediaUrl).toHaveBeenCalledTimes(2);
     });
 
     it("retries remote sync from the existing IndexedDB image", async () => {

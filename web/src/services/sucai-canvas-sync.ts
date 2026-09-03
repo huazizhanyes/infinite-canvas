@@ -3,6 +3,7 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { accountScopedKey, getCanvasAccountScope, getCanvasSessionEpoch } from "@/lib/canvas-account-scope";
 import { localForageStorage } from "@/lib/localforage-storage";
 import { nanoid } from "nanoid";
+import { serializeCanvasProjectForCloud } from "@/lib/canvas/canvas-cloud-serialization";
 
 type CloudProjectList = {
     projects?: CanvasProject[];
@@ -109,11 +110,13 @@ export async function syncSucaiCanvasProject(projectId: string) {
     await waitForCanvasHydration();
     const project = useCanvasStore.getState().projects.find((item) => item.id === projectId);
     if (!project) throw new Error("当前画布不存在");
-    await apiRequest(`/v1/projects/${encodeURIComponent(project.id)}`, {
+    const cloudProject = serializeCanvasProjectForCloud(project);
+    const response = await apiRequest<ApiResponse<{ project?: CanvasProject; conflict?: boolean; deleted?: boolean }>>(`/v1/projects/${encodeURIComponent(project.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project }),
+        body: JSON.stringify({ project: cloudProject }),
     });
+    if (response.data?.conflict) handleProjectConflict(project, response.data);
     pendingProjects.delete(project.id);
 }
 
@@ -187,20 +190,23 @@ async function flushPendingChanges(): Promise<boolean> {
         }),
         ...projects.map(async (project) => {
             try {
+                const cloudProject = serializeCanvasProjectForCloud(project);
                 const opResponse = await apiRequest<ApiResponse<{ ops?: Array<{ seq?: number }> }>>(`/v1/projects/${encodeURIComponent(project.id)}/ops`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ops: [{ opId: `${config?.userId || "user"}:${project.id}:${project.updatedAt}`, clientId: getClientId(), actorId: config?.userId || "", baseSeq: 0, opType: "project.update", payload: project }] }),
+                    body: JSON.stringify({ ops: [{ opId: `${config?.userId || "user"}:${project.id}:${project.updatedAt}`, clientId: getClientId(), actorId: config?.userId || "", baseSeq: 0, opType: "project.update", payload: cloudProject }] }),
                 }).catch(() => null);
                 const latestSeq = Math.max(...(opResponse?.data?.ops || []).map((item) => Number(item.seq || 0)), 0);
                 if (latestSeq > syncCursor) syncCursor = latestSeq;
                 const response = await apiRequest<ApiResponse<{ project?: CanvasProject; conflict?: boolean; deleted?: boolean }>>(`/v1/projects/${encodeURIComponent(project.id)}`, {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ project }),
+                    body: JSON.stringify({ project: cloudProject }),
                 });
-                if (response.data?.conflict && response.data.deleted) applyRemoteDeletion(project.id);
-                else if (response.data?.conflict && response.data.project) applyRemoteProject(response.data.project);
+                if (response.data?.conflict) {
+                    handleProjectConflict(project, response.data);
+                    saved = false;
+                }
             } catch (error) {
                 saved = false;
                 const current = useCanvasStore.getState().projects.find((item) => item.id === project.id);
@@ -213,6 +219,15 @@ async function flushPendingChanges(): Promise<boolean> {
     if (pendingDeletes.size || pendingProjects.size) scheduleFlush(RETRY_DELAY);
     await persistOutbox();
     return saved;
+}
+
+function handleProjectConflict(localProject: CanvasProject, response: { project?: CanvasProject; deleted?: boolean }) {
+    // Keep the local edit in the outbox with a newer timestamp. This makes a
+    // conflict recoverable instead of silently discarding one device's work.
+    const retry = { ...localProject, updatedAt: new Date(Date.now() + 1).toISOString() };
+    queueProject(retry);
+    if (response.deleted) applyRemoteDeletion(localProject.id);
+    else if (response.project) applyRemoteProject(response.project);
 }
 
 let clientId = "";

@@ -1,11 +1,12 @@
 import axios from "axios";
+import { getCanvasStorageScopeId } from "@/lib/canvas-account-scope";
 
 const TOKEN_KEY = "sucai_token";
 const API_BASE = import.meta.env.VITE_SUCAI_CANVAS_API_BASE || "";
 export const MAX_ASSET_IMAGE_BYTES = 20 * 1024 * 1024;
 
 export type CanvasMediaUpload = { mediaId: string; mediaStatus: "synced" | "failed" };
-export type CanvasMediaOwner = { projectId?: string; ownerType?: "asset"; ownerId?: string };
+export type CanvasMediaOwner = { projectId?: string; ownerType?: "asset" | "library"; ownerId?: string };
 export type CanvasMediaUploadStatus = "uploading" | "confirming" | "synced" | "failed";
 export type CanvasMediaUploadOptions = {
     signal?: AbortSignal;
@@ -35,14 +36,21 @@ export async function uploadCanvasMedia(blob: Blob, kind: "image" | "video" | "a
     const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : "";
     if (!token || !API_BASE) return null;
     const assetOwner = typeof owner !== "string" && owner.ownerType === "asset";
+    const libraryOwner = typeof owner !== "string" && owner.ownerType === "library";
     if (assetOwner && kind === "image" && blob.size > MAX_ASSET_IMAGE_BYTES) throw new Error("资产图片大小不能超过 20MB");
-    const projectId = assetOwner ? "" : typeof owner === "string" ? owner : owner.projectId || currentProjectId();
+    const projectId = assetOwner || libraryOwner ? "" : typeof owner === "string" ? owner : owner.projectId || currentProjectId();
     // Canvas-node media belongs to a project; library media belongs directly
     // to an asset so it can sync from non-project routes and across devices.
-    if (assetOwner && !owner.ownerId) return null;
-    if (!assetOwner && !projectId) return null;
+    const resolvedOwnerId = typeof owner !== "string" ? owner.ownerId : undefined;
+    const libraryOwnerId = `user-${getCanvasStorageScopeId()}`;
+    if (assetOwner && !resolvedOwnerId) return null;
+    if (!assetOwner && !libraryOwner && !projectId) {
+        return uploadCanvasMedia(blob, kind, { ownerType: "library", ownerId: libraryOwnerId }, options);
+    }
     const ownership = assetOwner
-        ? { ownerType: "asset" as const, ownerId: owner.ownerId }
+        ? { ownerType: "asset" as const, ownerId: resolvedOwnerId }
+        : libraryOwner
+        ? { ownerType: "library" as const, ownerId: resolvedOwnerId || libraryOwnerId }
         : typeof owner === "string"
         ? { projectId }
         : { projectId };

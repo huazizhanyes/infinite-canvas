@@ -14,7 +14,8 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
-import { resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { resolvePersistedImage, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { resolveCanvasMediaUrl } from "@/services/canvas-media";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { createCanvasVideoTask, isCanvasVideoModel, waitForCanvasVideoTask, type CanvasVideoTask } from "@/services/api/canvas-video";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -130,13 +131,13 @@ export default function VideoPage() {
         const nextReferences = await Promise.all(
             imageFiles.map(async (file) => {
                 const image = await uploadImage(file);
-                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
+                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, mediaId: image.mediaId };
             }),
         );
         const nextVideoReferences = await Promise.all(
             videoFiles.map(async (file) => {
                 const video = await uploadMediaFile(file, "video-reference");
-                return { id: nanoid(), name: file.name, type: video.mimeType, url: video.url, storageKey: video.storageKey, bytes: video.bytes, width: video.width, height: video.height, durationMs: video.durationMs };
+                return { id: nanoid(), name: file.name, type: video.mimeType, url: video.url, storageKey: video.storageKey, mediaId: video.mediaId, bytes: video.bytes, width: video.width, height: video.height, durationMs: video.durationMs };
             }),
         );
         const nextAudioReferences = filterAudioReferencesByDuration(
@@ -144,7 +145,7 @@ export default function VideoPage() {
             await Promise.all(
                 audioFiles.map(async (file) => {
                     const audio = await uploadMediaFile(file, "audio-reference");
-                    return { id: nanoid(), name: file.name, type: audio.mimeType, url: audio.url, storageKey: audio.storageKey, durationMs: audio.durationMs };
+                    return { id: nanoid(), name: file.name, type: audio.mimeType, url: audio.url, storageKey: audio.storageKey, mediaId: audio.mediaId, durationMs: audio.durationMs };
                 }),
             ),
             message.warning,
@@ -165,7 +166,7 @@ export default function VideoPage() {
             const nextReferences = await Promise.all(
                 blobs.slice(0, SEEDANCE_REFERENCE_LIMITS.images - references.length).map(async (blob, index) => {
                     const image = await uploadImage(blob);
-                    return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
+                    return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, mediaId: image.mediaId };
                 }),
             );
             setReferences((value) => [...value, ...nextReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
@@ -271,10 +272,9 @@ export default function VideoPage() {
         if (payload.kind === "text") {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
-            const stored = await uploadImage(payload.dataUrl);
-            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
+            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "image/png", dataUrl: payload.dataUrl, storageKey: payload.storageKey, mediaId: payload.mediaId }].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
         } else if (payload.kind === "video") {
-            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height }].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
+            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: "video/mp4", url: payload.url, storageKey: payload.storageKey, mediaId: payload.mediaId, width: payload.width, height: payload.height }].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
         }
         setAssetPickerOpen(false);
     };
@@ -741,19 +741,19 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     const videoReferences = await Promise.all(
         (log.videoReferences || []).map(async (item) => ({
             ...item,
-            url: item.storageKey ? await resolveMediaUrl(item.storageKey, item.url) : item.url,
+            url: item.mediaId ? await resolveCanvasMediaUrl(item.mediaId, await resolveMediaUrl(item.storageKey, item.url)) : item.storageKey ? await resolveMediaUrl(item.storageKey, item.url) : item.url,
         })),
     );
     const audioReferences = await Promise.all(
         (log.audioReferences || []).map(async (item) => ({
             ...item,
-            url: item.storageKey ? await resolveMediaUrl(item.storageKey, item.url) : item.url,
+            url: item.mediaId ? await resolveCanvasMediaUrl(item.mediaId, await resolveMediaUrl(item.storageKey, item.url)) : item.storageKey ? await resolveMediaUrl(item.storageKey, item.url) : item.url,
         })),
     );
     const references = await Promise.all(
         (log.references || []).map(async (item) => ({
             ...item,
-            dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
+            dataUrl: item.mediaId ? (await resolvePersistedImage(item.mediaId, item.storageKey, item.dataUrl)).url : await resolveImageUrl(item.storageKey, item.dataUrl),
         })),
     );
     const config = normalizeLogConfig(log);

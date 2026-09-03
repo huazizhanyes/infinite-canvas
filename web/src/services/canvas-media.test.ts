@@ -62,6 +62,18 @@ describe("resolveCanvasProjectId", () => {
         expect(body).not.toHaveProperty("projectId");
     });
 
+    it("uses a user-scoped library owner for standalone workbench media", async () => {
+        const postMock = vi.spyOn(axios, "post").mockResolvedValue({ data: { data: { media: { id: "library-media-1" }, deduplicated: true } } });
+        vi.stubGlobal("window", { location: location({ pathname: "/image" }) });
+        vi.stubGlobal("localStorage", { getItem: vi.fn(() => "token-1") });
+
+        await expect(uploadCanvasMedia(new Blob(["image"], { type: "image/png" }), "image")).resolves.toEqual({ mediaId: "library-media-1", mediaStatus: "synced" });
+
+        const [, body] = postMock.mock.calls[0];
+        expect(body).toEqual(expect.objectContaining({ ownerType: "library", ownerId: expect.stringMatching(/^user-/), kind: "image" }));
+        expect(body).not.toHaveProperty("projectId");
+    });
+
     it("reports real upload progress and confirming state", async () => {
         const statuses: string[] = [];
         const progress: number[] = [];

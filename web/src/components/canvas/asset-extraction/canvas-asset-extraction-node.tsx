@@ -15,6 +15,7 @@ import { modelOptionName, useConfigStore, useEffectiveConfig } from "@/stores/us
 import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType } from "@/types/canvas";
 import type { CanvasNodeContext } from "@/types/canvas-plugin";
+import { resolveCanvasProjectId } from "@/services/canvas-media";
 
 export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
     const { message } = App.useApp();
@@ -44,6 +45,8 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
     const ctxRef = useRef(ctx);
     const resumedAnalysisRef = useRef<string | undefined>(undefined);
     const resumedImageBatchesRef = useRef(new Set<string>());
+    const recoveringScriptSetRef = useRef(false);
+    const projectId = typeof window === "undefined" ? "" : resolveCanvasProjectId(window.location);
     ctxRef.current = ctx;
     const currentEpisode = episodes.find((episode) => episode.id === episodeId);
     const episodeAssets = assets.filter((asset) => asset.episodeIds?.includes(episodeId || ""));
@@ -121,26 +124,49 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
         return () => controller.abort();
     }, [aspectRatio, connection, generationTargetKey, generationTargets.length, imageModel, imageQuality, quoteRequestId]);
 
+    const recoverScriptSet = useCallback(async () => {
+        if (!connection || !projectId || recoveringScriptSetRef.current) return;
+        recoveringScriptSetRef.current = true;
+        try {
+            const created = await canvasScriptApi.createSet(connection, { projectId, nodeId: ctxRef.current.node.id, title: recordName || "未命名", visualStyle });
+            const episode = created.episodes[0] || await canvasScriptApi.createEpisode(connection, created.id, { content });
+            ctxRef.current.updateMetadata({ scriptSetId: created.id, scriptSetNodeId: ctxRef.current.node.id, scriptSetRecoveryPending: undefined, ...(episode ? { assetExtractionEpisodeId: episode.id } : {}) });
+            setEpisodes(episode ? [episode, ...created.episodes.filter((item) => item.id !== episode.id)] : created.episodes);
+            if (episode && !ctxRef.current.node.metadata?.content) activateEpisode(episode);
+        } catch (error) {
+            message.error(`剧集恢复失败：${readError(error)}`);
+        } finally {
+            recoveringScriptSetRef.current = false;
+        }
+    }, [activateEpisode, connection, content, message, projectId, recordName, visualStyle]);
+
     useEffect(() => {
-        if (!connection || !scriptSetId) return;
+        if (!connection || !projectId || recoveringScriptSetRef.current) return;
         let canceled = false;
-        void canvasScriptApi
-            .getSet(connection, scriptSetId)
-            .then((set) => {
+        const load = async () => {
+            if (!scriptSetId) {
+                if (ctxRef.current.node.metadata?.scriptSetRecoveryPending) await recoverScriptSet();
+                return;
+            }
+            try {
+                const set = await canvasScriptApi.getSet(connection, scriptSetId);
                 if (canceled) return;
                 const restoredName = ctxRef.current.node.metadata?.assetExtractionRecordName || (set.title && set.title !== "资产提取" ? set.title : "未命名");
                 setRecordName(restoredName);
                 if (ctxRef.current.node.metadata?.assetExtractionRecordName !== restoredName) ctxRef.current.updateMetadata({ assetExtractionRecordName: restoredName });
                 setEpisodes(set.episodes);
                 const selected = set.episodes.find((episode) => episode.id === episodeId) || set.episodes[0];
-                if (!selected) return;
-                if (selected.id !== episodeId || ctxRef.current.node.metadata?.content === undefined) activateEpisode(selected);
-            })
-            .catch((error) => message.error(`读取剧集失败：${readError(error)}`));
+                if (selected && (selected.id !== episodeId || ctxRef.current.node.metadata?.content === undefined)) activateEpisode(selected);
+            } catch (error) {
+                if (!canceled && (error as { response?: { status?: number } })?.response?.status === 404) await recoverScriptSet();
+                else if (!canceled) message.error(`读取剧集失败：${readError(error)}`);
+            }
+        };
+        void load();
         return () => {
             canceled = true;
         };
-    }, [activateEpisode, connection, episodeId, message, scriptSetId]);
+    }, [activateEpisode, connection, episodeId, message, projectId, recoverScriptSet, scriptSetId]);
 
     const saveRecordName = async () => {
         const next = recordName.trim() || "未命名";
