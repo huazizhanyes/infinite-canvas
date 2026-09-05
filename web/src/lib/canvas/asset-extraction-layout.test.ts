@@ -87,7 +87,7 @@ describe("buildAssetExtractionOps", () => {
         expect(ops).toEqual([{ type: "update_node", id: existing.id, metadata: { scriptAssetStale: true } }]);
     });
 
-    it("仅删除已被同类型同名活动资产替代的历史重复节点", () => {
+    it("同类型同名资产也保留历史节点，等待用户手动决定是否复用", () => {
         const duplicate: CanvasNodeData = {
             id: "script-asset-old-c1",
             type: CanvasNodeType.ScriptAsset,
@@ -99,8 +99,8 @@ describe("buildAssetExtractionOps", () => {
         };
         const ops = buildAssetExtractionOps(source, [asset("c1", "character", "秦墨")], [source, duplicate], []);
 
-        expect(ops).toContainEqual({ type: "delete_node", ids: [duplicate.id] });
-        expect(ops).not.toContainEqual({ type: "update_node", id: duplicate.id, metadata: { scriptAssetStale: true } });
+        expect(ops).not.toContainEqual({ type: "delete_node", ids: [duplicate.id] });
+        expect(ops).toContainEqual({ type: "update_node", id: duplicate.id, metadata: { scriptAssetStale: true } });
     });
 });
 
@@ -116,7 +116,12 @@ describe("buildAssetGenerationTargets", () => {
             { ...asset("palace", "scene", "大乾皇宫太极宫"), episodeIds: ["ep-2"], occurrences: [{ episodeId: "ep-2", matchStatus: "new" }] },
         ];
 
-        expect(buildAssetGenerationTargets(episodeAssets, "ep-2")).toEqual([{ assetId: "li-shi-long" }, { assetId: "cheng-san-fu" }, { assetId: "map" }, { assetId: "palace" }]);
+        expect(buildAssetGenerationTargets(episodeAssets, "ep-2")).toEqual([
+            { assetId: "li-shi-long", imageLayout: "character-sheet" },
+            { assetId: "cheng-san-fu", imageLayout: "character-sheet" },
+            { assetId: "map", imageLayout: "single" },
+            { assetId: "palace", imageLayout: "scene-4view" },
+        ]);
     });
 
     it("只提交本集缺图资产，不重复生成已有的复用资产", () => {
@@ -128,7 +133,7 @@ describe("buildAssetGenerationTargets", () => {
         } satisfies ScriptAsset;
         const fresh = { ...asset("fresh", "scene", "太极宫"), episodeIds: ["ep-2"], occurrences: [{ episodeId: "ep-2", matchStatus: "new" }] } satisfies ScriptAsset;
 
-        expect(buildAssetGenerationTargets([reused, fresh], "ep-2")).toEqual([{ assetId: "fresh" }]);
+        expect(buildAssetGenerationTargets([reused, fresh], "ep-2")).toEqual([{ assetId: "fresh", imageLayout: "scene-4view" }]);
     });
 
     it("本集变体缺图时提交 variantId，已有变体图时跳过", () => {
@@ -137,7 +142,7 @@ describe("buildAssetGenerationTargets", () => {
             occurrences: [{ episodeId: "ep-2", matchStatus: "variant", variantId: "v2" }],
             variants: [{ id: "v2", name: "雨夜林夏", state: {}, visualDescription: "", imagePrompt: "", image: null }],
         };
-        expect(buildAssetGenerationTargets([item], "ep-2")).toEqual([{ assetId: "c1", variantId: "v2" }]);
+        expect(buildAssetGenerationTargets([item], "ep-2")).toEqual([{ assetId: "c1", variantId: "v2", imageLayout: "character-sheet" }]);
 
         item.variants[0].image = { id: "img-v2", imageUrl: "https://example.test/v2.png", status: "success", selected: true };
         expect(buildAssetGenerationTargets([item], "ep-2")).toEqual([]);
@@ -146,5 +151,20 @@ describe("buildAssetGenerationTargets", () => {
     it("跳过已直接复用或基于快照生成图片的本地资产节点", () => {
         const missing = { ...asset("c1", "character", "林夏"), episodeIds: ["ep-1"], occurrences: [{ episodeId: "ep-1", matchStatus: "new" }] } satisfies ScriptAsset;
         expect(buildAssetGenerationTargets([missing], "ep-1", false, new Set(["c1"]))).toEqual([]);
+    });
+
+    it("同类型同名资产不再自动删除历史节点，交给用户手动连线复用", () => {
+        const oldNode: CanvasNodeData = {
+            id: "script-asset-old",
+            type: CanvasNodeType.ScriptAsset,
+            title: "秦墨",
+            position: { x: 0, y: 0 },
+            width: 560,
+            height: 320,
+            metadata: { assetExtractionNodeId: source.id, scriptAssetId: "old", scriptAssetType: "character" },
+        };
+        const ops = buildAssetExtractionOps(source, [asset("new", "character", "秦墨")], [source, oldNode], []);
+        expect(ops).toContainEqual({ type: "update_node", id: oldNode.id, metadata: { scriptAssetStale: true } });
+        expect(ops.some((op) => op.type === "delete_node")).toBe(false);
     });
 });

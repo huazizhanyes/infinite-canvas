@@ -61,12 +61,13 @@ function SelectTrigger({
 
 function SelectContent({
   className,
+  viewportClassName,
   children,
   position = "item-aligned",
   align = "center",
   hideScrollButtons = false,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content> & { hideScrollButtons?: boolean }) {
+}: React.ComponentProps<typeof SelectPrimitive.Content> & { hideScrollButtons?: boolean; viewportClassName?: string }) {
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -79,11 +80,13 @@ function SelectContent({
       >
         {!hideScrollButtons ? <SelectScrollUpButton /> : null}
         <SelectPrimitive.Viewport
+          data-slot="select-viewport"
           data-position={position}
           className={cn(
             "data-[position=popper]:h-(--radix-select-trigger-height) data-[position=popper]:w-full data-[position=popper]:min-w-(--radix-select-trigger-width)",
             position === "popper" && "",
-            hideScrollButtons && "thin-scrollbar max-h-[18rem] overflow-y-auto"
+            hideScrollButtons && "thin-scrollbar max-h-[18rem] overflow-y-auto",
+            viewportClassName
           )}
         >
           {children}

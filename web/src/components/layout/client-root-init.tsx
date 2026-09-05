@@ -106,10 +106,13 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 faceFriendly: Boolean(item.faceFriendly || item.face_friendly || item.channel === "59" && item.upstream_model === "minimax-h3"),
                 displayNotice: item.displayNotice || item.display_notice || null,
                 freePromotion: item.free_promotion || null,
+                statsRecent10: item.statsRecent10 || null,
+                recent10: item.recent10 || null,
             },
         });
         const refreshVideoPricing = () => {
             void requestModels("/v1/video/models", true).then((videoModels) => {
+                if (!videoModels.length) return;
                 const current = useConfigStore.getState().config;
                 const channels = current.channels.map((channel) => channel.id === SUCAI_CHANNEL_ID
                     ? createModelChannel({ ...channel, models: [...channel.models.filter((item) => item.capability !== "video"), ...videoModels.map(mapVideoModel)] })
@@ -121,7 +124,32 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 if (!selectedExists) updateConfig("videoModel", nextDefault?.id ? encodeChannelModel(SUCAI_CHANNEL_ID, nextDefault.id) : "");
             }).catch(() => undefined);
         };
+        let refreshTimer: number | undefined;
+        const refreshVideoStats = () => {
+            if (document.visibilityState === "hidden") return;
+            void requestModels("/v1/video/models", true).then((videoModels) => {
+                if (!videoModels.length) return;
+                const current = useConfigStore.getState().config;
+                const channels = current.channels.map((channel) => channel.id === SUCAI_CHANNEL_ID
+                    ? createModelChannel({ ...channel, models: [...channel.models.filter((item) => item.capability !== "video"), ...videoModels.map(mapVideoModel)] })
+                    : channel);
+                updateConfig("channels", channels);
+                updateConfig("models", modelOptionsFromChannels(channels));
+            }).catch(() => undefined);
+        };
+        const startStatsRefresh = () => {
+            if (refreshTimer === undefined) refreshTimer = window.setInterval(refreshVideoStats, 60_000);
+        };
+        const stopStatsRefresh = () => {
+            if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
+            refreshTimer = undefined;
+        };
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === "hidden") stopStatsRefresh();
+            else { refreshVideoStats(); startStatsRefresh(); }
+        };
         window.addEventListener("canvas-video-pricing-changed", refreshVideoPricing);
+        document.addEventListener("visibilitychange", handleVisibilityChange);
 
         void Promise.all([requestModels("/v1/models"), requestModels("/v1/video/models", true).catch(() => [])])
             .then(async ([models, videoModels]) => {
@@ -178,12 +206,18 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     console.warn("[SucaiCanvasSync] initialization failed", error);
                 });
                 setSucaiState("ready");
+                refreshVideoStats();
+                startStatsRefresh();
             })
             .catch((error) => {
                 setSucaiError(error instanceof Error ? error.message : "画布初始化失败");
                 setSucaiState("error");
             });
-        return () => window.removeEventListener("canvas-video-pricing-changed", refreshVideoPricing);
+        return () => {
+            window.removeEventListener("canvas-video-pricing-changed", refreshVideoPricing);
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
+            stopStatsRefresh();
+        };
     }, [setConfigDialogOpen, updateConfig]);
 
     useEffect(() => {

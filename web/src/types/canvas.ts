@@ -172,6 +172,7 @@ export type CanvasNodeMetadata = {
     assetExtractionEpisodeId?: string;
     assetExtractionRunId?: string;
     assetExtractionStatus?: "idle" | "analyzing" | "success" | "error";
+    assetExtractionMode?: "exhaustive";
     assetExtractionVisualStyle?: string;
     assetExtractionTextModel?: string;
     assetExtractionImageModel?: string;
@@ -198,6 +199,10 @@ export type CanvasNodeMetadata = {
     scriptAssetVisualDescription?: string;
     scriptAssetImagePrompt?: string;
     scriptAssetImageStatus?: string;
+    /** Image composition used for the asset generation result. */
+    scriptAssetImageLayout?: "single" | "character-sheet" | "scene-4view";
+    scriptAssetSceneViewMode?: "environment" | "interior";
+    scriptAssetSourceExcerpt?: string;
     scriptAssetSourceSnapshot?: ScriptAssetImageSnapshot;
     scriptAssetImageOrigin?: "local" | "inherited" | "derived";
     scriptAssetStale?: boolean;

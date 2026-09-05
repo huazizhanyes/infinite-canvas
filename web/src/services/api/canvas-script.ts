@@ -3,6 +3,15 @@ import axios from "axios";
 import type { UserAssetConnection } from "@/services/api/user-assets";
 
 export type ScriptAssetType = "character" | "scene" | "prop";
+export type ScriptAssetImageLayout = "single" | "character-sheet" | "scene-4view";
+export type ScriptExtractionMode = "exhaustive";
+
+export type ScriptExtractionOptions = {
+    mode: ScriptExtractionMode;
+    deduplicate: false;
+    includeSourceExcerpts: true;
+    sceneImageLayout: "scene-4view";
+};
 
 export type ScriptEpisode = {
     id: string;
@@ -52,6 +61,9 @@ export type ScriptAsset = {
     identity: Record<string, unknown>;
     visualDescription: string;
     imagePrompt: string;
+    imageLayout?: ScriptAssetImageLayout;
+    sceneViewMode?: "environment" | "interior";
+    sourceExcerpt?: string;
     manuallyEdited: boolean;
     status: string;
     firstEpisodeId?: string;
@@ -97,7 +109,10 @@ export type ScriptGenerationImage = {
     imageUrl?: string;
     selected: boolean;
     error?: string;
+    imageLayout?: ScriptAssetImageLayout;
 };
+
+export type ScriptGenerationTarget = { assetId: string; variantId?: string; imageLayout?: ScriptAssetImageLayout };
 
 export type ScriptGenerationBatch = {
     id: string;
@@ -127,7 +142,7 @@ export const canvasScriptApi = {
     createEpisode: (connection: UserAssetConnection, setId: string, data: { title?: string; content?: string } = {}) => request<ScriptEpisode>(connection, "post", `/script-sets/${setId}/episodes`, data),
     updateEpisode: (connection: UserAssetConnection, id: string, data: { title?: string; content?: string }) => request<ScriptEpisode>(connection, "put", `/script-episodes/${id}`, data),
     deleteEpisode: (connection: UserAssetConnection, id: string) => request<{ success: boolean }>(connection, "delete", `/script-episodes/${id}`),
-    analyzeEpisode: (connection: UserAssetConnection, id: string, requestId: string, model?: string) => request<ScriptAnalysisRun>(connection, "post", `/script-episodes/${id}/analyze`, { requestId, model }),
+    analyzeEpisode: (connection: UserAssetConnection, id: string, requestId: string, model?: string, options: ScriptExtractionOptions = DEFAULT_SCRIPT_EXTRACTION_OPTIONS) => request<ScriptAnalysisRun>(connection, "post", `/script-episodes/${id}/analyze`, { requestId, model, ...options }),
     getAnalysis: (connection: UserAssetConnection, id: string) => request<ScriptAnalysisRun>(connection, "get", `/script-analysis/${id}`),
     listAssets: (connection: UserAssetConnection, setId: string, type?: ScriptAssetType) => request<{ assets: ScriptAsset[]; pending: ScriptPendingMention[] }>(connection, "get", `/script-sets/${setId}/assets`, undefined, type ? { type } : undefined),
     archiveAssets: async (connection: UserAssetConnection, setId: string) => {
@@ -138,8 +153,15 @@ export const canvasScriptApi = {
     updateAsset: (connection: UserAssetConnection, id: string, data: Partial<Pick<ScriptAsset, "name" | "aliases" | "identity" | "visualDescription" | "imagePrompt" | "status">>) => request<ScriptAsset>(connection, "put", `/script-assets/${id}`, data),
     mergeAsset: (connection: UserAssetConnection, id: string, sourceAssetId: string) => request(connection, "post", `/script-assets/${id}/merge`, { sourceAssetId }),
     resolveMention: (connection: UserAssetConnection, id: string, decision: "reuse" | "variant" | "new", assetId?: string) => request<ScriptPendingMention>(connection, "post", `/script-mentions/${id}/resolve`, { decision, assetId }),
-    generateAssets: (connection: UserAssetConnection, scriptSetId: string, targets: Array<{ assetId: string; variantId?: string }>, requestId: string, model?: string, quoteToken?: string) => request<ScriptGenerationBatch>(connection, "post", "/script-assets/generate", { scriptSetId, targets, requestId, model, quoteToken }),
+    generateAssets: (connection: UserAssetConnection, scriptSetId: string, targets: ScriptGenerationTarget[], requestId: string, model?: string, quoteToken?: string) => request<ScriptGenerationBatch>(connection, "post", "/script-assets/generate", { scriptSetId, targets, requestId, model, quoteToken }),
     getGenerationBatch: (connection: UserAssetConnection, id: string) => request<ScriptGenerationBatch>(connection, "get", `/script-assets/generation-batches/${id}`),
+};
+
+export const DEFAULT_SCRIPT_EXTRACTION_OPTIONS: ScriptExtractionOptions = {
+    mode: "exhaustive",
+    deduplicate: false,
+    includeSourceExcerpts: true,
+    sceneImageLayout: "scene-4view",
 };
 
 export function notifyScriptSetUpdated(scriptSetId: string) {

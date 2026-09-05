@@ -190,4 +190,20 @@ describe("buildNodeMentionReferences", () => {
 
         expect(reference?.previewUrl).toBe("blob:restored-local-image");
     });
+
+    it("keeps a persisted image reference visible while its preview is hydrating", () => {
+        const node: CanvasNodeData = {
+            id: "persisted-image",
+            type: CanvasNodeType.Image,
+            title: "待恢复图片",
+            position: { x: 0, y: 0 },
+            width: 320,
+            height: 240,
+            metadata: { storageKey: "image:u1:pending-image", mediaId: "media-pending-image" },
+        };
+
+        expect(buildNodeMentionReferences(node, [node], []).map((reference) => [reference.kind, reference.nodeId, reference.active])).toEqual([
+            ["image", "persisted-image", true],
+        ]);
+    });
 });

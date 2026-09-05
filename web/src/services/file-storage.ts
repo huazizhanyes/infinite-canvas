@@ -2,7 +2,7 @@ import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { cacheObjectUrl, revokeCachedObjectUrl } from "@/services/object-url-cache";
 import { getCanvasStorageScopeId, getCanvasSessionEpoch } from "@/lib/canvas-account-scope";
-import { uploadCanvasMedia } from "@/services/canvas-media";
+import { uploadCanvasMedia, resolveCanvasMediaUrl } from "@/services/canvas-media";
 
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number; mediaId?: string; mediaStatus?: "uploading" | "synced" | "failed" };
 
@@ -54,6 +54,14 @@ export async function resolveMediaUrl(storageKey?: string, fallback = "") {
     if (!blob) return fallback;
     const url = cacheObjectUrl(objectUrls, storageKey, blob);
     return url;
+}
+
+/** Resolve media after a refresh: browser cache first, then the durable server record. */
+export async function resolvePersistedMediaUrl(mediaId?: string, storageKey?: string, fallback = "") {
+    const localUrl = await resolveMediaUrl(storageKey, "");
+    if (localUrl) return localUrl;
+    if (!mediaId) return fallback;
+    return resolveCanvasMediaUrl(mediaId, fallback);
 }
 
 export async function getMediaBlob(storageKey: string) {

@@ -11,7 +11,7 @@ import { createCanvasVideoTask, isCanvasVideoModel, retryCanvasVideoTask, waitFo
 import { SHOW_AGENT_UI, SUCAI_INTEGRATION } from "@/constant/env";
 import { defaultConfig, modelOptionName, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { getImageBlob, imageToDataUrl, resolveImageUrl, resolvePersistedImage, resolvePersistedImageUrl, storeImageLocally, uploadImage, type UploadedImage } from "@/services/image-storage";
-import { getMediaBlob, resolveMediaUrl, storeMediaFileLocally, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { getMediaBlob, resolveMediaUrl, resolvePersistedMediaUrl, storeMediaFileLocally, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { resolveCanvasMediaUrl, uploadCanvasMedia } from "@/services/canvas-media";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
@@ -88,6 +88,10 @@ import {
 } from "@/types/canvas";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio } from "@/types/media";
+
+const CANVAS_VIEW_PADDING_PX = 480;
+const CANVAS_RETENTION_PADDING_PX = 900;
+const CANVAS_RETENTION_CLEANUP_DELAY_MS = 500;
 
 // 内置节点注册到统一注册表(模块加载时执行一次)
 registerBuiltinNodes();
@@ -279,42 +283,29 @@ function ConnectionCreateMenu({
     );
 }
 
-function ConnectionCreateOption({ theme, icon, title, description, accent, onClick }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; icon: React.ReactNode; title: string; description?: string; accent?: { color: string; background: string }; onClick?: () => void }) {
+function ConnectionCreateOption({ theme, icon, title, description, onClick }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; icon: React.ReactNode; title: string; description?: string; onClick?: () => void }) {
     return (
         <button
             type="button"
-            className="flex h-11 w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-left transition"
+            className="flex min-h-12 w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left transition"
             style={{ color: theme.node.text }}
             onClick={onClick}
             onMouseEnter={(event) => (event.currentTarget.style.background = theme.node.fill)}
             onMouseLeave={(event) => (event.currentTarget.style.background = "transparent")}
         >
-            <span className="grid size-8 shrink-0 place-items-center rounded-md [&_svg]:size-4" style={{ background: accent?.background || theme.node.fill, color: accent?.color || theme.node.muted }}>
+            <span className="grid size-8 shrink-0 place-items-center rounded-md [&_svg]:size-5" style={{ color: theme.node.text }}>
                 {icon}
             </span>
             <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5 text-[11px] font-semibold leading-4">{title}</span>
+                <span className="flex items-center gap-2 text-sm font-semibold leading-5">{title}</span>
                 {description ? (
-                    <span className="block truncate text-[10px] leading-[13px]" style={{ color: theme.node.muted }}>
+                    <span className="block truncate text-xs leading-4" style={{ color: theme.node.text }}>
                         {description}
                     </span>
                 ) : null}
             </span>
         </button>
     );
-}
-
-function nodeCreateMenuAccent(type: string) {
-    const accents: Record<string, { color: string; background: string }> = {
-        [CanvasNodeType.Text]: { color: "#818cf8", background: "rgba(99,102,241,.14)" },
-        [CanvasNodeType.Image]: { color: "#34d399", background: "rgba(16,185,129,.14)" },
-        [CanvasNodeType.Video]: { color: "#22d3ee", background: "rgba(6,182,212,.14)" },
-        [CanvasNodeType.Audio]: { color: "#fb7185", background: "rgba(244,63,94,.14)" },
-        [CanvasNodeType.Group]: { color: "#a78bfa", background: "rgba(139,92,246,.14)" },
-        [CanvasNodeType.AssetExtraction]: { color: "#38bdf8", background: "rgba(14,165,233,.14)" },
-        [CanvasNodeType.ScriptAsset]: { color: "#34d399", background: "rgba(16,185,129,.14)" },
-    };
-    return accents[type] || { color: "#38bdf8", background: "rgba(14,165,233,.14)" };
 }
 
 function NodeCreateMenu({ position, scale, onCreate, onClose }: { position: Position; scale: number; onCreate: (type: string) => void; onClose: () => void }) {
@@ -333,22 +324,22 @@ function NodeCreateMenu({ position, scale, onCreate, onClose }: { position: Posi
     return (
         <div
             ref={menuRef}
-            className="absolute z-[120] max-h-[66vh] w-[240px] origin-top-left overflow-y-auto rounded-xl border p-2 shadow-2xl backdrop-blur thin-scrollbar"
+            className="absolute z-[120] max-h-[70vh] w-[270px] origin-top-left overflow-y-auto rounded-[14px] border p-2.5 shadow-2xl backdrop-blur thin-scrollbar"
             data-canvas-no-zoom
             style={{ left: position.x, top: position.y, transform: `scale(${1 / Math.max(scale, 0.05)})`, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             onPointerDown={(event) => event.stopPropagation()}
         >
-            <div className="mb-1 flex items-center justify-between px-1">
-                <span className="text-xs font-medium" style={{ color: theme.node.muted }}>
+            <div className="mb-2 flex items-center justify-between px-1">
+                <span className="text-sm font-medium" style={{ color: theme.node.text }}>
                     选择节点
                 </span>
-                <button type="button" className="grid size-6 place-items-center rounded-md opacity-55 transition hover:opacity-100" onClick={onClose} aria-label="关闭">
-                    <X className="size-3.5" />
+                <button type="button" className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100" onClick={onClose} aria-label="关闭">
+                    <X className="size-4" />
                 </button>
             </div>
-            <div className="grid gap-0.5">
+            <div className="grid gap-1">
                 {definitions.map((def) => (
-                    <ConnectionCreateOption key={def.type} theme={theme} icon={def.icon} title={def.title} description={def.description} accent={nodeCreateMenuAccent(def.type)} onClick={() => onCreate(def.type)} />
+                    <ConnectionCreateOption key={def.type} theme={theme} icon={def.icon} title={def.title} description={def.description} onClick={() => onCreate(def.type)} />
                 ))}
             </div>
         </div>
@@ -456,6 +447,7 @@ function InfiniteCanvasPage() {
     const [chatSessions, setChatSessions] = useState<CanvasAssistantSession[]>([]);
     const [activeChatId, setActiveChatId] = useState<string | null>(null);
     const [viewport, setViewport] = useState<ViewportTransform>({ x: 0, y: 0, k: 1 });
+    const [canvasInteracting, setCanvasInteracting] = useState(false);
     const [size, setSize] = useState({ width: 1200, height: 720 });
     const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
     const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
@@ -506,6 +498,8 @@ function InfiniteCanvasPage() {
     const connectionsRef = useRef(connections);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
     const viewportRef = useRef(viewport);
+    const retainedNodeIdsRef = useRef<Set<string>>(new Set());
+    const retentionCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, options?: CanvasNodeGenerationOptions) => Promise<void>) | null>(null);
     const connectingParamsRef = useRef(connectingParams);
     const batchConnectingRef = useRef<ConnectionHandle[] | null>(batchConnectingParams);
@@ -706,7 +700,7 @@ function InfiniteCanvasPage() {
                         if (!hydratedNode || !base) return node;
                         if (base === node) return hydratedNode;
                         if (base.metadata?.storageKey && base.metadata.storageKey === node.metadata?.storageKey && hydratedNode.metadata?.content) {
-                            return { ...node, metadata: { ...node.metadata, content: hydratedNode.metadata.content } };
+                            return { ...node, metadata: { ...node.metadata, ...hydratedNode.metadata, status: node.metadata?.status, videoTaskId: node.metadata?.videoTaskId } };
                         }
                         return node;
                     });
@@ -1329,14 +1323,28 @@ function InfiniteCanvasPage() {
         [connections, geometryNodeById],
     );
     const canvasViewBounds = useMemo(() => {
-        const padding = 280;
         const rect = containerRef.current?.getBoundingClientRect();
         const width = rect?.width || size.width;
         const height = rect?.height || size.height;
-        const viewLeft = -viewport.x / viewport.k - padding;
-        const viewTop = -viewport.y / viewport.k - padding;
-        const viewRight = viewLeft + width / viewport.k + padding * 2;
-        const viewBottom = viewTop + height / viewport.k + padding * 2;
+        const scale = Math.max(viewport.k, 0.05);
+        const padding = CANVAS_VIEW_PADDING_PX / scale;
+        const viewLeft = -viewport.x / scale - padding;
+        const viewTop = -viewport.y / scale - padding;
+        const viewRight = viewLeft + width / scale + padding * 2;
+        const viewBottom = viewTop + height / scale + padding * 2;
+
+        return { left: viewLeft, top: viewTop, right: viewRight, bottom: viewBottom };
+    }, [size.height, size.width, viewport.k, viewport.x, viewport.y]);
+    const canvasRetentionBounds = useMemo(() => {
+        const rect = containerRef.current?.getBoundingClientRect();
+        const width = rect?.width || size.width;
+        const height = rect?.height || size.height;
+        const scale = Math.max(viewport.k, 0.05);
+        const padding = CANVAS_RETENTION_PADDING_PX / scale;
+        const viewLeft = -viewport.x / scale - padding;
+        const viewTop = -viewport.y / scale - padding;
+        const viewRight = viewLeft + width / scale + padding * 2;
+        const viewBottom = viewTop + height / scale + padding * 2;
 
         return { left: viewLeft, top: viewTop, right: viewRight, bottom: viewBottom };
     }, [size.height, size.width, viewport.k, viewport.x, viewport.y]);
@@ -1362,9 +1370,44 @@ function InfiniteCanvasPage() {
         });
         return ids;
     }, [canvasViewBounds, nodeSpatialIndex, visibleConnections]);
+    const retentionNodeIds = useMemo(
+        () => new Set(nodeSpatialIndex.query(canvasRetentionBounds).map((node) => node.id)),
+        [canvasRetentionBounds, nodeSpatialIndex],
+    );
+    const [retainedNodeIds, setRetainedNodeIds] = useState<Set<string>>(() => new Set(visibleNodeIds));
+    useEffect(() => {
+        const merged = new Set(retainedNodeIdsRef.current);
+        visibleNodeIds.forEach((id) => merged.add(id));
+        retentionNodeIds.forEach((id) => merged.add(id));
+        selectedNodeIds.forEach((id) => merged.add(id));
+        retainedNodeIdsRef.current = merged;
+        setRetainedNodeIds(merged);
+
+        if (retentionCleanupTimerRef.current) clearTimeout(retentionCleanupTimerRef.current);
+        if (canvasInteracting) return;
+        retentionCleanupTimerRef.current = setTimeout(() => {
+            const next = new Set(retentionNodeIds);
+            visibleNodeIds.forEach((id) => next.add(id));
+            selectedNodeIds.forEach((id) => next.add(id));
+            retainedNodeIdsRef.current = next;
+            setRetainedNodeIds(next);
+            retentionCleanupTimerRef.current = null;
+        }, CANVAS_RETENTION_CLEANUP_DELAY_MS);
+    }, [canvasInteracting, retentionNodeIds, selectedNodeIds, visibleNodeIds]);
+    useEffect(
+        () => () => {
+            if (retentionCleanupTimerRef.current) clearTimeout(retentionCleanupTimerRef.current);
+        },
+        [],
+    );
+    const renderNodeIds = useMemo(() => {
+        const ids = new Set(visibleNodeIds);
+        retainedNodeIds.forEach((id) => ids.add(id));
+        return ids;
+    }, [retainedNodeIds, visibleNodeIds]);
     const visibleNodes = useMemo(
-        () => nodes.filter((node) => visibleNodeIds.has(node.id) && !isHiddenBatchChild(node, nodeById, collapsingBatchIds)),
-        [collapsingBatchIds, nodeById, nodes, visibleNodeIds],
+        () => nodes.filter((node) => renderNodeIds.has(node.id) && !isHiddenBatchChild(node, nodeById, collapsingBatchIds)),
+        [collapsingBatchIds, nodeById, nodes, renderNodeIds],
     );
     // 工具条跟随「单选节点」:点击/新建/框选/键盘选中任一节点都会显示,不再仅靠精确点中触发。
     // 多选时不显示;拖拽中由下方 isNodeDragging 守卫隐藏。
@@ -1378,6 +1421,29 @@ function InfiniteCanvasPage() {
     const superResolveNode = superResolveNodeId ? nodeById.get(superResolveNodeId) || null : null;
     const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
+    const [previewUrl, setPreviewUrl] = useState("");
+    const [previewLoading, setPreviewLoading] = useState(false);
+    useEffect(() => {
+        let cancelled = false;
+        if (!previewNode || previewNode.type === CanvasNodeType.Text) {
+            setPreviewUrl("");
+            setPreviewLoading(false);
+            return;
+        }
+        setPreviewLoading(true);
+        const metadata = previewNode.metadata || {};
+        const resolve = async () => {
+            const url = previewNode.type === CanvasNodeType.Image || previewNode.type === CanvasNodeType.ScriptAsset
+                ? await resolvePersistedImageUrl(metadata.mediaId, metadata.storageKey, metadata.content || "")
+                : await resolvePersistedMediaUrl(metadata.mediaId, metadata.storageKey, metadata.content || "");
+            if (!cancelled) {
+                setPreviewUrl(url);
+                setPreviewLoading(false);
+            }
+        };
+        void resolve();
+        return () => { cancelled = true; };
+    }, [previewNode]);
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const batchConnectionNodes = useMemo(
         () => nodes.filter((node) => selectedNodeIds.has(node.id) && node.type !== CanvasNodeType.Group && (getNodeDefinition(node.type)?.hasSourceHandle ?? true)),
@@ -4013,13 +4079,19 @@ function InfiniteCanvasPage() {
     const handleViewportChange = useCallback((next: ViewportTransform) => {
         viewportRef.current = next;
         setViewport(next);
+        setCanvasInteracting(false);
         setContextMenu(null);
     }, []);
 
     const handleViewportInteractionStart = useCallback(() => {
+        setCanvasInteracting(true);
         setContextMenu(null);
         setHoveredNodeId(null);
         setToolbarNodeId(null);
+    }, []);
+
+    const handleViewportInteractionEnd = useCallback(() => {
+        setCanvasInteracting(false);
     }, []);
 
     const renderCanvasNodePanel = useCallback(
@@ -4113,6 +4185,7 @@ function InfiniteCanvasPage() {
                     panMode={panMode}
                     onViewportChange={handleViewportChange}
                     onViewportInteractionStart={handleViewportInteractionStart}
+                    onViewportInteractionEnd={handleViewportInteractionEnd}
                     onCanvasMouseDown={handleCanvasMouseDown}
                     onCanvasDeselect={deselectCanvas}
                     onCanvasDoubleClick={(event) => {
@@ -4424,8 +4497,8 @@ function InfiniteCanvasPage() {
                 {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
 
                 <Modal
-                    title={previewNode?.type === CanvasNodeType.Text ? previewNode.title || "文本预览" : "图片详情"}
-                    open={Boolean(previewNode && (previewNode.type === CanvasNodeType.Text || previewNode.metadata?.content))}
+                    title={previewNode?.type === CanvasNodeType.Text ? previewNode.title || "文本预览" : "媒体详情"}
+                    open={Boolean(previewNode)}
                     centered
                     onCancel={() => setPreviewNodeId(null)}
                     footer={null}
@@ -4436,7 +4509,13 @@ function InfiniteCanvasPage() {
                         <div className="thin-scrollbar max-h-[72vh] w-full overflow-y-auto whitespace-pre-wrap break-words rounded-lg border p-5 font-mono text-sm leading-7" style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}>
                             {previewNode.metadata?.content || "暂无文本内容"}
                         </div>
-                    ) : previewNode?.metadata?.content ? <img src={previewNode.metadata.content} alt={previewNode.title || "图片"} style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain" }} /> : null}
+                    ) : previewLoading ? (
+                        <div className="grid min-h-64 min-w-80 place-items-center text-sm opacity-70">媒体加载中…</div>
+                    ) : previewUrl ? (
+                        previewNode?.type === CanvasNodeType.Video ? <video src={previewUrl} controls playsInline className="max-h-[80vh] max-w-[92vw] object-contain" />
+                            : previewNode?.type === CanvasNodeType.Audio ? <audio src={previewUrl} controls className="w-[min(92vw,560px)]" />
+                                : <img src={previewUrl} alt={previewNode?.title || "图片"} style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain" }} />
+                    ) : <div className="grid min-h-64 min-w-80 place-items-center text-sm text-red-400">媒体暂时无法加载</div>}
                 </Modal>
 
                 <Modal
@@ -4862,7 +4941,7 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
                     }
                 }
                 if (node.metadata?.mediaId) {
-                    const remote = await resolveCanvasMediaUrl(node.metadata.mediaId, content || "");
+                    const remote = await resolvePersistedMediaUrl(node.metadata.mediaId, node.metadata.storageKey, content || "");
                     return remote ? { ...node, metadata: { ...node.metadata, content: remote, mediaStatus: "synced" as const } } : node;
                 }
                 return node;

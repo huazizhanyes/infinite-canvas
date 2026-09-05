@@ -330,10 +330,11 @@ function resourceText(node: CanvasNodeData): string | undefined {
 }
 
 function resourceKind(node: CanvasNodeData): CanvasResourceKind | null {
-    if (node.type === CanvasNodeType.Image && node.metadata?.content) return "image";
-    if (node.type === CanvasNodeType.ScriptAsset && node.metadata?.content) return "image";
-    if (node.type === CanvasNodeType.Video && node.metadata?.content) return "video";
-    if (node.type === CanvasNodeType.Audio && node.metadata?.content) return "audio";
+    const hasPersistedMedia = Boolean(node.metadata?.content || node.metadata?.storageKey || node.metadata?.mediaId);
+    if (node.type === CanvasNodeType.Image && hasPersistedMedia) return "image";
+    if (node.type === CanvasNodeType.ScriptAsset && hasPersistedMedia) return "image";
+    if (node.type === CanvasNodeType.Video && hasPersistedMedia) return "video";
+    if (node.type === CanvasNodeType.Audio && hasPersistedMedia) return "audio";
     if (node.type === CanvasNodeType.Text && (node.metadata?.content || node.metadata?.prompt)) return "text";
     // 插件节点通过 definition.resource 声明可作为输入
     return getNodeDefinition(node.type)?.resource?.(node)?.kind || null;

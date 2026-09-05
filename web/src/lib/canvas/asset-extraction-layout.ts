@@ -15,24 +15,24 @@ export const ASSET_BLOCK_GAP = 96;
 
 const TYPE_ORDER = { character: 0, scene: 1, prop: 2 } as const;
 
-export type AssetGenerationTarget = { assetId: string; variantId?: string };
+export type AssetGenerationTarget = { assetId: string; variantId?: string; imageLayout?: "single" | "character-sheet" | "scene-4view" };
 
 export function buildAssetGenerationTargets(assets: ScriptAsset[], episodeId?: string, includeAll = false, filledAssetIds: ReadonlySet<string> = new Set()): AssetGenerationTarget[] {
     const targets: AssetGenerationTarget[] = [];
     assets.forEach((asset) => {
         if (filledAssetIds.has(asset.id)) return;
         if (includeAll) {
-            if (!asset.image?.imageUrl) targets.push({ assetId: asset.id });
-            asset.variants.filter((variant) => !variant.image?.imageUrl).forEach((variant) => targets.push({ assetId: asset.id, variantId: variant.id }));
+            if (!asset.image?.imageUrl) targets.push({ assetId: asset.id, imageLayout: asset.imageLayout || defaultImageLayout(asset.type) });
+            asset.variants.filter((variant) => !variant.image?.imageUrl).forEach((variant) => targets.push({ assetId: asset.id, variantId: variant.id, imageLayout: asset.imageLayout || defaultImageLayout(asset.type) }));
             return;
         }
         const occurrence = asset.occurrences?.find((item) => item.episodeId === episodeId);
         if (!occurrence) return;
         if (occurrence.variantId) {
             const variant = asset.variants.find((item) => item.id === occurrence.variantId);
-            if (!variant?.image?.imageUrl) targets.push({ assetId: asset.id, variantId: occurrence.variantId });
+            if (!variant?.image?.imageUrl) targets.push({ assetId: asset.id, variantId: occurrence.variantId, imageLayout: asset.imageLayout || defaultImageLayout(asset.type) });
         } else if (!asset.image?.imageUrl) {
-            targets.push({ assetId: asset.id });
+            targets.push({ assetId: asset.id, imageLayout: asset.imageLayout || defaultImageLayout(asset.type) });
         }
     });
     return targets;
@@ -102,6 +102,9 @@ export function buildAssetExtractionOps(source: CanvasNodeData, assets: ScriptAs
             scriptAssetType: asset.type,
             scriptAssetVisualDescription: displayVariant?.visualDescription || asset.visualDescription,
             scriptAssetImagePrompt: displayVariant?.imagePrompt || asset.imagePrompt,
+            scriptAssetImageLayout: asset.imageLayout || (asset.type === "scene" ? "scene-4view" : asset.type === "character" ? "character-sheet" : "single"),
+            ...(asset.sceneViewMode ? { scriptAssetSceneViewMode: asset.sceneViewMode } : {}),
+            ...(asset.sourceExcerpt ? { scriptAssetSourceExcerpt: asset.sourceExcerpt } : {}),
             scriptAssetImageStatus: displayImage?.status || existing?.metadata?.scriptAssetImageStatus || "idle",
             scriptAssetImageId: displayImage?.id || existing?.metadata?.scriptAssetImageId,
             scriptAssetStale: false,
@@ -129,24 +132,13 @@ export function buildAssetExtractionOps(source: CanvasNodeData, assets: ScriptAs
         }
     });
 
-    const activeByNameAndType = new Map(sorted.map((asset) => [`${asset.type}:${normalizedAssetName(asset.name)}`, asset.id]));
     const staleNodes = managed.filter((node) => node.metadata?.scriptAssetId && !activeIds.has(node.metadata.scriptAssetId));
-    const duplicateNodeIds = staleNodes
-        .filter((node) => {
-            const replacementId = activeByNameAndType.get(`${node.metadata?.scriptAssetType || ""}:${normalizedAssetName(node.title)}`);
-            return Boolean(replacementId && replacementId !== node.metadata?.scriptAssetId);
-        })
-        .map((node) => node.id);
-    if (duplicateNodeIds.length) ops.push({ type: "delete_node", ids: duplicateNodeIds });
-    staleNodes.filter((node) => !duplicateNodeIds.includes(node.id)).forEach((node) => ops.push({ type: "update_node", id: node.id, metadata: { scriptAssetStale: true } }));
+    staleNodes.forEach((node) => ops.push({ type: "update_node", id: node.id, metadata: { scriptAssetStale: true } }));
     return ops;
 }
 
-function normalizedAssetName(value: string) {
-    return value
-        .normalize("NFKC")
-        .toLowerCase()
-        .replace(/[\s\p{P}\p{S}]+/gu, "");
+function defaultImageLayout(type: ScriptAsset["type"]) {
+    return type === "scene" ? "scene-4view" as const : type === "character" ? "character-sheet" as const : "single" as const;
 }
 
 export function generationImageMetadata(image: ScriptGenerationImage, batchId?: string): CanvasNodeMetadata {
@@ -157,6 +149,7 @@ export function generationImageMetadata(image: ScriptGenerationImage, batchId?: 
         scriptAssetImageBatchId: batchId,
         scriptAssetImageTaskId: image.taskId,
         scriptAssetImageStatus: image.status,
+        ...(image.imageLayout ? { scriptAssetImageLayout: image.imageLayout } : {}),
         ...(image.imageUrl ? { scriptAssetImageOrigin: "local" as const } : {}),
         errorDetails: failed ? image.error || "图片生成失败" : undefined,
         ...(image.imageUrl ? { content: image.imageUrl } : {}),

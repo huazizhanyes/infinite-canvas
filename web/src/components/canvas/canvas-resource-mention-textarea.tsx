@@ -286,6 +286,8 @@ function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyD
     const [focused, setFocused] = useState(false);
     const savedRangeRef = useRef<Range | null>(null);
     const lastHandledMentionRequestRef = useRef(0);
+    const renderedReferenceSignatureRef = useRef("");
+    const referenceSignature = useMemo(() => references.map(referencePreviewSignature).join("|"), [references]);
     const candidates = useMemo(() => {
         if (!mention) return [];
         const query = mention.query.trim().toLowerCase();
@@ -301,9 +303,15 @@ function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyD
     };
 
     useLayoutEffect(() => {
-        if (!editorRef.current || focused) return;
-        if (serializeEditor(editorRef.current) !== value) editorRef.current.innerHTML = richEditorHtml(value, references);
-    }, [focused, references, value]);
+        const editor = editorRef.current;
+        if (!editor) return;
+        if (!focused && serializeEditor(editor) !== value) {
+            editor.innerHTML = richEditorHtml(value, references);
+        } else if (renderedReferenceSignatureRef.current !== referenceSignature) {
+            syncRichEditorReferences(editor, references);
+        }
+        renderedReferenceSignatureRef.current = referenceSignature;
+    }, [focused, referenceSignature, references, value]);
 
     useEffect(() => {
         if (!autoFocus) return;
@@ -374,6 +382,14 @@ function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyD
                     onFocus={(event) => { setFocused(true); updateMention(); rememberSelection(); onFocus?.(event as never); }}
                     onBlur={(event) => { setFocused(false); setMention(null); onBlur?.(event as never); }}
                     onInput={() => { emitChange(); rememberSelection(); }}
+                    onErrorCapture={(event) => {
+                        const media = event.target;
+                        if (media instanceof HTMLImageElement || media instanceof HTMLVideoElement) media.hidden = true;
+                    }}
+                    onLoadCapture={(event) => {
+                        const media = event.target;
+                        if (media instanceof HTMLImageElement || media instanceof HTMLVideoElement) media.hidden = false;
+                    }}
                     onKeyDown={(event) => {
                         if (mention && candidates.length) {
                             if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((index) => (index + (event.key === "ArrowDown" ? 1 : -1) + candidates.length) % candidates.length); return; }
@@ -686,20 +702,47 @@ function escapeAttribute(value: string) {
 
 function mentionPreviewHtml(reference: CanvasResourceReference) {
     if (reference.kind === "audio") return `<span class="grid size-5 shrink-0 place-items-center rounded-sm bg-[#2f80ff]/18 text-[16px] leading-none" aria-hidden="true">&#9835;</span>`;
-    if (reference.previewUrl && reference.kind === "video") return `<video src="${escapeAttribute(reference.previewUrl)}" class="size-5 shrink-0 rounded-sm bg-black object-cover" muted preload="metadata"></video>`;
-    if (reference.previewUrl && reference.kind === "image") return `<img src="${escapeAttribute(reference.previewUrl)}" alt="" class="size-5 shrink-0 rounded-sm object-cover" />`;
+    if (reference.kind === "video") return mediaMentionPreviewHtml(reference.previewUrl, "video");
+    if (reference.kind === "image") return mediaMentionPreviewHtml(reference.previewUrl, "image");
     return "";
 }
 
 function ReferencePreview({ reference }: { reference: CanvasResourceReference }) {
-    if (reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="size-9 rounded-md object-cover" />;
-    if (reference.kind === "video" && reference.previewUrl) return <video src={reference.previewUrl} className="size-9 rounded-md bg-black object-cover" muted preload="metadata" />;
+    const [failed, setFailed] = useState(false);
+    useEffect(() => setFailed(false), [reference.previewUrl]);
+    if (!failed && reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="size-9 rounded-md object-cover" onError={() => setFailed(true)} />;
+    if (!failed && reference.kind === "video" && reference.previewUrl) return <video src={reference.previewUrl} className="size-9 rounded-md bg-black object-cover" muted preload="metadata" onError={() => setFailed(true)} />;
     const Icon = reference.kind === "audio" ? Music2 : reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
     return (
         <span className="grid size-9 shrink-0 place-items-center rounded-md bg-black/10">
             <Icon className="size-4" />
         </span>
     );
+}
+
+function mediaMentionPreviewHtml(url: string | undefined, kind: "image" | "video") {
+    const fallback = kind === "image" ? "图" : "▶";
+    const media = url
+        ? kind === "image"
+            ? `<img data-mention-media src="${escapeAttribute(url)}" alt="" class="absolute inset-0 size-5 object-cover" />`
+            : `<video data-mention-media src="${escapeAttribute(url)}" class="absolute inset-0 size-5 bg-black object-cover" muted preload="metadata"></video>`
+        : "";
+    return `<span data-mention-preview class="relative grid size-5 shrink-0 place-items-center overflow-hidden rounded-sm bg-[#2f80ff]/18 text-[10px] leading-none" aria-hidden="true"><span>${fallback}</span>${media}</span>`;
+}
+
+function referencePreviewSignature(reference: CanvasResourceReference) {
+    return [reference.nodeId, reference.label, reference.kind, reference.previewUrl || "", reference.mediaId || "", reference.storageKey || "", reference.active ? "1" : "0"].join("\u0001");
+}
+
+function syncRichEditorReferences(editor: HTMLElement, references: CanvasResourceReference[]) {
+    const byNodeId = new Map(references.map((reference) => [reference.nodeId, reference]));
+    editor.querySelectorAll<HTMLElement>("[data-mention-id]").forEach((token) => {
+        const reference = byNodeId.get(token.dataset.mentionId || "");
+        if (!reference?.active) return;
+        token.dataset.mentionLabel = reference.label;
+        token.title = reference.title || reference.label;
+        token.innerHTML = `${mentionPreviewHtml(reference)}<span class="${mentionTokenLabelClassName}">${escapeHtml(reference.label)}</span>`;
+    });
 }
 
 function clamp(value: number, min: number, max: number) {

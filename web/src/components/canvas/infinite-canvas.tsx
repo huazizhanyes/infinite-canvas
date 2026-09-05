@@ -17,6 +17,7 @@ type InfiniteCanvasProps = {
     panMode?: boolean;
     onViewportChange: (viewport: ViewportTransform) => void;
     onViewportInteractionStart?: () => void;
+    onViewportInteractionEnd?: () => void;
     onCanvasMouseDown?: (event: React.PointerEvent<HTMLDivElement>) => void;
     onCanvasDeselect?: () => void;
     onCanvasDoubleClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
@@ -41,7 +42,7 @@ export function calculateWheelViewport(viewport: ViewportTransform, pointerX: nu
     };
 }
 
-export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines", panMode = false, onViewportChange, onViewportInteractionStart, onCanvasMouseDown, onCanvasDeselect, onCanvasDoubleClick, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines", panMode = false, onViewportChange, onViewportInteractionStart, onViewportInteractionEnd, onCanvasMouseDown, onCanvasDeselect, onCanvasDoubleClick, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const panState = useRef({
         isPanning: false,
@@ -63,6 +64,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     const finishWheelInteractionRef = useRef<() => void>(() => undefined);
     const onViewportChangeRef = useRef(onViewportChange);
     const onViewportInteractionStartRef = useRef(onViewportInteractionStart);
+    const onViewportInteractionEndRef = useRef(onViewportInteractionEnd);
     const onCanvasDeselectRef = useRef(onCanvasDeselect);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
 
@@ -89,6 +91,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
         if (!wheelInteractionActiveRef.current) return;
         wheelInteractionActiveRef.current = false;
         onViewportChangeRef.current(viewportRef.current);
+        onViewportInteractionEndRef.current?.();
         syncInteractionAttribute();
     };
     finishWheelInteractionRef.current = finishWheelInteraction;
@@ -102,8 +105,9 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     useEffect(() => {
         onViewportChangeRef.current = onViewportChange;
         onViewportInteractionStartRef.current = onViewportInteractionStart;
+        onViewportInteractionEndRef.current = onViewportInteractionEnd;
         onCanvasDeselectRef.current = onCanvasDeselect;
-    }, [onCanvasDeselect, onViewportChange, onViewportInteractionStart]);
+    }, [onCanvasDeselect, onViewportChange, onViewportInteractionEnd, onViewportInteractionStart]);
 
     useEffect(
         () => () => {
@@ -260,6 +264,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
                 onViewportChangeRef.current(nextViewportRef.current);
                 nextViewportRef.current = null;
             }
+            onViewportInteractionEndRef.current?.();
             syncInteractionAttribute();
         };
 

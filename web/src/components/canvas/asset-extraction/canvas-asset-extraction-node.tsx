@@ -50,7 +50,8 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
     ctxRef.current = ctx;
     const currentEpisode = episodes.find((episode) => episode.id === episodeId);
     const episodeAssets = assets.filter((asset) => asset.episodeIds?.includes(episodeId || ""));
-    const episodePending = pending.filter((item) => item.episodeId === episodeId);
+    const exhaustiveExtraction = (ctx.node.metadata?.assetExtractionMode || "exhaustive") === "exhaustive";
+    const episodePending = exhaustiveExtraction ? [] : pending.filter((item) => item.episodeId === episodeId);
     const filledAssetIds = new Set(
         ctx.getNodes()
             .filter((node) => node.type === CanvasNodeType.ScriptAsset && node.metadata?.assetExtractionNodeId === ctx.node.id && node.metadata?.content && ["inherited", "derived"].includes(node.metadata?.scriptAssetImageOrigin || ""))
@@ -183,7 +184,9 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
     const placeAssets = useCallback((nextAssets: ScriptAsset[], repack = false) => {
         const current = ctxRef.current;
         const source = current.getNode(current.node.id) || current.node;
-        const ops = buildAssetExtractionOps(source, nextAssets, current.getNodes(), current.getConnections(), { repack });
+        const scopedEpisodeId = source.metadata?.assetExtractionEpisodeId;
+        const scopedAssets = scopedEpisodeId ? nextAssets.filter((asset) => asset.episodeIds?.includes(scopedEpisodeId)) : nextAssets;
+        const ops = buildAssetExtractionOps(source, scopedAssets, current.getNodes(), current.getConnections(), { repack });
         if (ops.length) current.applyOps(ops);
     }, []);
 
@@ -194,10 +197,10 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
         setPending(data.pending);
         placeAssets(data.assets);
         const currentAssetCount = data.assets.filter((asset) => asset.episodeIds?.includes(episodeId || "")).length;
-        const currentPendingCount = data.pending.filter((item) => item.episodeId === episodeId).length;
+        const currentPendingCount = exhaustiveExtraction ? 0 : data.pending.filter((item) => item.episodeId === episodeId).length;
         ctxRef.current.updateMetadata({ assetExtractionAssetCount: currentAssetCount, assetExtractionPendingCount: currentPendingCount });
         return data;
-    }, [connection, episodeId, placeAssets, scriptSetId]);
+    }, [connection, episodeId, exhaustiveExtraction, placeAssets, scriptSetId]);
 
     useEffect(() => {
         if (!scriptSetId || !connection) return;
@@ -213,11 +216,11 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
                 if (run.status !== "succeeded") throw new Error(run.error || "资产提取失败");
                 const data = await loadAssets();
                 const currentAssetCount = data?.assets.filter((asset) => asset.episodeIds?.includes(episodeId || "")).length || 0;
-                const currentPendingCount = data?.pending.filter((item) => item.episodeId === episodeId).length || 0;
+                const currentPendingCount = exhaustiveExtraction ? 0 : data?.pending.filter((item) => item.episodeId === episodeId).length || 0;
                 ctxRef.current.updateMetadata({ assetExtractionStatus: "success", assetExtractionAssetCount: currentAssetCount, assetExtractionPendingCount: currentPendingCount, assetExtractionUpdatedAt: Date.now() });
             })
             .catch((error) => ctxRef.current.updateMetadata({ assetExtractionStatus: "error", errorDetails: readError(error) }));
-    }, [analyzing, connection, ctx.node.metadata?.assetExtractionRunId, episodeId, loadAssets]);
+    }, [analyzing, connection, ctx.node.metadata?.assetExtractionRunId, episodeId, exhaustiveExtraction, loadAssets]);
 
     const runAnalyze = async () => {
         if (!connection || !scriptSetId || !episodeId || analyzing) return;
@@ -227,6 +230,7 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
         }
         ctx.updateMetadata({
             content,
+            assetExtractionMode: "exhaustive",
             assetExtractionContentHash: assetExtractionContentHash(content),
             assetExtractionVisualStyle: visualStyle,
             assetExtractionTextModel: textModel,
@@ -239,14 +243,19 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
         });
         try {
             await Promise.all([canvasScriptApi.updateSet(connection, scriptSetId, { title: recordName.trim() || "未命名", visualStyle, aspectRatio, imageQuality }), canvasScriptApi.updateEpisode(connection, episodeId, { content })]);
-            const started = await canvasScriptApi.analyzeEpisode(connection, episodeId, nanoid(), modelOptionName(textModel));
+            const started = await canvasScriptApi.analyzeEpisode(connection, episodeId, nanoid(), modelOptionName(textModel), {
+                mode: "exhaustive",
+                deduplicate: false,
+                includeSourceExcerpts: true,
+                sceneImageLayout: "scene-4view",
+            });
             resumedAnalysisRef.current = started.id;
             ctx.updateMetadata({ assetExtractionRunId: started.id });
             const run = await waitForAssetAnalysis(connection, started.id);
             if (run.status !== "succeeded") throw new Error(run.error || "资产提取失败");
             const data = await loadAssets();
             const currentAssetCount = data?.assets.filter((asset) => asset.episodeIds?.includes(episodeId)).length || 0;
-            const currentPendingCount = data?.pending.filter((item) => item.episodeId === episodeId).length || 0;
+            const currentPendingCount = exhaustiveExtraction ? 0 : data?.pending.filter((item) => item.episodeId === episodeId).length || 0;
             ctx.updateMetadata({
                 assetExtractionStatus: "success",
                 assetExtractionAssetCount: currentAssetCount,
@@ -269,7 +278,7 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
         }
         Modal.confirm({
             title: "重新分析本集？",
-            content: `系统会重新计算“${currentEpisode?.title || "当前剧集"}”的资产出现与复用关系，不会清空其他剧集的资产，也不会移动已有画布节点。`,
+            content: `系统会重新提取“${currentEpisode?.title || "当前剧集"}”中出现的全部资产；相同资产不会自动合并，其他剧集的资产保持不变。`,
             okText: "重新分析本集",
             cancelText: "取消",
             centered: true,
@@ -281,7 +290,7 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
         (images: ScriptGenerationImage[], _batchId: string) => {
             const nodes = ctx.getNodes();
             const ops = images.flatMap((image) => {
-                const node = nodes.find((item) => item.type === CanvasNodeType.ScriptAsset && item.metadata?.assetExtractionNodeId === ctx.node.id && item.metadata?.scriptAssetId === image.assetId);
+                const node = nodes.find((item) => item.type === CanvasNodeType.ScriptAsset && item.metadata?.assetExtractionNodeId === ctx.node.id && item.metadata?.scriptAssetId === image.assetId && (image.variantId ? item.metadata?.scriptVariantId === image.variantId : !item.metadata?.scriptVariantId));
                 return node ? [{ type: "update_node" as const, id: node.id, metadata: generationImageMetadata(image, _batchId) }] : [];
             });
             if (ops.length) ctx.applyOps(ops);

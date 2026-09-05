@@ -168,7 +168,8 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
             });
             if (!quote.canSubmit) throw new Error("图片余额不足，请先充值或调整账户权益");
             ctx.updateMetadata({ content: undefined, storageKey: undefined, mediaId: undefined, mediaStatus: undefined, naturalWidth: undefined, naturalHeight: undefined, bytes: undefined, mimeType: undefined, scriptAssetImageOrigin: undefined });
-            const batch = await canvasScriptApi.generateAssets(connection, scriptSetId, [{ assetId }], requestId, selectedModel ? modelOptionName(selectedModel) : undefined, quote.quoteToken);
+            const imageLayout = ctx.node.metadata?.scriptAssetImageLayout || (ctx.node.metadata?.scriptAssetType === "scene" ? "scene-4view" : ctx.node.metadata?.scriptAssetType === "character" ? "character-sheet" : "single");
+            const batch = await canvasScriptApi.generateAssets(connection, scriptSetId, [{ assetId, imageLayout }], requestId, selectedModel ? modelOptionName(selectedModel) : undefined, quote.quoteToken);
             resumedBatchRef.current = batch.id;
             const initial = batch.images[0];
             if (initial) ctx.updateMetadata(generationImageMetadata(initial, batch.id));
@@ -439,6 +440,7 @@ export function CanvasScriptAssetNode({ ctx }: { ctx: CanvasNodeContext }) {
                 <div className="flex cursor-grab items-center gap-2 active:cursor-grabbing" title="拖动资产节点">
                     <GripVertical className="size-3.5 shrink-0 opacity-45" />
                     <Tag color={type === "character" ? "blue" : type === "scene" ? "green" : "gold"}>{type === "character" ? "人物" : type === "scene" ? "场景" : "道具"}</Tag>
+                    {ctx.node.metadata?.scriptAssetImageLayout === "scene-4view" ? <Tag color="cyan">四视角</Tag> : null}
                     {ctx.node.metadata?.scriptAssetStale ? <Tag>本次未识别</Tag> : null}
                 </div>
                 <input value={name} className="h-8 rounded-md border bg-transparent px-2 text-sm font-semibold outline-none" style={{ borderColor: ctx.theme.node.stroke, background: ctx.theme.node.fill }} onMouseDown={stopCanvasInteraction} onPointerDown={stopCanvasInteraction} onChange={(event) => setName(event.target.value)} />

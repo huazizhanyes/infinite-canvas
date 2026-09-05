@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
 import { accountScopedKey } from "@/lib/canvas-account-scope";
 import { cleanupUnusedImages, resolvePersistedImage, uploadImage } from "@/services/image-storage";
-import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
+import { cleanupUnusedMedia, resolveMediaUrl, resolvePersistedMediaUrl } from "@/services/file-storage";
 
 export type AssetKind = "text" | "image" | "video";
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
@@ -45,7 +45,7 @@ const assetStorage: PersistStorage<AssetStore> = {
         const parsed = JSON.parse(value) as StorageValue<AssetStore>;
         parsed.state.assets = await Promise.all(
             parsed.state.assets.map(async (asset) => {
-                if (asset.kind === "video" && asset.data.storageKey) return { ...asset, data: { ...asset.data, url: await resolveMediaUrl(asset.data.storageKey, asset.data.url) } };
+                if (asset.kind === "video" && (asset.data.storageKey || asset.data.mediaId)) return { ...asset, data: { ...asset.data, url: await resolvePersistedMediaUrl(asset.data.mediaId, asset.data.storageKey, asset.data.url), mediaStatus: asset.data.mediaId ? "synced" : asset.data.mediaStatus } };
                 if (asset.kind !== "image") return asset;
                 if (asset.data.storageKey || asset.data.mediaId) {
                     const resolved = await resolvePersistedImage(asset.data.mediaId, asset.data.storageKey, asset.data.dataUrl || asset.coverUrl);

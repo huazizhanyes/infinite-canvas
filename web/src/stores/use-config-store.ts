@@ -62,6 +62,24 @@ export type VideoModelCapabilities = {
     faceFriendly?: boolean;
     displayNotice?: string | null;
     freePromotion?: { active: boolean; label: string; startsAt?: string | null; endsAt?: string | null } | null;
+    statsRecent10?: {
+        successRate: number | null;
+        successRateBps?: number | null;
+        successCount: number;
+        failedCount: number;
+        sampleCount: number;
+        targetCount: number;
+        calculatedAt?: string;
+    };
+    recent10?: {
+        sampleCount: number;
+        targetCount: number;
+        avgDurationSeconds: number | null;
+        medianDurationSeconds?: number | null;
+        minDurationSeconds?: number | null;
+        maxDurationSeconds?: number | null;
+        durationsSeconds?: number[];
+    };
 };
 
 export function normalizeVideoDuration(value: string | number | undefined, range?: VideoModelCapabilities["duration"] | null) {

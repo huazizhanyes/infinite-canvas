@@ -22,6 +22,8 @@ import { isNonInterruptibleVideoGeneration, videoModelSelectionPatch } from "@/l
 import { CanvasConnectionPreviewStrip } from "./canvas-connection-preview-strip";
 import { appendCanvasConnectionMention, removeCanvasConnectionMention, type CanvasConnectionPreview } from "@/lib/canvas/canvas-connection-previews";
 import { canvasPromptCharacterWarning, countCanvasPromptCharacters } from "@/lib/canvas/canvas-prompt-character-count";
+import { resolvePersistedImage } from "@/services/image-storage";
+import { resolvePersistedMediaUrl } from "@/services/file-storage";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 export type CanvasNodeGenerationOptions = { operation?: CanvasTextOperation; sourceScope?: "full" | "selection"; skipConfirmation?: boolean; audioMode?: "synthesis" | "design" };
@@ -70,7 +72,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const [textAction, setTextAction] = useState<CanvasTextOperation>("polish");
     const [textScope, setTextScope] = useState<"full" | "selection">(selectedText.trim() ? "selection" : "full");
     const connection = useUserStore((state) => state.connection);
-    const quotePayload = buildQuotePayload(config, mode, node, prompt, mentionReferences);
+    const resolvedMentionReferences = useResolvedMentionReferences(mentionReferences);
+    const resolvedConnectionPreviews = useMemo(
+        () => connectionPreviews.map((item) => ({ ...item, previewUrl: resolvedMentionReferences.find((reference) => reference.nodeId === item.nodeId)?.previewUrl || item.previewUrl })),
+        [connectionPreviews, resolvedMentionReferences],
+    );
+    const quotePayload = buildQuotePayload(config, mode, node, prompt, resolvedMentionReferences);
     const quoteKey = JSON.stringify(quotePayload);
     const stableQuotePayload = useMemo(() => quotePayload, [quoteKey]);
     const official = useMemo(() => {
@@ -82,16 +89,16 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const [quoteState, setQuoteState] = useState<"idle" | "loading" | "ready" | "error">("idle");
     const [quoteError, setQuoteError] = useState("");
     const quoteEligible = mode === "image" || mode === "video" || (mode === "audio" && !isVoiceDesign && Boolean(prompt.trim()));
-    const activeReferences = activeGenerationReferences(mode, prompt, mentionReferences);
+    const activeReferences = activeGenerationReferences(mode, prompt, resolvedMentionReferences);
     const promptCharacterCount = mode === "video" ? countCanvasPromptCharacters(prompt) : 0;
     const promptCharacterWarning = mode === "video" ? canvasPromptCharacterWarning(videoCapabilities?.channel, promptCharacterCount) : null;
 
     useEffect(() => {
         const savedPrompt = savedComposerPrompt(node, isEditingExistingContent);
-        const normalizedPrompt = normalizeCanvasResourceMentions(savedPrompt, mentionReferences);
+        const normalizedPrompt = normalizeCanvasResourceMentions(savedPrompt, resolvedMentionReferences);
         setPrompt(normalizedPrompt);
         if (normalizedPrompt !== savedPrompt) onPromptChange(node.id, normalizedPrompt);
-    }, [isEditingExistingContent, mentionReferences, node.id, node.metadata?.composerContent, node.metadata?.prompt, onPromptChange]);
+    }, [isEditingExistingContent, node.id, node.metadata?.composerContent, node.metadata?.prompt, onPromptChange, resolvedMentionReferences]);
 
     useEffect(() => {
         if (!selectedText.trim()) setTextScope("full");
@@ -100,13 +107,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     useEffect(() => {
         if (mode !== "video" || !videoCapabilities?.modes.includes("image2video")) return;
-        const hasMedia = hasMentionedMediaReference(prompt, mentionReferences);
+        const hasMedia = hasMentionedMediaReference(prompt, resolvedMentionReferences);
         if (!hasMedia) {
             manualVideoModeRef.current = false;
             return;
         }
         if (!manualVideoModeRef.current && config.videoMode !== "image2video") onConfigChange(node.id, { videoMode: "image2video" });
-    }, [config.videoMode, mentionReferences, mode, node.id, onConfigChange, prompt, videoCapabilities]);
+    }, [config.videoMode, mode, node.id, onConfigChange, prompt, resolvedMentionReferences, videoCapabilities]);
 
     useEffect(() => {
         if (mode === "text" || !official || !connection || !quoteEligible) {
@@ -156,7 +163,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
-        if (mode === "video" && videoCapabilities?.modes.includes("image2video") && !manualVideoModeRef.current && hasMentionedMediaReference(value, mentionReferences) && config.videoMode !== "image2video") {
+        if (mode === "video" && videoCapabilities?.modes.includes("image2video") && !manualVideoModeRef.current && hasMentionedMediaReference(value, resolvedMentionReferences) && config.videoMode !== "image2video") {
             onConfigChange(node.id, { videoMode: "image2video" });
         }
         onPromptChange(node.id, value);
@@ -169,7 +176,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const insertPreviewMention = (item: CanvasConnectionPreview) => {
         if (appendCanvasConnectionMention(prompt, item.label) === prompt) return;
-        const reference = mentionReferences.find((candidate) => candidate.source === "canvas" && candidate.nodeId === item.nodeId && candidate.label === item.label);
+        const reference = resolvedMentionReferences.find((candidate) => candidate.source === "canvas" && candidate.nodeId === item.nodeId && candidate.label === item.label);
         if (!reference) {
             updatePrompt(appendCanvasConnectionMention(prompt, item.label));
             return;
@@ -241,7 +248,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 onPointerDown={(event) => event.stopPropagation()}
                             >
                                 <span className="truncate">{videoModeLabel(videoMode)}</span>
-                                {mentionedMediaReferenceCount(prompt, mentionReferences) > 0 ? <span className="ml-1 shrink-0 opacity-60">{mentionedMediaReferenceCount(prompt, mentionReferences)}项</span> : null}
+                                {mentionedMediaReferenceCount(prompt, resolvedMentionReferences) > 0 ? <span className="ml-1 shrink-0 opacity-60">{mentionedMediaReferenceCount(prompt, resolvedMentionReferences)}项</span> : null}
                             </Button>
                         </Dropdown>
                         <CanvasVideoSettingsPopover config={config} quote={quoteState === "ready" ? quote : null} hasReferenceVideo={activeReferences.some((reference) => reference.kind === "video")} buttonClassName="!h-9 !max-w-[170px] !justify-start !rounded-lg !px-2.5 !text-xs" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
@@ -310,14 +317,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         >
             <CanvasResourceMentionTextarea
                 value={prompt}
-                references={mentionReferences}
+                references={resolvedMentionReferences}
                 onChange={updatePrompt}
                 onSubmit={submit}
                 richMentions={mode === "image" || mode === "video"}
                 mentionInsertRequest={mentionInsertRequest}
                 header={isMediaComposer && connectionPreviews.length && onRemoveConnection ? (
                     <CanvasConnectionPreviewStrip
-                        items={connectionPreviews}
+                        items={resolvedConnectionPreviews}
                         onMention={insertPreviewMention}
                         onRemove={(item) => {
                             updatePrompt(removeCanvasConnectionMention(prompt, item.label));
@@ -350,6 +357,37 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             {renderComposerToolbar()}
         </div>
     );
+}
+
+function useResolvedMentionReferences(references: CanvasResourceReference[]) {
+    const signature = useMemo(
+        () => references.map((reference) => [reference.nodeId, reference.kind, reference.previewUrl || "", reference.storageKey || "", reference.mediaId || "", reference.active ? "1" : "0"].join("\u0001")).join("\u0002"),
+        [references],
+    );
+    const [resolved, setResolved] = useState<{ signature: string; references: CanvasResourceReference[] }>({ signature: "", references });
+    const currentReferences = resolved.signature === signature ? resolved.references : references;
+
+    useEffect(() => {
+        let cancelled = false;
+        const resolve = async () => {
+            const next = await Promise.all(references.map(async (reference) => {
+                if (reference.kind === "image" && (reference.storageKey || reference.mediaId)) {
+                    const image = await resolvePersistedImage(reference.mediaId, reference.storageKey, reference.previewUrl || "");
+                    return { ...reference, previewUrl: image.url || reference.previewUrl, storageKey: image.storageKey || reference.storageKey };
+                }
+                if ((reference.kind === "video" || reference.kind === "audio") && (reference.storageKey || reference.mediaId)) {
+                    const url = await resolvePersistedMediaUrl(reference.mediaId, reference.storageKey, reference.previewUrl || "");
+                    return { ...reference, previewUrl: url || reference.previewUrl };
+                }
+                return reference;
+            }));
+            if (!cancelled) setResolved({ signature, references: next });
+        };
+        void resolve();
+        return () => { cancelled = true; };
+    }, [references, signature]);
+
+    return currentReferences;
 }
 
 function PromptCharacterCount({ count, color, warning }: { count: number; color: string; warning: string | null }) {
