@@ -24,4 +24,8 @@ describe("videoModelSelectionPatch", () => {
         expect(videoModelSelectionPatch("video-model-b")).toEqual({ model: "video-model-b", seconds: "5" });
         expect(videoModelSelectionPatch("video-model-c", "1080p")).toEqual({ model: "video-model-c", seconds: "5", vquality: "1080p" });
     });
+
+    it("accepts a capability-normalized duration", () => {
+        expect(videoModelSelectionPatch("video-model-d", "720p", "30")).toEqual({ model: "video-model-d", seconds: "30", vquality: "720p" });
+    });
 });

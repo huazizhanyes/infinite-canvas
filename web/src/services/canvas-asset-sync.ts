@@ -1,10 +1,10 @@
-import type { Asset, ImageAsset, VideoAsset } from "@/stores/use-asset-store";
+import type { Asset, AudioAsset, ImageAsset, VideoAsset } from "@/stores/use-asset-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { accountScopedKey, getCanvasSessionEpoch, getCanvasStorageScopeId } from "@/lib/canvas-account-scope";
 import { getImageBlob, resolvePersistedImage } from "@/services/image-storage";
 import { getMediaBlob, resolveMediaUrl, setMediaBlob } from "@/services/file-storage";
 import { uploadCanvasMedia, resolveCanvasMediaUrl } from "@/services/canvas-media";
-import { canvasAssetsApi, type CanvasAssetConnection } from "@/services/api/canvas-assets";
+import { canvasAssetsApi, CanvasAssetsApiError, type CanvasAssetConnection } from "@/services/api/canvas-assets";
 import { localForageStorage } from "@/lib/localforage-storage";
 import { nanoid } from "nanoid";
 
@@ -20,7 +20,9 @@ let applyingRemoteState = false;
 let previousAssets = new Map<string, Asset>();
 let pendingAssets = new Map<string, Asset>();
 let pendingDeletes = new Set<string>();
-let pendingAssetClears = new Map<string, ImageAsset | VideoAsset>();
+type SyncableMediaAsset = ImageAsset | VideoAsset | AudioAsset;
+
+let pendingAssetClears = new Map<string, SyncableMediaAsset>();
 const OUTBOX_KEY = "canvas_asset_sync_outbox";
 let stopping = false;
 
@@ -34,7 +36,7 @@ export async function initializeCanvasAssetSync(nextConnection: CanvasAssetConne
     await waitForAssetHydration();
     const epoch = getCanvasSessionEpoch();
     const localAssets = useAssetStore.getState().assets;
-    let remoteAssets: Array<ImageAsset | VideoAsset> = [];
+    let remoteAssets: SyncableMediaAsset[] = [];
     try {
         remoteAssets = (await canvasAssetsApi.list(nextConnection)).filter(isSyncableAsset);
     } catch (error) {
@@ -162,6 +164,19 @@ async function flushPendingAssets() {
                         return;
                     }
                 }
+                if (isPermanentAssetSyncError(error)) {
+                    saved = false;
+                    const current = useAssetStore.getState().assets.find((item) => item.id === asset.id);
+                    if (current && isSyncableAsset(current)) {
+                        const failed = markAssetMediaFailed(current);
+                        applyingRemoteState = true;
+                        useAssetStore.getState().replaceAssets(useAssetStore.getState().assets.map((item) => (item.id === asset.id ? failed : item)));
+                        applyingRemoteState = false;
+                        previousAssets.set(asset.id, failed);
+                    }
+                    console.warn("[CanvasAssetSync] permanent save failure; retry stopped", { id: asset.id, error });
+                    return;
+                }
                 saved = false;
                 const current = useAssetStore.getState().assets.find((item) => item.id === asset.id);
                 if (current) {
@@ -187,56 +202,75 @@ async function prepareAssetForUpload(asset: Asset) {
     if (asset.kind === "image") {
         return { ...asset, data: { ...asset.data, mediaId: remote.mediaId, mediaOwner: "asset", mediaStatus: "synced" } } as ImageAsset;
     }
-    return { ...asset, data: { ...asset.data, mediaId: remote.mediaId, mediaOwner: "asset", mediaStatus: "synced" } } as VideoAsset;
+    return { ...asset, data: { ...asset.data, mediaId: remote.mediaId, mediaOwner: "asset", mediaStatus: "synced" } } as VideoAsset | AudioAsset;
 }
 
-async function repairAssetMedia(asset: ImageAsset | VideoAsset) {
+async function repairAssetMedia(asset: SyncableMediaAsset) {
     const blob = await readAssetBlob(asset);
     if (!blob?.size) throw new Error("资产媒体文件不存在，无法修复");
     const remote = await uploadCanvasMedia(blob, asset.kind, { ownerType: "asset", ownerId: asset.id });
     if (!remote?.mediaId) throw new Error("资产媒体重新上传失败");
-    return { ...asset, data: { ...asset.data, mediaId: remote.mediaId, mediaOwner: "asset", mediaStatus: "synced" } } as ImageAsset | VideoAsset;
+    return { ...asset, data: { ...asset.data, mediaId: remote.mediaId, mediaOwner: "asset", mediaStatus: "synced" } } as SyncableMediaAsset;
 }
 
-async function readAssetBlob(asset: ImageAsset | VideoAsset) {
+async function readAssetBlob(asset: SyncableMediaAsset) {
     if (asset.data.storageKey) {
         const stored = await (asset.kind === "image" ? getImageBlob(asset.data.storageKey) : getMediaBlob(asset.data.storageKey));
         if (stored?.size) return stored;
     }
     const url = asset.kind === "image" ? asset.data.dataUrl : asset.data.url;
     if (url) {
-        const local = await fetch(url).then((response) => response.ok ? response.blob() : null).catch(() => null);
+        const local = await fetch(url)
+            .then((response) => (response.ok ? response.blob() : null))
+            .catch(() => null);
         if (local?.size) return local;
     }
     if (!asset.data.mediaId) return null;
     const remoteUrl = await resolveCanvasMediaUrl(asset.data.mediaId, "");
     if (!remoteUrl) return null;
-    return fetch(remoteUrl).then((response) => response.ok ? response.blob() : null).catch(() => null);
+    return fetch(remoteUrl)
+        .then((response) => (response.ok ? response.blob() : null))
+        .catch(() => null);
 }
 
 function isInvalidAssetMediaError(error: unknown) {
     return error instanceof Error && /资产媒体尚未同步完成或归属无效/.test(error.message);
 }
 
+function isPermanentAssetSyncError(error: unknown) {
+    return error instanceof CanvasAssetsApiError && error.statusCode >= 400 && error.statusCode < 500;
+}
+
 function applyPreparedAsset(asset: Asset) {
     const current = useAssetStore.getState().assets;
     applyingRemoteState = true;
-    useAssetStore.getState().replaceAssets(current.map((item) => item.id === asset.id ? asset : item));
+    useAssetStore.getState().replaceAssets(current.map((item) => (item.id === asset.id ? asset : item)));
     applyingRemoteState = false;
     previousAssets.set(asset.id, asset);
 }
 
-function markAssetMediaMissing(asset: ImageAsset | VideoAsset) {
+function markAssetMediaMissing(asset: SyncableMediaAsset) {
     pendingAssets.delete(asset.id);
     pendingDeletes.delete(asset.id);
-    const next = asset.kind === "image"
-        ? { ...asset, coverUrl: "", data: { ...asset.data, mediaId: undefined, mediaOwner: undefined, dataUrl: "", mediaStatus: "missing" as const } }
-        : { ...asset, coverUrl: "", data: { ...asset.data, mediaId: undefined, mediaOwner: undefined, url: "", mediaStatus: "missing" as const } };
+    let next: SyncableMediaAsset;
+    if (asset.kind === "image") {
+        next = { ...asset, coverUrl: "", data: { ...asset.data, mediaId: undefined, mediaOwner: undefined, dataUrl: "", mediaStatus: "missing" } };
+    } else if (asset.kind === "video") {
+        next = { ...asset, coverUrl: "", data: { ...asset.data, mediaId: undefined, mediaOwner: undefined, url: "", mediaStatus: "missing" } };
+    } else {
+        next = { ...asset, coverUrl: "", data: { ...asset.data, mediaId: undefined, mediaOwner: undefined, url: "", mediaStatus: "missing" } };
+    }
     applyingRemoteState = true;
-    useAssetStore.getState().replaceAssets(useAssetStore.getState().assets.map((item) => item.id === asset.id ? next : item));
+    useAssetStore.getState().replaceAssets(useAssetStore.getState().assets.map((item) => (item.id === asset.id ? next : item)));
     applyingRemoteState = false;
     previousAssets.set(asset.id, next);
     return next;
+}
+
+function markAssetMediaFailed(asset: SyncableMediaAsset): SyncableMediaAsset {
+    if (asset.kind === "image") return { ...asset, data: { ...asset.data, mediaStatus: "failed" } };
+    if (asset.kind === "video") return { ...asset, data: { ...asset.data, mediaStatus: "failed" } };
+    return { ...asset, data: { ...asset.data, mediaStatus: "failed" } };
 }
 
 function toRemoteAsset(asset: Asset): Asset {
@@ -246,38 +280,47 @@ function toRemoteAsset(asset: Asset): Asset {
         const { storageKey: _storageKey, ...data } = asset.data;
         return { ...asset, coverUrl, data: { ...data, dataUrl: "" } };
     }
+    if (asset.kind === "video") {
+        const { storageKey: _storageKey, ...data } = asset.data;
+        return { ...asset, coverUrl, data: { ...data, url: "" } } as VideoAsset;
+    }
     const { storageKey: _storageKey, ...data } = asset.data;
-    return { ...asset, coverUrl, data: { ...data, url: "" } };
+    return { ...asset, coverUrl, data: { ...data, url: "" } } as AudioAsset;
 }
 
 function isBrowserOnlyUrl(value?: string) {
     return !value || value.startsWith("blob:") || value.startsWith("data:");
 }
 
-async function hydrateRemoteAssets(assets: Array<ImageAsset | VideoAsset>) {
-    return Promise.all(assets.map(async (asset) => {
-        if (!asset.data.mediaId) return asset;
-        const fallback = asset.kind === "image" ? asset.data.dataUrl : asset.data.url;
-        if (asset.kind === "image") {
-            const resolved = await resolvePersistedImage(asset.data.mediaId, asset.data.storageKey, fallback);
-            return { ...asset, coverUrl: resolved.url, data: { ...asset.data, storageKey: resolved.storageKey, dataUrl: resolved.url, mediaOwner: "asset", mediaStatus: "synced" } } as ImageAsset;
-        }
-        const remoteUrl = await resolveCanvasMediaUrl(asset.data.mediaId, fallback);
-        if (!remoteUrl) return asset;
-        const storageKey = asset.data.storageKey || `${asset.kind}:u${getCanvasStorageScopeId()}:${nanoid()}`;
-        const existing = await getMediaBlob(storageKey);
-        if (!existing) {
-            const response = await fetch(remoteUrl).catch(() => null);
-            if (response?.ok) {
-                const blob = await response.blob();
-                if (blob.size) {
-                    await setMediaBlob(storageKey, blob);
+async function hydrateRemoteAssets(assets: SyncableMediaAsset[]) {
+    return Promise.all(
+        assets.map(async (asset) => {
+            if (!asset.data.mediaId) return asset;
+            const fallback = asset.kind === "image" ? asset.data.dataUrl : asset.data.url;
+            if (asset.kind === "image") {
+                const resolved = await resolvePersistedImage(asset.data.mediaId, asset.data.storageKey, fallback);
+                return { ...asset, coverUrl: resolved.url, data: { ...asset.data, storageKey: resolved.storageKey, dataUrl: resolved.url, mediaOwner: "asset", mediaStatus: "synced" } } as ImageAsset;
+            }
+            const remoteUrl = await resolveCanvasMediaUrl(asset.data.mediaId, fallback);
+            if (!remoteUrl) return asset;
+            const storageKey = asset.data.storageKey || `${asset.kind}:u${getCanvasStorageScopeId()}:${nanoid()}`;
+            const existing = await getMediaBlob(storageKey);
+            if (!existing) {
+                const response = await fetch(remoteUrl).catch(() => null);
+                if (response?.ok) {
+                    const blob = await response.blob();
+                    if (blob.size) {
+                        await setMediaBlob(storageKey, blob);
+                    }
                 }
             }
-        }
-        const localUrl = await resolveMediaUrl(storageKey, remoteUrl);
-        return { ...asset, coverUrl: localUrl, data: { ...asset.data, storageKey, url: localUrl, mediaOwner: "asset", mediaStatus: "synced" } } as VideoAsset;
-    }));
+            const localUrl = await resolveMediaUrl(storageKey, remoteUrl);
+            if (asset.kind === "video") {
+                return { ...asset, coverUrl: localUrl, data: { ...asset.data, storageKey, url: localUrl, mediaOwner: "asset", mediaStatus: "synced" } } as VideoAsset;
+            }
+            return { ...asset, coverUrl: localUrl, data: { ...asset.data, storageKey, url: localUrl, mediaOwner: "asset", mediaStatus: "synced" } } as AudioAsset;
+        }),
+    );
 }
 
 function mergeAssets(local: Asset[], remote: Asset[]) {
@@ -291,15 +334,15 @@ function mergeAssets(local: Asset[], remote: Asset[]) {
     return [...result.values()].sort((left, right) => assetTime(right) - assetTime(left));
 }
 
-function isSyncableAsset(asset: Asset): asset is ImageAsset | VideoAsset {
-    return asset.kind === "image" || asset.kind === "video";
+function isSyncableAsset(asset: Asset): asset is SyncableMediaAsset {
+    return asset.kind === "image" || asset.kind === "video" || asset.kind === "audio";
 }
 
-function isQueueableAsset(asset: Asset): asset is ImageAsset | VideoAsset {
+function isQueueableAsset(asset: Asset): asset is SyncableMediaAsset {
     return isSyncableAsset(asset) && asset.data.mediaStatus !== "missing";
 }
 
-function isClearableAsset(asset: Asset): asset is ImageAsset | VideoAsset {
+function isClearableAsset(asset: Asset): asset is SyncableMediaAsset {
     return isSyncableAsset(asset) && asset.data.mediaStatus === "missing";
 }
 

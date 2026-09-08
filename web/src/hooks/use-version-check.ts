@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App } from "antd";
 import { APP_VERSION } from "@/constant/env";
 import { parseChangelog, type ReleaseInfo } from "@/lib/release";
 
 const latestVersionUrl = "https://raw.githubusercontent.com/basketikun/infinite-canvas/main/VERSION";
 const latestChangelogUrl = "https://raw.githubusercontent.com/basketikun/infinite-canvas/main/CHANGELOG.md";
+const VERSION_CHECK_INTERVAL = 15 * 60 * 1000;
+const VERSION_NOTICE_KEY = "infinite-canvas:last-update-notice";
 
 function readLocalReleases(): ReleaseInfo[] {
     return __APP_RELEASES__ || [];
@@ -22,7 +24,25 @@ function isNewerVersion(latestVersion: string, currentVersion: string) {
     return latest.some((value, index) => value > current[index] && latest.slice(0, index).every((part, prevIndex) => part === current[prevIndex]));
 }
 
-export function useVersionCheck() {
+function readNotifiedVersion() {
+    if (typeof window === "undefined") return null;
+    try {
+        return window.sessionStorage.getItem(VERSION_NOTICE_KEY);
+    } catch {
+        return null;
+    }
+}
+
+function markVersionNotified(version: string) {
+    if (typeof window === "undefined") return;
+    try {
+        window.sessionStorage.setItem(VERSION_NOTICE_KEY, version);
+    } catch {
+        // Storage may be unavailable in private browsing; the in-memory ref still prevents duplicates.
+    }
+}
+
+export function useVersionCheck({ autoOpen = false }: { autoOpen?: boolean } = {}) {
     const currentVersion = APP_VERSION;
     const { message } = App.useApp();
     const localReleases = useMemo(readLocalReleases, []);
@@ -30,11 +50,12 @@ export function useVersionCheck() {
     const [releases, setReleases] = useState<ReleaseInfo[]>(localReleases);
     const [checking, setChecking] = useState(false);
     const [open, setOpen] = useState(false);
+    const notifiedVersionRef = useRef<string | null>(readNotifiedVersion());
     const hasNewVersion = isNewerVersion(latestVersion, currentVersion);
 
     const checkLatestVersion = useCallback(async () => {
         try {
-            const response = await fetch(latestVersionUrl);
+            const response = await fetch(`${latestVersionUrl}?t=${Date.now()}`, { cache: "no-store" });
             if (!response.ok) return false;
             const version = await response.text();
             setLatestVersion(version.trim() || currentVersion);
@@ -48,7 +69,8 @@ export function useVersionCheck() {
         async (showMessage = false) => {
             setChecking(true);
             try {
-                const [versionResponse, changelogResponse] = await Promise.all([fetch(latestVersionUrl), fetch(latestChangelogUrl)]);
+                const cacheBust = Date.now();
+                const [versionResponse, changelogResponse] = await Promise.all([fetch(`${latestVersionUrl}?t=${cacheBust}`, { cache: "no-store" }), fetch(`${latestChangelogUrl}?t=${cacheBust}`, { cache: "no-store" })]);
                 if (!versionResponse.ok) throw new Error("版本读取失败");
                 if (!changelogResponse.ok) throw new Error("更新日志读取失败");
                 const [version, changelog] = await Promise.all([versionResponse.text(), changelogResponse.text()]);
@@ -69,8 +91,27 @@ export function useVersionCheck() {
     );
 
     useEffect(() => {
-        void checkLatestVersion();
+        const checkWhenVisible = () => {
+            if (document.visibilityState !== "hidden") void checkLatestVersion();
+        };
+        checkWhenVisible();
+        const timer = window.setInterval(checkWhenVisible, VERSION_CHECK_INTERVAL);
+        window.addEventListener("focus", checkWhenVisible);
+        document.addEventListener("visibilitychange", checkWhenVisible);
+        return () => {
+            window.clearInterval(timer);
+            window.removeEventListener("focus", checkWhenVisible);
+            document.removeEventListener("visibilitychange", checkWhenVisible);
+        };
     }, [checkLatestVersion]);
+
+    useEffect(() => {
+        if (!autoOpen || !hasNewVersion || notifiedVersionRef.current === latestVersion) return;
+        notifiedVersionRef.current = latestVersion;
+        markVersionNotified(latestVersion);
+        setOpen(true);
+        void checkLatestRelease();
+    }, [autoOpen, checkLatestRelease, hasNewVersion, latestVersion]);
 
     const openReleaseModal = useCallback(() => {
         setOpen(true);

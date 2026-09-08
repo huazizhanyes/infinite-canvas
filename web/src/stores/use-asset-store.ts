@@ -7,11 +7,16 @@ import { accountScopedKey } from "@/lib/canvas-account-scope";
 import { cleanupUnusedImages, resolvePersistedImage, uploadImage } from "@/services/image-storage";
 import { cleanupUnusedMedia, resolveMediaUrl, resolvePersistedMediaUrl } from "@/services/file-storage";
 
-export type AssetKind = "text" | "image" | "video";
+export type AssetKind = "text" | "image" | "video" | "audio";
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
-export type ImageAsset = AssetBase<"image"> & { data: { dataUrl: string; storageKey?: string; mediaId?: string; mediaOwner?: "asset"; mediaStatus?: "uploading" | "synced" | "missing" | "failed"; width: number; height: number; bytes: number; mimeType: string } };
-export type VideoAsset = AssetBase<"video"> & { data: { url: string; storageKey?: string; mediaId?: string; mediaOwner?: "asset"; mediaStatus?: "uploading" | "synced" | "missing" | "failed"; width: number; height: number; bytes: number; mimeType: string } };
-export type Asset = TextAsset | ImageAsset | VideoAsset;
+export type ImageAsset = AssetBase<"image"> & {
+    data: { dataUrl: string; storageKey?: string; mediaId?: string; mediaOwner?: "asset"; mediaStatus?: "uploading" | "synced" | "missing" | "failed"; width: number; height: number; bytes: number; mimeType: string };
+};
+export type VideoAsset = AssetBase<"video"> & {
+    data: { url: string; storageKey?: string; mediaId?: string; mediaOwner?: "asset"; mediaStatus?: "uploading" | "synced" | "missing" | "failed"; width: number; height: number; bytes: number; mimeType: string };
+};
+export type AudioAsset = AssetBase<"audio"> & { data: { url: string; storageKey?: string; mediaId?: string; mediaOwner?: "asset"; mediaStatus?: "uploading" | "synced" | "missing" | "failed"; durationMs?: number; bytes: number; mimeType: string } };
+export type Asset = TextAsset | ImageAsset | VideoAsset | AudioAsset;
 
 type AssetBase<T extends AssetKind> = {
     id: string;
@@ -45,7 +50,10 @@ const assetStorage: PersistStorage<AssetStore> = {
         const parsed = JSON.parse(value) as StorageValue<AssetStore>;
         parsed.state.assets = await Promise.all(
             parsed.state.assets.map(async (asset) => {
-                if (asset.kind === "video" && (asset.data.storageKey || asset.data.mediaId)) return { ...asset, data: { ...asset.data, url: await resolvePersistedMediaUrl(asset.data.mediaId, asset.data.storageKey, asset.data.url), mediaStatus: asset.data.mediaId ? "synced" : asset.data.mediaStatus } };
+                if (asset.kind === "video" && (asset.data.storageKey || asset.data.mediaId))
+                    return { ...asset, data: { ...asset.data, url: await resolvePersistedMediaUrl(asset.data.mediaId, asset.data.storageKey, asset.data.url), mediaStatus: asset.data.mediaId ? "synced" : asset.data.mediaStatus } } as VideoAsset;
+                if (asset.kind === "audio" && (asset.data.storageKey || asset.data.mediaId))
+                    return { ...asset, data: { ...asset.data, url: await resolvePersistedMediaUrl(asset.data.mediaId, asset.data.storageKey, asset.data.url), mediaStatus: asset.data.mediaId ? "synced" : asset.data.mediaStatus } } as AudioAsset;
                 if (asset.kind !== "image") return asset;
                 if (asset.data.storageKey || asset.data.mediaId) {
                     const resolved = await resolvePersistedImage(asset.data.mediaId, asset.data.storageKey, asset.data.dataUrl || asset.coverUrl);
@@ -57,7 +65,11 @@ const assetStorage: PersistStorage<AssetStore> = {
                 }
                 if (!asset.data.dataUrl.startsWith("data:image/")) return asset;
                 const image = await uploadImage(asset.data.dataUrl);
-                return { ...asset, coverUrl: asset.coverUrl.startsWith("data:image/") ? image.url : asset.coverUrl, data: { ...asset.data, dataUrl: image.url, storageKey: image.storageKey, mediaId: image.mediaId, mediaStatus: image.mediaStatus, bytes: image.bytes, mimeType: image.mimeType } };
+                return {
+                    ...asset,
+                    coverUrl: asset.coverUrl.startsWith("data:image/") ? image.url : asset.coverUrl,
+                    data: { ...asset.data, dataUrl: image.url, storageKey: image.storageKey, mediaId: image.mediaId, mediaStatus: image.mediaStatus, bytes: image.bytes, mimeType: image.mimeType },
+                };
             }),
         );
         return parsed;
@@ -124,5 +136,6 @@ export function assetPreviewUrl(asset: Asset) {
         return asset.coverUrl || asset.data.dataUrl;
     }
     if (asset.kind === "video") return asset.coverUrl || asset.data.url;
+    if (asset.kind === "audio") return "";
     return asset.coverUrl;
 }

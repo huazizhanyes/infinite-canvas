@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Result, Spin } from "antd";
 
-import { createModelChannel, encodeChannelModel, modelOptionsFromChannels, useConfigStore, rehydrateConfigForAccount, visibleCanvasVideoModes } from "@/stores/use-config-store";
+import { adaptVideoCapabilitiesForModel, createModelChannel, encodeChannelModel, modelOptionsFromChannels, normalizeVideoDuration, useConfigStore, rehydrateConfigForAccount, visibleCanvasVideoModes } from "@/stores/use-config-store";
 import { initializeSucaiCanvasSync } from "@/services/sucai-canvas-sync";
 import { stopSucaiCanvasSync } from "@/services/sucai-canvas-sync";
 import { initializeCanvasAssetSync, stopCanvasAssetSync } from "@/services/canvas-asset-sync";
@@ -85,7 +85,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             capability: "video" as const,
             icon: item.icon,
             iconUrl: item.icon_url,
-            videoCapabilities: {
+            videoCapabilities: adaptVideoCapabilitiesForModel(item.id, item.channel, {
                 provider: "canvas-video" as const,
                 displayName: item.display_name || item.id,
                 displayBaseName: item.display_base_name || item.display_name || item.id,
@@ -106,9 +106,9 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 faceFriendly: Boolean(item.faceFriendly || item.face_friendly || item.channel === "59" && item.upstream_model === "minimax-h3"),
                 displayNotice: item.displayNotice || item.display_notice || null,
                 freePromotion: item.free_promotion || null,
-                statsRecent10: item.statsRecent10 || null,
-                recent10: item.recent10 || null,
-            },
+                statsRecent3: item.statsRecent3 || null,
+                recent3: item.recent3 || null,
+            }),
         });
         const refreshVideoPricing = () => {
             void requestModels("/v1/video/models", true).then((videoModels) => {
@@ -159,7 +159,10 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 const audioModels = models.filter((item: { capability?: string }) => item.capability === "audio");
                 const textModel = textModels.find((item: { is_default?: boolean }) => item.is_default) || textModels[0];
                 const audioModel = audioModels.find((item: { is_default?: boolean }) => item.is_default) || audioModels[0];
+                const mappedVideoModels = videoModels.map(mapVideoModel);
                 const videoModel = videoModels.find((item: { default_option?: boolean }) => item.default_option) || videoModels[0];
+                const selectedVideoModel = mappedVideoModels.find((item: { name: string }) => item.name === videoModel?.id);
+                const selectedVideoCapabilities = selectedVideoModel?.videoCapabilities;
                 if (!imageModel?.id) throw new Error("管理员尚未配置画布生图模型");
                 const channel = createModelChannel({
                     id: SUCAI_CHANNEL_ID,
@@ -171,7 +174,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                         ...models
                             .filter((item: { id?: string; capability?: string }) => item.id && ["image", "text", "audio"].includes(item.capability || ""))
                             .map((item: { id: string; display_name?: string; capability: "image" | "text" | "audio"; icon?: string; icon_url?: string }) => ({ name: item.id, displayName: item.display_name || item.id, capability: item.capability, icon: item.icon, iconUrl: item.icon_url })),
-                        ...videoModels.map(mapVideoModel),
+                        ...mappedVideoModels,
                     ],
                 });
                 const imageModelValue = encodeChannelModel(channel.id, imageModel.id);
@@ -188,10 +191,10 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 if (textModelValue) updateConfig("textModel", textModelValue);
                 if (videoModelValue) {
                     updateConfig("videoModel", videoModelValue);
-                    updateConfig("videoMode", visibleCanvasVideoModes(videoModel.modes)[0] || "text2video");
-                    updateConfig("size", videoModel.aspect_ratios?.[0] || "16:9");
-                    updateConfig("vquality", videoModel.qualities?.[0]?.quality || "720p");
-                    updateConfig("videoSeconds", String(videoModel.duration?.options?.[0] || videoModel.duration?.min || 5));
+                    updateConfig("videoMode", selectedVideoCapabilities?.modes[0] || visibleCanvasVideoModes(videoModel.modes)[0] || "text2video");
+                    updateConfig("size", selectedVideoCapabilities?.aspectRatios[0] || videoModel.aspect_ratios?.[0] || "16:9");
+                    updateConfig("vquality", selectedVideoCapabilities?.qualities[0]?.quality || videoModel.qualities?.[0]?.quality || "720p");
+                    updateConfig("videoSeconds", String(normalizeVideoDuration(undefined, selectedVideoCapabilities?.duration || videoModel.duration)));
                     updateConfig("videoParameters", Object.fromEntries((videoModel.parameters || []).map((parameter: any) => [parameter.key, parameter.defaultValue] as [string, unknown]).filter(([, value]: [string, unknown]) => value !== undefined)));
                 } else updateConfig("videoModel", "");
                 if (audioModelValue) {

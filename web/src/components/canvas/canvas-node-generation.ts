@@ -2,7 +2,7 @@ import type { AiTextMessage } from "@/services/api/image";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
-import { getGenerationResourceNodes, mentionedCanvasResourceReferences, missingCanvasResourceMentions, plainCanvasResourceMentions, resolveCanvasResourceMentionLabels } from "@/lib/canvas/canvas-resource-references";
+import { getGenerationResourceNodes, mentionedCanvasResourceReferences, missingCanvasResourceMentions, parseCanvasResourceMentionTokens, plainCanvasResourceMentions, resolveCanvasResourceMentionLabels } from "@/lib/canvas/canvas-resource-references";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import type { CanvasGraphIndex } from "@/lib/canvas/canvas-graph-index";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
@@ -80,11 +80,28 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
 }
 
 function buildMentionGenerationInputs(prompt: string, references: CanvasResourceReference[]): NodeGenerationInput[] {
-    return references
-        .map((reference, index) => ({ reference, index, position: mentionPosition(prompt, reference.label) }))
-        .filter(({ reference, position }) => reference.active && reference.source === "user-asset" && position >= 0)
+    const userAssetReferences = references.filter((reference) => reference.active && reference.source === "user-asset");
+    const byNodeId = new Map(userAssetReferences.map((reference) => [reference.nodeId, reference]));
+    const structuredMentions = parseCanvasResourceMentionTokens(prompt);
+    const structuredNodeIds = new Set(structuredMentions.map((mention) => mention.nodeId));
+    const mentionedUserAssets = structuredMentions.flatMap((mention, index) => {
+        const reference = byNodeId.get(mention.nodeId);
+        return reference ? [{ reference, index, position: mention.start }] : [];
+    });
+    // Older saved prompts may contain plain @labels instead of stable canvas-ref
+    // tokens. Keep the legacy lookup for those references only, while masking
+    // structured tokens so their labels cannot cause a second, incorrect match.
+    const legacyPrompt = structuredMentions.reduce((value, mention) => `${value.slice(0, mention.start)}${" ".repeat(mention.end - mention.start)}${value.slice(mention.end)}`, prompt);
+    const legacyMentions = userAssetReferences
+        .filter((reference) => !structuredNodeIds.has(reference.nodeId))
+        .map((reference, index) => ({ reference, index, position: mentionPosition(legacyPrompt, reference.label) }))
+        .filter(({ position }) => position >= 0);
+    return [...mentionedUserAssets, ...legacyMentions]
         .sort((left, right) => left.position - right.position || left.index - right.index)
         .flatMap(({ reference }): NodeGenerationInput[] => {
+            if (reference.kind === "text") {
+                return [{ nodeId: reference.nodeId, type: "text", title: reference.title, text: reference.text || "", label: reference.label }];
+            }
             if (reference.kind === "image") {
                 return [{
                     nodeId: reference.nodeId,

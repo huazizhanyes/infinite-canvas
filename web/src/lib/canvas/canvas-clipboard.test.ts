@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { prepareCanvasNodeForClipboard, remapCanvasClipboardConnections, selectCanvasClipboardConnections } from "./canvas-clipboard";
+import { arrangePastedCanvasNodes, prepareCanvasNodeForClipboard, remapCanvasClipboardConnections, selectCanvasClipboardConnections } from "./canvas-clipboard";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const connections = [
@@ -78,5 +78,33 @@ describe("prepareCanvasNodeForClipboard", () => {
         expect(copied.metadata?.status).toBe("success");
         expect(copied.metadata?.content).toBe("https://old.example/video.mp4");
         expect(copied.metadata?.mediaId).toBe("old-media");
+    });
+});
+
+describe("arrangePastedCanvasNodes", () => {
+    const node = (id: string, position = { x: 0, y: 0 }): CanvasNodeData => ({
+        id,
+        type: CanvasNodeType.Image,
+        title: id,
+        position,
+        width: 100,
+        height: 80,
+    });
+
+    it("arranges overlapping pasted nodes into a grid", () => {
+        const arranged = arrangePastedCanvasNodes([node("a"), node("b"), node("c"), node("d")], [], { x: 500, y: 400 });
+
+        expect(arranged.map((item) => item.position)).toEqual([
+            { x: 376, y: 296 },
+            { x: 524, y: 296 },
+            { x: 376, y: 424 },
+            { x: 524, y: 424 },
+        ]);
+    });
+
+    it("moves repeated pastes to an available position", () => {
+        const arranged = arrangePastedCanvasNodes([node("copy")], [node("existing", { x: 450, y: 360 })], { x: 500, y: 400 });
+
+        expect(arranged[0].position).toEqual({ x: 598, y: 360 });
     });
 });

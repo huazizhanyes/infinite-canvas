@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createModelChannel, encodeChannelModel, modelIconOf, normalizeChannelModels, normalizeVideoDuration, videoCapabilitiesOf, visibleCanvasVideoModes, type VideoModelCapabilities } from "./use-config-store";
+import { adaptVideoCapabilitiesForModel, createModelChannel, encodeChannelModel, modelIconOf, normalizeChannelModels, normalizeVideoDuration, videoCapabilitiesOf, visibleCanvasVideoModes, type VideoModelCapabilities } from "./use-config-store";
 import { defaultConfig } from "./use-config-store";
 
 describe("backend video model capabilities", () => {
@@ -46,5 +46,31 @@ describe("backend video model capabilities", () => {
         expect(normalizeVideoDuration("2")).toBe(5);
         expect(normalizeVideoDuration("2", { min: 2, max: 30, options: null })).toBe(5);
         expect(normalizeVideoDuration("2", { min: 2, max: 30, options: [2, 4, 6] })).toBe(6);
+    });
+
+    it("adapts the XKMJAI fixed-price video models", () => {
+        const base = {
+            provider: "canvas-video" as const,
+            displayName: "模型",
+            channel: "xkmjai",
+            upstreamModel: "model",
+            qualities: [{ quality: "720p", pricing: { type: "per_second", credits: 52 } }],
+            aspectRatios: ["16:9"],
+            duration: { options: [5, 10] },
+            modes: ["text2video"],
+            inputImagesMax: 0,
+            inputVideosMax: 0,
+            inputAudiosMax: 0,
+        } satisfies VideoModelCapabilities;
+
+        const wan = adaptVideoCapabilitiesForModel("wan-3.0-cc", "XKMJAI", base);
+        expect(wan.qualities).toEqual([{ quality: "720p", pricing: { type: "fixed_total", credits: 52 } }]);
+        expect(wan.duration).toEqual({ options: null, min: 5, max: 30 });
+
+        const sd = adaptVideoCapabilitiesForModel("SD-2.5-HM-2", "channel xkmjai", base);
+        expect(sd.qualities[0].quality).toBe("720p");
+        expect(sd.qualities[0].pricing.type).toBe("fixed_total");
+        expect(adaptVideoCapabilitiesForModel("published-wan", "XKMJAI_VIDEO_BASE_URL", { ...base, upstreamModel: "wan-3.0-cc" }).qualities[0].quality).toBe("720p");
+        expect(adaptVideoCapabilitiesForModel("wan-3.0-cc", "other", base)).toBe(base);
     });
 });

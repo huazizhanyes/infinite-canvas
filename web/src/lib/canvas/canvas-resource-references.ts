@@ -16,6 +16,8 @@ export type CanvasResourceReference = {
     kind: CanvasResourceKind;
     label: string;
     title: string;
+    menuTitle?: string;
+    mentionLabel?: string;
     previewUrl?: string;
     text?: string;
     storageKey?: string;
@@ -26,6 +28,8 @@ export type CanvasResourceReference = {
     bytes?: number;
     durationMs?: number;
     active: boolean;
+    connected?: boolean;
+    selectable?: boolean;
 };
 
 export type CanvasResourceMentionToken = { start: number; end: number; nodeId: string; label: string };
@@ -136,11 +140,13 @@ export function buildCanvasResourceReferences(nodes: CanvasNodeData[], connectio
     return globalReferences.map((reference) => ({ ...reference, active: activeIds.has(reference.nodeId) }));
 }
 
-export function buildNodeMentionReferences(node: CanvasNodeData, nodes: CanvasNodeData[], connections: CanvasConnection[], graphIndex?: CanvasGraphIndex, assets: Asset[] = []) {
+export function buildNodeMentionReferences(node: CanvasNodeData, nodes: CanvasNodeData[], connections: CanvasConnection[], graphIndex?: CanvasGraphIndex, assets: Asset[] = [], includeAllCanvasResources = false) {
     const index = graphIndex || createCanvasGraphIndex(nodes, connections);
     const connected = getMentionResourceNodes(node.id, nodes, connections, index);
     const connectedIds = new Set(connected.map((item) => item.id));
-    const ordered = stableContextResourceNodes(node, nodes, connected);
+    const contextOrdered = stableContextResourceNodes(node, nodes, connected);
+    const seen = new Set(contextOrdered.map((item) => item.id));
+    const ordered = includeAllCanvasResources ? [...contextOrdered, ...nodes.filter((item) => isResourceNode(item) && !seen.has(item.id))] : contextOrdered;
     return [...labelResourceNodes(ordered, connectedIds), ...labelUserAssets(assets)];
 }
 
@@ -262,12 +268,16 @@ function labelResourceNodes(nodes: CanvasNodeData[], active: boolean | Set<strin
                 source: "canvas",
                 kind,
                 label,
+                mentionLabel: label,
                 title: node.title || label,
+                menuTitle: node.title || label,
                 previewUrl: node.metadata?.content,
                 storageKey: node.metadata?.storageKey,
                 mediaId: node.metadata?.mediaId,
                 text: resourceText(node),
                 active: typeof active === "boolean" ? active : active.has(node.id),
+                connected: typeof active === "boolean" ? active : active.has(node.id),
+                selectable: true,
             },
         ];
     });
@@ -282,15 +292,14 @@ function labelUserAssets(assets: Asset[]) {
     const titleCounts = new Map<string, number>();
     const seenTitles = new Map<string, number>();
     assets.forEach((asset) => {
-        if (asset.kind !== "text" && asset.title) titleCounts.set(asset.title, (titleCounts.get(asset.title) || 0) + 1);
+        if (asset.title) titleCounts.set(asset.title, (titleCounts.get(asset.title) || 0) + 1);
     });
     return assets.flatMap((asset): CanvasResourceReference[] => {
-        if (asset.kind === "text") return [];
         const kind = asset.kind as CanvasResourceKind;
         const index = counts[kind]++;
         const titleIndex = (seenTitles.get(asset.title) || 0) + 1;
         seenTitles.set(asset.title, titleIndex);
-        const title = asset.title || `${kind === "image" ? "图片" : "视频"}${index + 1}`;
+        const title = asset.title || `${kind === "image" ? "图片" : kind === "video" ? "视频" : kind === "audio" ? "音频" : "文本"}${index + 1}`;
         const previewUrl = assetPreviewUrl(asset);
         return [{
             id: `asset:${asset.id}`,
@@ -300,14 +309,20 @@ function labelUserAssets(assets: Asset[]) {
             kind,
             label: `资产·${title}${(titleCounts.get(asset.title) || 0) > 1 ? `·${titleIndex}` : ""}`,
             title: asset.title,
+            menuTitle: asset.title || title,
+            mentionLabel: `资产·${title}${(titleCounts.get(asset.title) || 0) > 1 ? `·${titleIndex}` : ""}`,
             previewUrl,
-            storageKey: asset.data.storageKey,
-            mediaId: asset.data.mediaId,
-            mimeType: asset.data.mimeType,
-            width: asset.data.width,
-            height: asset.data.height,
-            bytes: asset.data.bytes,
+            storageKey: asset.kind === "text" ? undefined : asset.data.storageKey,
+            mediaId: asset.kind === "text" ? undefined : asset.data.mediaId,
+            mimeType: asset.kind === "text" ? undefined : asset.data.mimeType,
+            width: asset.kind === "image" || asset.kind === "video" ? asset.data.width : undefined,
+            height: asset.kind === "image" || asset.kind === "video" ? asset.data.height : undefined,
+            bytes: asset.kind === "text" ? undefined : asset.data.bytes,
+            durationMs: asset.kind === "audio" ? asset.data.durationMs : undefined,
+            text: asset.kind === "text" ? asset.data.content : undefined,
             active: true,
+            connected: false,
+            selectable: true,
         }];
     });
 }

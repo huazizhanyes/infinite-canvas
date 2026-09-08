@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } fro
 import type { CSSProperties, ForwardedRef, MouseEvent, PointerEvent, ReactNode, TextareaHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import { Button, Modal } from "antd";
-import { ChevronRight, FileText, FolderOpen, Image as ImageIcon, Maximize2, Music2, Video } from "lucide-react";
+import { ChevronRight, FileText, FolderOpen, Image as ImageIcon, Maximize2, Music2, Search, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { isImeComposing, isPlainEnterKey } from "@/lib/keyboard-event";
@@ -34,6 +34,7 @@ type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "onChange" | "val
     header?: ReactNode;
     expandedFooter?: ReactNode;
     mentionInsertRequest?: CanvasMentionInsertRequest | null;
+    onReferenceSelect?: (reference: CanvasResourceReference) => boolean | void;
 };
 
 export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea(props, forwardedRef) {
@@ -41,7 +42,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
     return <CanvasTextareaMentionEditor {...props} forwardedRef={forwardedRef} />;
 });
 
-function CanvasTextareaMentionEditor({ value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, expandable = true, expandTitle = "编辑内容", richMentions: _richMentions, header: _header, expandedFooter: _expandedFooter, mentionInsertRequest, placeholder, forwardedRef, ...props }: Props & { forwardedRef: ForwardedRef<HTMLTextAreaElement> }) {
+function CanvasTextareaMentionEditor({ value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, expandable = true, expandTitle = "编辑内容", richMentions: _richMentions, header: _header, expandedFooter: _expandedFooter, mentionInsertRequest, onReferenceSelect, placeholder, forwardedRef, ...props }: Props & { forwardedRef: ForwardedRef<HTMLTextAreaElement> }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const overlayRef = useRef<HTMLDivElement | null>(null);
@@ -55,9 +56,7 @@ function CanvasTextareaMentionEditor({ value, references, onChange, onSubmit, on
     const candidates = useMemo(() => {
         if (!mention) return [];
         const query = mention.query.trim().toLowerCase();
-        const activeReferences = references.filter((item) => item.active);
-        if (!query) return activeReferences;
-        return activeReferences.filter((item) => `${item.label} ${item.title} ${item.kind} ${item.text || ""}`.toLowerCase().includes(query));
+        return references.filter((item) => item.selectable !== false && (!query || `${item.label} ${item.title} ${item.menuTitle || ""} ${item.kind} ${item.text || ""}`.toLowerCase().includes(query)));
     }, [mention, references]);
     const activeLabels = useMemo(() => (highlightLabels ? Array.from(new Set(references.filter((item) => item.active).map((item) => item.label))).sort((a, b) => b.length - a.length) : []), [highlightLabels, references]);
     const updateValue = (next: string, selectionStart?: number) => {
@@ -92,7 +91,7 @@ function CanvasTextareaMentionEditor({ value, references, onChange, onSubmit, on
     const syncMention = (nextValue: string, cursor: number) => {
         const prefix = nextValue.slice(0, cursor);
         const match = /(^|[\s\S])@([^\s@]*)$/.exec(prefix);
-        if (!match || !references.some((item) => item.active)) {
+        if (!match || !references.some((item) => item.selectable !== false)) {
             closeMention();
             return;
         }
@@ -101,11 +100,13 @@ function CanvasTextareaMentionEditor({ value, references, onChange, onSubmit, on
     };
 
     const insertReference = (reference: CanvasResourceReference) => {
-        if (!mention) return;
+        if (!mention) return false;
+        if (onReferenceSelect?.(reference) === false) return false;
         const insertText = `@${reference.label} `;
         const next = `${value.slice(0, mention.start)}${insertText}${value.slice(mention.end)}`;
         closeMention();
         updateValue(next, mention.start + insertText.length);
+        return true;
     };
 
     const updateSelectionState = () => {
@@ -126,7 +127,7 @@ function CanvasTextareaMentionEditor({ value, references, onChange, onSubmit, on
         caretColor: style?.color || theme.node.text,
         ...(showHighlight ? { background: "transparent", backgroundColor: "transparent" } : {}),
     } as CSSProperties;
-    const menu = mention && candidates.length && textareaRef.current ? <MentionMenu anchor={textareaRef.current} references={candidates} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} /> : null;
+    const menu = mention && candidates.length && textareaRef.current ? <MentionMenu anchor={textareaRef.current} value={value} query={mention.query} references={candidates} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} /> : null;
 
     const content = (
         <div className={`relative h-full w-full ${containerClassName || ""}`} data-canvas-no-zoom onWheel={(event) => event.stopPropagation()}>
@@ -213,7 +214,7 @@ function CanvasTextareaMentionEditor({ value, references, onChange, onSubmit, on
                 onBlur={(event) => {
                     setIsFocused(false);
                     setHasSelection(false);
-                    window.setTimeout(closeMention, 120);
+                    window.setTimeout(() => { if (!document.activeElement?.closest("[data-canvas-resource-mention-menu]")) closeMention(); }, 120);
                     props.onBlur?.(event);
                 }}
             />
@@ -277,7 +278,7 @@ function MentionHighlightText({ value, labels }: { value: string; labels: string
     );
 }
 
-function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyDown, onFocus, onBlur, className, containerClassName, style, placeholder, placeholderClassName, autoFocus, header, expandedFooter, mentionInsertRequest, expandable = true, expandTitle = "编辑内容" }: Props) {
+function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyDown, onFocus, onBlur, className, containerClassName, style, placeholder, placeholderClassName, autoFocus, header, expandedFooter, mentionInsertRequest, onReferenceSelect, expandable = true, expandTitle = "编辑内容" }: Props) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement | null>(null);
     const [mention, setMention] = useState<MentionState | null>(null);
@@ -291,7 +292,7 @@ function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyD
     const candidates = useMemo(() => {
         if (!mention) return [];
         const query = mention.query.trim().toLowerCase();
-        return references.filter((item) => item.active && (!query || `${item.label} ${item.title} ${item.kind} ${item.text || ""}`.toLowerCase().includes(query)));
+        return references.filter((item) => item.selectable !== false && (!query || `${item.label} ${item.title} ${item.menuTitle || ""} ${item.kind} ${item.text || ""}`.toLowerCase().includes(query)));
     }, [mention, references]);
 
     const rememberSelection = () => {
@@ -354,11 +355,12 @@ function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyD
     };
     const insertReference = (reference: CanvasResourceReference) => {
         const editor = editorRef.current;
-        const selection = window.getSelection();
-        if (!editor || !selection?.rangeCount || !mention) return;
-        const range = selection.getRangeAt(0);
+        if (!editor || !mention) return false;
+        const range = selectionRangeInside(editor) || savedRangeRef.current;
+        if (!range) return false;
         const text = range.startContainer;
-        if (text.nodeType !== Node.TEXT_NODE) return;
+        if (text.nodeType !== Node.TEXT_NODE) return false;
+        if (onReferenceSelect?.(reference) === false) return false;
         const start = Math.max(0, range.startOffset - mention.query.length - 1);
         range.setStart(text, start);
         range.deleteContents();
@@ -366,8 +368,9 @@ function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyD
         rememberSelection();
         setMention(null);
         onChange(serializeEditor(editor));
+        return true;
     };
-    const menu = mention && candidates.length && editorRef.current ? <MentionMenu anchor={editorRef.current} references={candidates} activeIndex={activeIndex} theme={theme} onSelect={insertReference} /> : null;
+    const menu = mention && candidates.length && editorRef.current ? <MentionMenu anchor={editorRef.current} value={value} query={mention.query} references={candidates} activeIndex={activeIndex} theme={theme} onSelect={insertReference} /> : null;
     return (
         <div className={`relative flex h-full w-full flex-col ${containerClassName || ""}`} data-canvas-no-zoom onWheel={(event) => event.stopPropagation()}>
             {header ? <div className={`shrink-0 ${expandable ? "pr-8" : ""}`}>{header}</div> : null}
@@ -380,7 +383,7 @@ function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyD
                     className={`${className || ""} relative z-[1] overflow-y-auto whitespace-pre-wrap`}
                     style={style}
                     onFocus={(event) => { setFocused(true); updateMention(); rememberSelection(); onFocus?.(event as never); }}
-                    onBlur={(event) => { setFocused(false); setMention(null); onBlur?.(event as never); }}
+                    onBlur={(event) => { rememberSelection(); setFocused(false); window.setTimeout(() => { if (!document.activeElement?.closest("[data-canvas-resource-mention-menu]")) setMention(null); }, 120); onBlur?.(event as never); }}
                     onInput={() => { emitChange(); rememberSelection(); }}
                     onErrorCapture={(event) => {
                         const media = event.target;
@@ -442,6 +445,7 @@ function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyD
                                 expandable={false}
                                 expandTitle={expandTitle}
                                 mentionInsertRequest={mentionInsertRequest}
+                                onReferenceSelect={onReferenceSelect}
                             />
                         </div>
                         {expandedFooter ? (
@@ -456,13 +460,23 @@ function CanvasRichMentionEditor({ value, references, onChange, onSubmit, onKeyD
     );
 }
 
-function MentionMenu({ anchor, references, activeIndex, theme, onSelect }: { anchor: HTMLElement; references: CanvasResourceReference[]; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (reference: CanvasResourceReference) => void }) {
+function MentionMenu({ anchor, value, query = "", references, activeIndex, theme, onSelect }: { anchor: HTMLElement; value: string; query?: string; references: CanvasResourceReference[]; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (reference: CanvasResourceReference) => boolean | void }) {
     const selectedRef = useRef(false);
-    const assetLeaveTimer = useRef<number | null>(null);
-    const [assetRowRect, setAssetRowRect] = useState<DOMRect | null>(null);
+    const [search, setSearch] = useState(query);
+    const [category, setCategory] = useState<MentionCategory | null>(null);
+    const [selectedIndex, setSelectedIndex] = useState(activeIndex);
+    const categoryLeaveTimer = useRef<number | null>(null);
+    const anchorRectRef = useRef<DOMRect | null>(null);
     const [, refreshPosition] = useState(0);
+    if (!anchorRectRef.current) anchorRectRef.current = mentionAnchorRect(anchor);
     useLayoutEffect(() => {
-        const update = () => refreshPosition((value) => value + 1);
+        const update = () => {
+            // Do not read the live selection while focus is inside the portal.
+            // The input owns the selection at that point, not the editor caret.
+            if (document.activeElement?.closest("[data-canvas-resource-mention-menu]")) return;
+            anchorRectRef.current = mentionAnchorRect(anchor);
+            refreshPosition((value) => value + 1);
+        };
         window.addEventListener("resize", update);
         window.addEventListener("scroll", update, true);
         return () => {
@@ -470,125 +484,78 @@ function MentionMenu({ anchor, references, activeIndex, theme, onSelect }: { anc
             window.removeEventListener("scroll", update, true);
         };
     }, [anchor]);
-    const rect = mentionAnchorRect(anchor);
+    const rect = anchorRectRef.current;
     const boundary = anchor.closest(".ant-modal-content")?.getBoundingClientRect() || { left: 8, top: 8, right: window.innerWidth - 8, bottom: window.innerHeight - 8 };
-    const menuWidth = 256;
-    const maxMenuHeight = 224;
-    const menuHeight = Math.min(maxMenuHeight, Math.max(56, (references.some((reference) => reference.source === "user-asset") ? references.filter((reference) => reference.source !== "user-asset").length + 1 : references.length) * 48 + 8));
-    const gap = 6;
+    const menuWidth = 192;
+    const menuHeight = 344;
+    const gap = 2;
     const left = clamp(rect.left, boundary.left + 8, boundary.right - menuWidth - 8);
     const showAbove = rect.bottom + gap + menuHeight > boundary.bottom && rect.top - gap - menuHeight >= boundary.top;
     const top = clamp(showAbove ? rect.top - gap - menuHeight : rect.bottom + gap, boundary.top + 8, boundary.bottom - menuHeight - 8);
-    const canvasReferences = references.filter((reference) => reference.source !== "user-asset");
-    const assetReferences = references.filter((reference) => reference.source === "user-asset");
-    const assetMenuTop = assetRowRect ? clamp(assetRowRect.top, boundary.top + 8, boundary.bottom - maxMenuHeight - 8) : top;
-    const assetMenuLeft = assetRowRect
-        ? assetRowRect.right + gap + menuWidth <= boundary.right - 8
-            ? assetRowRect.right + gap
-            : clamp(assetRowRect.left - menuWidth - gap, boundary.left + 8, boundary.right - menuWidth - 8)
-        : left + menuWidth + gap;
-
+    const normalizedSearch = search.trim().toLowerCase();
+    const searchResults = normalizedSearch ? references.filter((reference) => `${reference.menuTitle || reference.title || ""} ${reference.label} ${reference.text || ""}`.toLowerCase().includes(normalizedSearch)) : [];
+    const mentionedTokens = parseCanvasResourceMentionTokens(value);
+    const mentionedIds = new Set(mentionedTokens.map((token) => token.nodeId));
+    const recentReferences = references.filter((reference) => (reference.source === "canvas" && reference.active) || mentionedIds.has(reference.nodeId) || value.includes(`@${reference.label}`)).slice(0, 4);
+    const categoryReferences = category ? references.filter((reference) => category === "assets" ? reference.source === "user-asset" : reference.source !== "user-asset" && reference.kind === category) : [];
+    const keyboardReferences = normalizedSearch ? searchResults : recentReferences;
+    const subMenuWidth = 196;
+    const subMenuGap = 10;
+    const subMenuOnRight = left + menuWidth + subMenuGap + subMenuWidth <= boundary.right - 8;
+    const subMenuLeft = subMenuOnRight
+        ? left + menuWidth + subMenuGap
+        : clamp(left - subMenuWidth - subMenuGap, boundary.left + 8, boundary.right - subMenuWidth - 8);
+    const bridgeLeft = subMenuOnRight ? left + menuWidth - 2 : subMenuLeft + subMenuWidth - 2;
+    const bridgeWidth = subMenuGap + 4;
     const stopCanvasInteraction = (event: PointerEvent | MouseEvent) => {
         event.stopPropagation();
     };
+    const scheduleCategoryClose = (event: MouseEvent) => {
+        const relatedTarget = event.relatedTarget;
+        if (relatedTarget instanceof Element && relatedTarget.closest("[data-canvas-resource-mention-submenu]")) return;
+        categoryLeaveTimer.current = window.setTimeout(() => setCategory(null), 220);
+    };
+    useEffect(() => setSelectedIndex(Math.min(activeIndex, Math.max(0, keyboardReferences.length - 1))), [activeIndex, keyboardReferences.length]);
+    useEffect(() => setSearch(query), [query]);
+    useEffect(() => () => {
+        if (categoryLeaveTimer.current) window.clearTimeout(categoryLeaveTimer.current);
+    }, []);
     const selectReference = (reference: CanvasResourceReference) => {
         if (selectedRef.current) return;
-        selectedRef.current = true;
-        onSelect(reference);
+        if (onSelect(reference) !== false) selectedRef.current = true;
     };
-
-    const keepAssetMenuOpen = () => {
-        if (assetLeaveTimer.current !== null) window.clearTimeout(assetLeaveTimer.current);
-    };
-    const closeAssetMenuSoon = () => {
-        if (assetLeaveTimer.current !== null) window.clearTimeout(assetLeaveTimer.current);
-        assetLeaveTimer.current = window.setTimeout(() => setAssetRowRect(null), 140);
-    };
-    useEffect(() => () => {
-        if (assetLeaveTimer.current !== null) window.clearTimeout(assetLeaveTimer.current);
-    }, []);
 
     return createPortal(
         <>
         <div
             data-canvas-resource-mention-menu="true"
             data-canvas-no-zoom
-            className="fixed z-[1400] max-h-56 w-64 overflow-y-auto rounded-xl border p-1 shadow-2xl backdrop-blur-md"
+            className="fixed z-[1400] flex h-[344px] max-h-[344px] w-[192px] flex-col overflow-hidden rounded-xl border p-1.5 shadow-2xl backdrop-blur-md"
             style={{ left, top, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onPointerDown={stopCanvasInteraction}
             onMouseDown={stopCanvasInteraction}
             onWheel={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
         >
-            {canvasReferences.map((reference, index) => (
-                <button
-                    key={reference.id}
-                    type="button"
-                    className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition"
-                    style={{ background: index === activeIndex ? theme.toolbar.activeBg : "transparent", color: index === activeIndex ? theme.toolbar.activeText : theme.node.text }}
-                    onPointerDown={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        selectReference(reference);
-                    }}
-                    onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        selectReference(reference);
-                    }}
-                >
-                    <ReferencePreview reference={reference} />
-                    <span className="min-w-0 flex-1 overflow-hidden">
-                        <span className="block truncate font-medium">{reference.label}</span>
-                        <span className="block truncate opacity-65">{reference.text || reference.title}</span>
-                    </span>
-                </button>
-            ))}
-            {assetReferences.length ? <button
-                type="button"
-                className="flex min-h-12 w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition"
-                style={{ background: assetRowRect ? theme.toolbar.activeBg : "transparent", color: assetRowRect ? theme.toolbar.activeText : theme.node.text }}
-                onMouseEnter={(event) => { keepAssetMenuOpen(); setAssetRowRect(event.currentTarget.getBoundingClientRect()); }}
-                onMouseLeave={closeAssetMenuSoon}
-                onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
-                onClick={(event) => event.stopPropagation()}
-            >
-                <span className="grid size-9 shrink-0 place-items-center rounded-md bg-black/10"><FolderOpen className="size-4" /></span>
-                <span className="min-w-0 flex-1 overflow-hidden"><span className="block truncate font-medium">资产库</span><span className="block truncate opacity-65">图片、视频资产</span></span>
-                <ChevronRight className="size-4 shrink-0 opacity-60" />
-            </button> : null}
+            <div className="relative shrink-0"><Search className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 opacity-55" /><input data-canvas-resource-mention-menu value={search} onChange={(event) => { setSearch(event.target.value); setCategory(null); setSelectedIndex(0); }} onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setSelectedIndex((index) => (index + (event.key === "ArrowDown" ? 1 : -1) + keyboardReferences.length) % Math.max(1, keyboardReferences.length)); } if (event.key === "Enter" && keyboardReferences[selectedIndex]) { event.preventDefault(); selectReference(keyboardReferences[selectedIndex]); } if (event.key === "Escape") { event.preventDefault(); (event.currentTarget as HTMLInputElement).blur(); } }} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} placeholder="搜索" aria-label="搜索资产名称" className="h-8 w-full rounded-lg border bg-transparent pl-8 pr-2 text-xs outline-none" style={{ borderColor: theme.toolbar.border, color: theme.node.text }} /></div>
+            <div className="thin-scrollbar mt-1 min-h-0 flex-1 overflow-y-auto">{normalizedSearch ? (searchResults.length ? searchResults.map((reference, index) => <MentionReferenceRow key={reference.id} reference={reference} selected={index === selectedIndex} theme={theme} onSelect={selectReference} onHover={() => setSelectedIndex(index)} />) : <div className="px-2 py-6 text-center text-xs opacity-55">没有找到资产</div>) : <>{recentReferences.map((reference, index) => <MentionReferenceRow key={reference.id} reference={reference} selected={index === selectedIndex} theme={theme} onSelect={selectReference} onHover={() => setSelectedIndex(index)} />)}<div className="px-1.5 pb-1 pt-1.5 text-[10px] opacity-45">素材引用</div>{MENTION_CATEGORIES.map((item) => <button key={item.value} type="button" className={`flex h-8 w-full items-center gap-2 rounded-lg px-1.5 text-left text-xs transition-none hover:bg-[var(--mention-hover-bg)] ${category === item.value ? "bg-[var(--mention-active-bg)]" : ""}`} style={{ color: category === item.value ? theme.toolbar.activeText : theme.node.text, "--mention-hover-bg": theme.toolbar.activeBg, "--mention-active-bg": theme.toolbar.activeBg } as CSSProperties} onMouseEnter={() => { if (categoryLeaveTimer.current) window.clearTimeout(categoryLeaveTimer.current); setCategory(item.value); }} onMouseLeave={scheduleCategoryClose} onFocus={() => setCategory(item.value)} onBlur={() => { categoryLeaveTimer.current = window.setTimeout(() => setCategory(null), 220); }}><MentionCategoryIcon category={item.value} /><span className="flex-1">{item.label}</span><ChevronRight className="size-3 opacity-50" /></button>)}</>}</div>
         </div>
-        {assetRowRect ? <div
-            data-canvas-no-zoom
-            className="fixed z-[1401] max-h-56 w-64 overflow-y-auto rounded-xl border p-1 shadow-2xl backdrop-blur-md"
-            style={{ left: assetMenuLeft, top: assetMenuTop, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
-            onMouseEnter={keepAssetMenuOpen}
-            onMouseLeave={closeAssetMenuSoon}
-            onPointerDown={stopCanvasInteraction}
-            onMouseDown={stopCanvasInteraction}
-            onWheel={(event) => event.stopPropagation()}
-            onClick={(event) => event.stopPropagation()}
-        >
-            {assetReferences.map((reference, index) => (
-                <button
-                    key={reference.id}
-                    type="button"
-                    className="flex min-h-12 w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition"
-                    style={{ background: index + canvasReferences.length === activeIndex ? theme.toolbar.activeBg : "transparent", color: index + canvasReferences.length === activeIndex ? theme.toolbar.activeText : theme.node.text }}
-                    onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); selectReference(reference); }}
-                    onClick={(event) => { event.preventDefault(); event.stopPropagation(); selectReference(reference); }}
-                >
-                    <ReferencePreview reference={reference} />
-                    <span className="min-w-0 flex-1 overflow-hidden">
-                        <span className="block truncate font-medium">{reference.title || reference.label}</span>
-                        <span className="block truncate opacity-65">我的资产 · {reference.kind === "image" ? "图片" : "视频"}</span>
-                    </span>
-                </button>
-            ))}
-        </div> : null}
+        {category ? <div data-canvas-resource-mention-menu="true" data-canvas-resource-mention-submenu="true" aria-hidden="true" className="fixed z-[1400]" style={{ left: bridgeLeft, top, width: bridgeWidth, height: menuHeight }} onMouseEnter={() => { if (categoryLeaveTimer.current) window.clearTimeout(categoryLeaveTimer.current); }} onMouseLeave={scheduleCategoryClose} /> : null}
+        {category ? <div data-canvas-resource-mention-menu="true" data-canvas-resource-mention-submenu="true" data-canvas-no-zoom className="fixed z-[1401] flex h-[344px] max-h-[344px] w-[196px] flex-col overflow-hidden rounded-xl border p-1.5 shadow-2xl backdrop-blur-md" style={{ left: subMenuLeft, top, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onMouseEnter={() => { if (categoryLeaveTimer.current) window.clearTimeout(categoryLeaveTimer.current); }} onMouseLeave={scheduleCategoryClose} onPointerDown={stopCanvasInteraction} onMouseDown={stopCanvasInteraction} onWheel={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}><div className="shrink-0 px-1.5 py-1 text-[10px] opacity-55">{MENTION_CATEGORIES.find((item) => item.value === category)?.label}</div><div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto">{categoryReferences.length ? categoryReferences.map((reference) => <MentionReferenceRow key={reference.id} reference={reference} theme={theme} onSelect={selectReference} />) : <div className="px-2 py-6 text-center text-[11px] opacity-50">暂无资源</div>}</div></div> : null}
         </>,
         document.body,
     );
+}
+
+type MentionCategory = "image" | "video" | "audio" | "text" | "assets";
+const MENTION_CATEGORIES: Array<{ value: MentionCategory; label: string }> = [
+    { value: "image", label: "图片" }, { value: "video", label: "视频" }, { value: "audio", label: "音频" },
+    { value: "text", label: "文本" }, { value: "assets", label: "资产" },
+];
+function MentionCategoryIcon({ category }: { category: MentionCategory }) { const Icon = category === "image" ? ImageIcon : category === "video" ? Video : category === "audio" ? Music2 : category === "text" ? FileText : FolderOpen; return <Icon className="size-4 opacity-55" />; }
+
+function MentionReferenceRow({ reference, selected = false, theme, onSelect, onHover }: { reference: CanvasResourceReference; selected?: boolean; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (reference: CanvasResourceReference) => void; onHover?: () => void }) {
+    return <button type="button" className={`flex h-9 w-full min-w-0 items-center gap-1 rounded-lg px-1 text-left text-xs transition-none hover:bg-[var(--mention-hover-bg)] ${selected ? "bg-[var(--mention-active-bg)]" : ""}`} style={{ color: selected ? theme.toolbar.activeText : theme.node.text, "--mention-hover-bg": theme.toolbar.activeBg, "--mention-active-bg": theme.toolbar.activeBg } as CSSProperties} onPointerEnter={onHover} onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); onSelect(reference); }} onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onSelect(reference); }}><ReferencePreview reference={reference} compact /><span className="min-w-0 flex-1 truncate">{reference.menuTitle || reference.title || reference.label}</span></button>;
 }
 
 function mentionAnchorRect(anchor: HTMLElement) {
@@ -616,9 +583,9 @@ function richEditorHtml(value: string, references: CanvasResourceReference[]) {
         tokens.forEach((token) => {
             html += legacyRichEditorHtml(value.slice(cursor, token.start), references);
             const reference = references.find((item) => item.nodeId === token.nodeId);
-            html += reference && reference.active
+            html += reference?.active
                 ? mentionTokenHtml(reference)
-                : missingMentionTokenHtml(token.nodeId, reference?.label || token.label);
+                : missingMentionTokenHtml(token.nodeId, token.label);
             cursor = token.end;
         });
         return html + legacyRichEditorHtml(value.slice(cursor), references);
@@ -638,7 +605,8 @@ function legacyRichEditorHtml(value: string, references: CanvasResourceReference
 }
 
 function mentionTokenHtml(reference: CanvasResourceReference) {
-    return `<span contenteditable="false" data-mention-id="${escapeAttribute(reference.nodeId)}" data-mention-label="${escapeAttribute(reference.label)}" title="${escapeAttribute(reference.title || reference.label)}" class="${mentionTokenClassName}">${mentionPreviewHtml(reference)}<span class="${mentionTokenLabelClassName}">${escapeHtml(reference.label)}</span></span>`;
+    const label = reference.mentionLabel || reference.label;
+    return `<span contenteditable="false" data-mention-id="${escapeAttribute(reference.nodeId)}" data-mention-label="${escapeAttribute(label)}" title="${escapeAttribute(reference.title || label)}" class="${mentionTokenClassName}">${mentionPreviewHtml(reference)}<span class="${mentionTokenLabelClassName}">${escapeHtml(label)}</span></span>`;
 }
 
 function missingMentionTokenHtml(nodeId: string, label: string) {
@@ -660,13 +628,14 @@ function insertRichMention(editor: HTMLElement, range: Range, reference: CanvasR
     const token = document.createElement("span");
     token.contentEditable = "false";
     token.dataset.mentionId = reference.nodeId;
-    token.dataset.mentionLabel = reference.label;
-    token.title = reference.title || reference.label;
+    const labelText = reference.mentionLabel || reference.label;
+    token.dataset.mentionLabel = labelText;
+    token.title = reference.title || labelText;
     token.className = mentionTokenClassName;
     token.innerHTML = mentionPreviewHtml(reference);
     const label = document.createElement("span");
     label.className = mentionTokenLabelClassName;
-    label.textContent = reference.label;
+    label.textContent = labelText;
     token.append(label);
     range.insertNode(token);
     const spacer = document.createTextNode(" ");
@@ -707,15 +676,15 @@ function mentionPreviewHtml(reference: CanvasResourceReference) {
     return "";
 }
 
-function ReferencePreview({ reference }: { reference: CanvasResourceReference }) {
+function ReferencePreview({ reference, compact = false }: { reference: CanvasResourceReference; compact?: boolean }) {
     const [failed, setFailed] = useState(false);
     useEffect(() => setFailed(false), [reference.previewUrl]);
-    if (!failed && reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="size-9 rounded-md object-cover" onError={() => setFailed(true)} />;
-    if (!failed && reference.kind === "video" && reference.previewUrl) return <video src={reference.previewUrl} className="size-9 rounded-md bg-black object-cover" muted preload="metadata" onError={() => setFailed(true)} />;
+    if (!failed && reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className={`${compact ? "size-7" : "size-9"} rounded-md object-cover`} onError={() => setFailed(true)} />;
+    if (!failed && reference.kind === "video" && reference.previewUrl) return <video src={reference.previewUrl} className={`${compact ? "size-7" : "size-9"} rounded-md bg-black object-cover`} muted preload="metadata" onError={() => setFailed(true)} />;
     const Icon = reference.kind === "audio" ? Music2 : reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
     return (
-        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-black/10">
-            <Icon className="size-4" />
+        <span className={`grid ${compact ? "size-7" : "size-9"} shrink-0 place-items-center rounded-md bg-black/10`}>
+            <Icon className={compact ? "size-3.5" : "size-4"} />
         </span>
     );
 }
@@ -738,10 +707,17 @@ function syncRichEditorReferences(editor: HTMLElement, references: CanvasResourc
     const byNodeId = new Map(references.map((reference) => [reference.nodeId, reference]));
     editor.querySelectorAll<HTMLElement>("[data-mention-id]").forEach((token) => {
         const reference = byNodeId.get(token.dataset.mentionId || "");
-        if (!reference?.active) return;
-        token.dataset.mentionLabel = reference.label;
-        token.title = reference.title || reference.label;
-        token.innerHTML = `${mentionPreviewHtml(reference)}<span class="${mentionTokenLabelClassName}">${escapeHtml(reference.label)}</span>`;
+        const label = reference?.mentionLabel || reference?.label || token.dataset.mentionLabel || "资源";
+        token.dataset.mentionLabel = label;
+        if (!reference?.active) {
+            token.className = `${mentionTokenClassName} !bg-red-500/15 !text-red-400`;
+            token.title = "引用已失效";
+            token.innerHTML = `<span class="${mentionTokenLabelClassName}">${escapeHtml(label)}（引用已失效）</span>`;
+            return;
+        }
+        token.className = mentionTokenClassName;
+        token.title = reference.title || label;
+        token.innerHTML = `${mentionPreviewHtml(reference)}<span class="${mentionTokenLabelClassName}">${escapeHtml(label)}</span>`;
     });
 }
 

@@ -10,7 +10,8 @@ import { assetPreviewUrl, useAssetStore, type Asset, type AssetKind } from "@/st
 export type InsertAssetPayload =
     | { kind: "text"; content: string; title: string }
     | { kind: "image"; dataUrl: string; title: string; storageKey?: string; mediaId?: string; width?: number; height?: number; bytes?: number; mimeType?: string }
-    | { kind: "video"; url: string; title: string; storageKey?: string; mediaId?: string; width?: number; height?: number };
+    | { kind: "video"; url: string; title: string; storageKey?: string; mediaId?: string; width?: number; height?: number }
+    | { kind: "audio"; url: string; title: string; storageKey?: string; mediaId?: string; durationMs?: number; bytes?: number; mimeType?: string };
 
 type Props = {
     open: boolean;
@@ -21,7 +22,7 @@ type Props = {
 };
 
 export function AssetPickerModal({ open, defaultKind, defaultTab, onInsert, onClose }: Props) {
-    const initialKind = defaultKind || (defaultTab === "text" || defaultTab === "image" || defaultTab === "video" ? defaultTab : "all");
+    const initialKind = defaultKind || (defaultTab === "text" || defaultTab === "image" || defaultTab === "video" || defaultTab === "audio" ? defaultTab : "all");
     return (
         <Modal title={<span className="inline-flex items-center gap-2 text-base"><Images className="size-5 text-sky-300" />选择资产</span>} open={open} onCancel={onClose} footer={null} width={980} destroyOnHidden styles={{ body: { padding: "0 28px 28px", minHeight: 520 } }}>
             <MyAssetsTab defaultKind={initialKind} onInsert={onInsert} />
@@ -36,6 +37,7 @@ const kindOptions: Array<{ label: string; value: AssetKind | "all" }> = [
     { label: "文本", value: "text" },
     { label: "图片", value: "image" },
     { label: "视频", value: "video" },
+    { label: "音频", value: "audio" },
 ];
 
 function PickerCard({ title, kind, cover, onClick }: { title: string; kind: string; cover: string; onClick: () => void }) {
@@ -53,7 +55,7 @@ function PickerCard({ title, kind, cover, onClick }: { title: string; kind: stri
             <div className="border-t border-slate-200/70 p-3 dark:border-slate-700/70">
                 <div className="flex items-center justify-between gap-2">
                     <span className="line-clamp-1 text-sm font-medium text-slate-800 dark:text-slate-100">{title}</span>
-                    <Tag className="m-0 shrink-0 text-[10px]">{kind === "image" ? "图片" : kind === "video" ? "视频" : "文本"}</Tag>
+                    <Tag className="m-0 shrink-0 text-[10px]">{kind === "image" ? "图片" : kind === "video" ? "视频" : kind === "audio" ? "音频" : "文本"}</Tag>
                 </div>
             </div>
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-950/0 text-sm font-medium text-white opacity-0 transition group-hover:bg-slate-950/55 group-hover:opacity-100">点击插入</div>
@@ -70,7 +72,7 @@ function MyAssetsTab({ defaultKind, onInsert }: { defaultKind: AssetKind | "all"
     const filtered = useMemo(() => {
         const query = keyword.trim().toLowerCase();
         return assets
-            .filter((a) => a.kind === "text" || a.kind === "image" || a.kind === "video")
+            .filter((a) => a.kind === "text" || a.kind === "image" || a.kind === "video" || a.kind === "audio")
             .filter((a) => kindFilter === "all" || a.kind === kindFilter)
             .filter((a) => !query || [a.title, ...(a.tags || [])].join(" ").toLowerCase().includes(query));
     }, [assets, keyword, kindFilter]);
@@ -88,6 +90,9 @@ function MyAssetsTab({ defaultKind, onInsert }: { defaultKind: AssetKind | "all"
         } else if (asset.kind === "video") {
             const url = await resolveMediaUrl(asset.data.storageKey, asset.data.url);
             onInsert({ kind: "video", url, storageKey: asset.data.storageKey, mediaId: asset.data.mediaId, title: asset.title, width: asset.data.width, height: asset.data.height });
+        } else if (asset.kind === "audio") {
+            const url = await resolveMediaUrl(asset.data.storageKey, asset.data.url);
+            onInsert({ kind: "audio", url, storageKey: asset.data.storageKey, mediaId: asset.data.mediaId, title: asset.title, durationMs: asset.data.durationMs, bytes: asset.data.bytes, mimeType: asset.data.mimeType });
         } else {
             const resolved = await resolvePersistedImage(asset.data.mediaId, asset.data.storageKey, asset.data.dataUrl || asset.coverUrl);
             onInsert({ kind: "image", dataUrl: resolved.url, storageKey: resolved.storageKey, mediaId: asset.data.mediaId, title: asset.title, width: asset.data.width, height: asset.data.height, bytes: asset.data.bytes, mimeType: asset.data.mimeType });

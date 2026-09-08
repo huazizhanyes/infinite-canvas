@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { App, Modal, Segmented, Tooltip } from "antd";
+import { App, Modal, Segmented } from "antd";
 import { Camera, CopyPlus, Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -151,7 +151,7 @@ export function CanvasNodeHoverToolbar({
     ];
     const nodeToolbarTools: ToolbarTool[] = [
         ...(canRetry ? [{ id: "retry", title: "重新生成", label: "重试", icon: <RefreshCw className="size-4" />, onClick: () => onRetry(node) }] : []),
-        ...(hasImage || hasVideo || isText ? [{ id: "saveAsset", title: "加入我的资产", label: "存资产", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
+        ...(hasImage || hasVideo || hasAudio || isText ? [{ id: "saveAsset", title: "加入我的资产", label: "存资产", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
         ...(hasImage || hasVideo || hasAudio ? [{ id: "download", title: hasAudio ? "下载音频" : hasVideo ? "下载视频" : "下载图片", label: "下载", icon: <Download className="size-4" />, onClick: () => onDownload(node) }] : []),
         ...(hasVideo ? [{ id: "captureFrame", title: "从视频截取图片帧", label: "截取帧", icon: <Camera className="size-4" />, active: frameMenuOpen, onClick: () => setFrameMenuOpen((current) => !current) }] : []),
         ...(canOpenDialog ? [{ id: "edit", title: isText ? "打开 AI 文本处理" : "编辑", label: isText ? "AI处理" : "编辑", icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
@@ -304,14 +304,19 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
 function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false }: ToolbarTool & { showLabel: boolean }) {
     const hasText = showLabel && Boolean(label);
     return (
-        <Tooltip title={title} placement="top" mouseEnterDelay={0.2}>
-            <button type="button" className={`group relative flex h-9 items-center whitespace-nowrap px-0.5 ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
-                <span className={`flex h-7 items-center ${hasText ? "gap-1.5 px-2" : "justify-center px-1.5"} rounded-md text-xs transition group-hover:bg-black/5 dark:group-hover:bg-white/10 ${active ? "bg-black/5 dark:bg-white/10" : ""} [&_svg]:size-3.5`}>
-                    {icon}
-                    {hasText ? <span>{label}</span> : null}
-                </span>
-            </button>
-        </Tooltip>
+        <button type="button" className={`group relative flex h-9 items-center whitespace-nowrap px-0.5 ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
+            <span className={`flex h-7 items-center ${hasText ? "gap-1.5 px-2" : "justify-center px-1.5"} rounded-md text-xs transition group-hover:bg-black/5 dark:group-hover:bg-white/10 ${active ? "bg-black/5 dark:bg-white/10" : ""} [&_svg]:size-3.5`}>
+                {icon}
+                {hasText ? <span>{label}</span> : null}
+            </span>
+            <span
+                role="tooltip"
+                className="pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-[90] -translate-x-1/2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-[11px] font-medium opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+                style={{ background: "#292524", color: "#fafaf9", boxShadow: "0 8px 22px rgba(0,0,0,.24)" }}
+            >
+                {title}
+            </span>
+        </button>
     );
 }
 

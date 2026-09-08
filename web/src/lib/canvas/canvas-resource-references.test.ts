@@ -61,6 +61,23 @@ describe("normalizeCanvasResourceMentions", () => {
 });
 
 describe("buildNodeMentionReferences", () => {
+    it("can expose disconnected canvas resources for the mention browser without activating them", () => {
+        const target: CanvasNodeData = { id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 240, metadata: {} };
+        const image = (id: string): CanvasNodeData => ({ id, type: CanvasNodeType.Image, title: `原始名称-${id}`, position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: `blob:${id}` } });
+        const references = buildNodeMentionReferences(target, [target, image("a"), image("b")], [{ id: "line", fromNodeId: "a", toNodeId: "video" }], undefined, [], true);
+        expect(references.map((reference) => reference.nodeId)).toEqual(["a", "b"]);
+        expect(references.map((reference) => reference.connected)).toEqual([true, false]);
+        expect(references.every((reference) => reference.selectable)).toBe(true);
+        expect(references.map((reference) => reference.menuTitle)).toEqual(["原始名称-a", "原始名称-b"]);
+    });
+
+    it("keeps text assets searchable as asset references", () => {
+        const node: CanvasNodeData = { id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 240, metadata: {} };
+        const asset = { id: "text-1", kind: "text", title: "分镜原文", coverUrl: "", tags: [], createdAt: "2026-01-01", updatedAt: "2026-01-01", data: { content: "第一幕" } } as Asset;
+        const reference = buildNodeMentionReferences(node, [node], [], undefined, [asset])[0];
+        expect(reference).toMatchObject({ source: "user-asset", kind: "text", title: "分镜原文", menuTitle: "分镜原文", text: "第一幕", selectable: true });
+    });
+
     it("keeps canvas badge labels stable while hovering a connected target", () => {
         const image = (id: string): CanvasNodeData => ({ id, type: CanvasNodeType.Image, title: id, position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: `blob:${id}` } });
         const target: CanvasNodeData = { id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 240, metadata: { referenceOrder: ["image-b", "image-a"] } };

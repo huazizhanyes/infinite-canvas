@@ -189,12 +189,14 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, theme }: { nodes:
 const ASSET_GROUPS: { kind: AssetKind; label: string; icon: typeof Square }[] = [
     { kind: "image", label: "图片", icon: ImageIcon },
     { kind: "video", label: "视频", icon: Video },
+    { kind: "audio", label: "音频", icon: Music2 },
     { kind: "text", label: "文本", icon: FileText },
 ];
 
 function buildInsertPayload(asset: Asset): InsertAssetPayload {
     if (asset.kind === "text") return { kind: "text", content: asset.data.content, title: asset.title };
     if (asset.kind === "video") return { kind: "video", url: asset.data.url, storageKey: asset.data.storageKey, mediaId: asset.data.mediaId, title: asset.title, width: asset.data.width, height: asset.data.height };
+    if (asset.kind === "audio") return { kind: "audio", url: asset.data.url, storageKey: asset.data.storageKey, mediaId: asset.data.mediaId, title: asset.title, durationMs: asset.data.durationMs, bytes: asset.data.bytes, mimeType: asset.data.mimeType };
     return { kind: "image", dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey, mediaId: asset.data.mediaId, title: asset.title, width: asset.data.width, height: asset.data.height, bytes: asset.data.bytes, mimeType: asset.data.mimeType };
 }
 
@@ -266,7 +268,7 @@ function AssetCard({ asset, theme, onClick }: { asset: Asset; theme: CanvasTheme
     const cover = asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "");
     return (
         <button type="button" onClick={onClick} className="group relative overflow-hidden rounded-lg border text-left transition hover:shadow-md" style={{ borderColor: theme.node.stroke, background: theme.node.panel }}>
-            {cover ? <img src={cover} alt={asset.title} className="aspect-square w-full object-cover" /> : <div className="flex aspect-square items-center justify-center p-2 text-center text-[11px] leading-4 opacity-60">{asset.title}</div>}
+            {cover ? <img src={cover} alt={asset.title} className="aspect-square w-full object-cover" /> : <div className="flex aspect-square items-center justify-center p-2 text-center text-[11px] leading-4 opacity-60">{asset.kind === "audio" ? <Music2 className="size-8" /> : asset.title}</div>}
             <div className="truncate px-2 py-1.5 text-[11px] font-medium">{asset.title}</div>
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-stone-950/0 text-xs font-medium text-white opacity-0 transition group-hover:bg-stone-950/55 group-hover:opacity-100">插入</div>
         </button>

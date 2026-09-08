@@ -39,6 +39,7 @@ type CanvasNodePromptPanelProps = {
     connectionPreviews?: CanvasConnectionPreview[];
     onRemoveConnection?: (connectionId: string) => void;
     onFocusReferenceNode?: (nodeId: string) => void;
+    onReferenceSelect?: (nodeId: string, reference: CanvasResourceReference) => boolean | void;
     onImageSettingsOpenChange?: (open: boolean) => void;
     selectedText?: string;
 };
@@ -53,7 +54,7 @@ const TEXT_ACTIONS: Array<{ value: CanvasTextOperation; label: string; instructi
     { value: "custom", label: "自定义", instruction: "" },
 ];
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], connectionPreviews = [], onRemoveConnection, onFocusReferenceNode, onImageSettingsOpenChange, selectedText = "" }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], connectionPreviews = [], onRemoveConnection, onFocusReferenceNode, onReferenceSelect, onImageSettingsOpenChange, selectedText = "" }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -219,7 +220,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 const nextQuality = nextCapabilities?.qualities.length && !nextCapabilities.qualities.some((item) => item.quality === config.vquality)
                                     ? nextCapabilities.qualities[0].quality
                                     : undefined;
-                                onConfigChange(node.id, videoModelSelectionPatch(model, nextQuality));
+                                const nextDuration = nextCapabilities ? String(normalizeVideoDuration(config.videoSeconds, nextCapabilities.duration)) : undefined;
+                                const nextSize = nextCapabilities?.aspectRatios.length && !nextCapabilities.aspectRatios.includes(config.size) ? nextCapabilities.aspectRatios[0] : undefined;
+                                const nextMode = nextCapabilities?.modes.length && !nextCapabilities.modes.includes(config.videoMode) ? nextCapabilities.modes[0] : undefined;
+                                onConfigChange(node.id, {
+                                    ...videoModelSelectionPatch(model, nextQuality, nextDuration),
+                                    ...(nextSize ? { size: nextSize } : {}),
+                                    ...(nextMode ? { videoMode: nextMode } : {}),
+                                });
                             }}
                             capability="video"
                             compactVideo
@@ -319,9 +327,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 value={prompt}
                 references={resolvedMentionReferences}
                 onChange={updatePrompt}
-                onSubmit={submit}
+                onSubmit={mode === "video" ? undefined : submit}
                 richMentions={mode === "image" || mode === "video"}
                 mentionInsertRequest={mentionInsertRequest}
+                onReferenceSelect={(reference) => onReferenceSelect?.(node.id, reference)}
                 header={isMediaComposer && connectionPreviews.length && onRemoveConnection ? (
                     <CanvasConnectionPreviewStrip
                         items={resolvedConnectionPreviews}

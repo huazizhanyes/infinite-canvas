@@ -214,6 +214,22 @@ describe("buildNodeGenerationContext asset mentions", () => {
         expect(references.filter((reference) => reference.source === "user-asset").map((reference) => reference.label)).toEqual(["资产·秦墨·1", "资产·秦墨·2"]);
     });
 
+    it("resolves structured user-asset mentions by stable id after same-title assets are reordered", () => {
+        const video: CanvasNodeData = { ...target, id: "video", type: CanvasNodeType.Video, title: "视频" };
+        const references: CanvasResourceReference[] = [
+            { id: "asset:new", nodeId: "asset:new", source: "user-asset", assetId: "new", kind: "image", label: "资产·画布图片·1", title: "画布图片", previewUrl: "blob:new", active: true },
+            { id: "asset:a", nodeId: "asset:a", source: "user-asset", assetId: "a", kind: "image", label: "资产·画布图片·2", title: "画布图片", previewUrl: "blob:a", active: true },
+            { id: "asset:b", nodeId: "asset:b", source: "user-asset", assetId: "b", kind: "image", label: "资产·画布图片·3", title: "画布图片", previewUrl: "blob:b", active: true },
+            { id: "asset:c", nodeId: "asset:c", source: "user-asset", assetId: "c", kind: "image", label: "资产·画布图片·4", title: "画布图片", previewUrl: "blob:c", active: true },
+        ];
+        const prompt = [serializeCanvasResourceMention("asset:a", "资产·画布图片·1"), serializeCanvasResourceMention("asset:b", "资产·画布图片·2"), serializeCanvasResourceMention("asset:c", "资产·画布图片·3")].join(" ");
+
+        const context = buildNodeGenerationContext(video.id, [video], [], prompt, references);
+
+        expect(context.referenceImages.map((image) => image.id)).toEqual(["a", "b", "c"]);
+        expect(context.selectedReferenceNodeIds).toEqual(["asset:a", "asset:b", "asset:c"]);
+    });
+
     it("restores missing submitted video references while preserving edited prompt mentions", () => {
         const video: CanvasNodeData = {
             ...target,

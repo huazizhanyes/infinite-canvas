@@ -7,6 +7,16 @@ export type CanvasAssetConnection = {
 
 type AssetResponse = { data?: { assets?: Asset[] } | Asset[]; assets?: Asset[] };
 
+export class CanvasAssetsApiError extends Error {
+    statusCode: number;
+
+    constructor(message: string, statusCode: number) {
+        super(message);
+        this.name = "CanvasAssetsApiError";
+        this.statusCode = statusCode;
+    }
+}
+
 const trimBase = (value: string) => value.replace(/\/+$/, "");
 
 export const canvasAssetsApi = {
@@ -34,6 +44,6 @@ async function request<T>(connection: CanvasAssetConnection, path: string, init:
     headers.set("Authorization", `Bearer ${connection.token}`);
     const response = await fetch(`${trimBase(connection.baseUrl)}${path}`, { ...init, headers });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload?.message || payload?.error?.message || `资产同步失败 (${response.status})`);
+    if (!response.ok) throw new CanvasAssetsApiError(payload?.message || payload?.error?.message || `资产同步失败 (${response.status})`, response.status);
     return payload as T;
 }

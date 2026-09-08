@@ -12,6 +12,8 @@ import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
+import { createVideoProgressBaseline, DEFAULT_VIDEO_ESTIMATE_MS, type VideoProgressBaseline } from "@/lib/video-generation-progress";
+import { useVideoGenerationProgress } from "@/hooks/use-video-generation-progress";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolvePersistedImage, resolveImageUrl, uploadImage } from "@/services/image-storage";
@@ -41,6 +43,9 @@ type GeneratedVideo = {
 type GenerationResult = {
     id: string;
     status: "pending" | "success" | "failed";
+    videoProgressStartedAt?: number;
+    videoProgressEstimateMs?: number;
+    videoProgressSampleCount?: number;
     video?: GeneratedVideo;
     error?: string;
 };
@@ -61,6 +66,9 @@ type GenerationLog = {
     resolution: string;
     seconds: string;
     status: "生成中" | "成功" | "失败";
+    videoProgressStartedAt?: number;
+    videoProgressEstimateMs?: number;
+    videoProgressSampleCount?: number;
     task?: VideoGenerationTask;
     canvasTask?: CanvasVideoTask;
     video?: GeneratedVideo;
@@ -181,11 +189,11 @@ export default function VideoPage() {
         setElapsedMs(0);
         setRunning(true);
         setPreviewLog(null);
-        setResults([{ id: nanoid(), status: "pending" }]);
+        const logId = nanoid();
+        setResults([{ id: logId, status: "pending" }]);
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
         try {
-            const logId = nanoid();
             let log: GenerationLog;
             if (isCanvasVideoModel(snapshot.config)) {
                 const canvasTask = await createCanvasVideoTask(snapshot.config, {
@@ -197,10 +205,14 @@ export default function VideoPage() {
                     referenceVideos: snapshot.videoReferences,
                     referenceAudios: snapshot.audioReferences,
                 });
-                log = buildLog({ id: logId, prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中", canvasTask });
+                const progress = createVideoProgressBaseline(snapshot.config, model);
+                setResults([{ id: logId, status: "pending", ...progress }]);
+                log = buildLog({ id: logId, prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中", canvasTask, progress });
             } else {
                 const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences);
-                log = buildLog({ id: logId, prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中", task });
+                const progress = createVideoProgressBaseline(snapshot.config, model);
+                setResults([{ id: logId, status: "pending", ...progress }]);
+                log = buildLog({ id: logId, prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中", task, progress });
             }
             await saveLog(log);
             void pollGenerationLog(log, snapshot.config);
@@ -311,7 +323,7 @@ export default function VideoPage() {
     };
 
     const refreshLogs = async () => {
-        const nextLogs = await readStoredLogs();
+        const nextLogs = await readStoredLogs(effectiveConfig);
         setLogs(nextLogs);
         resumePendingLogs(nextLogs);
         return nextLogs;
@@ -328,7 +340,7 @@ export default function VideoPage() {
         activeLogIdsRef.current.add(log.id);
         setRunning(true);
         setStartedAt((value) => value || performance.now());
-        setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
+        setResults((value) => (value.length ? value : [{ id: log.id, status: "pending", videoProgressStartedAt: log.videoProgressStartedAt, videoProgressEstimateMs: log.videoProgressEstimateMs, videoProgressSampleCount: log.videoProgressSampleCount }]));
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task?.model || log.model);
         try {
             if (log.canvasTask) {
@@ -396,7 +408,7 @@ export default function VideoPage() {
         if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
         if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
         if (log.config.videoMode) updateConfig("videoMode", log.config.videoMode);
-        setResults(log.status === "生成中" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || "生成失败" }]);
+        setResults(log.status === "生成中" ? [{ id: log.id, status: "pending", videoProgressStartedAt: log.videoProgressStartedAt, videoProgressEstimateMs: log.videoProgressEstimateMs, videoProgressSampleCount: log.videoProgressSampleCount }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || "生成失败" }]);
     };
 
     return (
@@ -541,7 +553,7 @@ export default function VideoPage() {
                         </div>
                         {results.length ? (
                             <div className="grid gap-4">
-                                {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || "生成失败"} onRetry={retryResult} /> : <PendingVideoCard key={result.id} />))}
+                                {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || "生成失败"} onRetry={retryResult} /> : <PendingVideoCard key={result.id} startedAt={result.videoProgressStartedAt} estimateMs={result.videoProgressEstimateMs} />))}
                             </div>
                         ) : (
                             <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
@@ -621,13 +633,15 @@ function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedV
     );
 }
 
-function PendingVideoCard() {
+function PendingVideoCard({ startedAt, estimateMs }: { startedAt?: number; estimateMs?: number }) {
+    const progress = useVideoGenerationProgress(startedAt, estimateMs);
     return (
         <div className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
                 <LoaderCircle className="size-6 animate-spin" />
-                <span>生成中</span>
+                <span>{progress ? `生成中 · ${progress}%` : "正在准备"}</span>
             </div>
+            <div className="absolute inset-x-0 bottom-0 h-1 overflow-hidden bg-stone-200 dark:bg-stone-800"><div className="h-full bg-stone-500 transition-[width] duration-700 dark:bg-stone-300" style={{ width: `${progress || 3}%` }} /></div>
         </div>
     );
 }
@@ -723,20 +737,20 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
     );
 }
 
-async function readStoredLogs() {
+async function readStoredLogs(configOverride?: AiConfig) {
     if (typeof window === "undefined") return [];
     try {
         const logs: GenerationLog[] = [];
         await logStore.iterate<GenerationLog, void>((value) => {
             logs.push(value);
         });
-        return (await Promise.all(logs.map(normalizeLog))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        return (await Promise.all(logs.map((log) => normalizeLog(log, configOverride)))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     } catch {
         return [];
     }
 }
 
-async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
+async function normalizeLog(log: Partial<GenerationLog>, configOverride?: AiConfig): Promise<GenerationLog> {
     const video = log.video?.storageKey && !log.video.serverStored ? { ...log.video, url: await resolveMediaUrl(log.video.storageKey, log.video.url) } : log.video;
     const videoReferences = await Promise.all(
         (log.videoReferences || []).map(async (item) => ({
@@ -757,6 +771,13 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         })),
     );
     const config = normalizeLogConfig(log);
+    const progress = log.videoProgressStartedAt && log.videoProgressEstimateMs
+        ? { videoProgressStartedAt: log.videoProgressStartedAt, videoProgressEstimateMs: log.videoProgressEstimateMs, videoProgressSampleCount: log.videoProgressSampleCount || 0 }
+        : log.status === "生成中" && (log.task || log.canvasTask)
+            ? configOverride
+                ? createVideoProgressBaseline(configOverride, log.model || config.videoModel, log.createdAt || Date.now())
+                : { videoProgressStartedAt: log.createdAt || Date.now(), videoProgressEstimateMs: DEFAULT_VIDEO_ESTIMATE_MS, videoProgressSampleCount: 0 }
+            : undefined;
     return {
         id: log.id || nanoid(),
         createdAt: log.createdAt || Date.now(),
@@ -773,6 +794,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         resolution: normalizeResolution(log.resolution || config.vquality || ""),
         seconds: log.seconds || config.videoSeconds || "",
         status: log.status || "成功",
+        ...progress,
         task: log.task,
         canvasTask: log.canvasTask,
         video,
@@ -845,7 +867,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
     };
 }
 
-function buildLog({ id, prompt, model, config, references, videoReferences, audioReferences, durationMs, status, task, canvasTask, video, error }: { id?: string; prompt: string; model: string; config: AiConfig; references: ReferenceImage[]; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; durationMs: number; status: GenerationLog["status"]; task?: VideoGenerationTask; canvasTask?: CanvasVideoTask; video?: GeneratedVideo; error?: string }): GenerationLog {
+function buildLog({ id, prompt, model, config, references, videoReferences, audioReferences, durationMs, status, task, canvasTask, video, error, progress }: { id?: string; prompt: string; model: string; config: AiConfig; references: ReferenceImage[]; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; durationMs: number; status: GenerationLog["status"]; task?: VideoGenerationTask; canvasTask?: CanvasVideoTask; video?: GeneratedVideo; error?: string; progress?: VideoProgressBaseline }): GenerationLog {
     const logConfig = {
         model: config.model,
         videoModel: config.videoModel,
@@ -872,6 +894,7 @@ function buildLog({ id, prompt, model, config, references, videoReferences, audi
         resolution: logConfig.vquality,
         seconds: logConfig.videoSeconds,
         status,
+        ...progress,
         task,
         canvasTask,
         video,

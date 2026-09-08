@@ -189,7 +189,7 @@ async function searchPrompts(input: SiteToolInput) {
 function listAssets(input: SiteToolInput) {
     const { assets, hydrated } = useAssetStore.getState();
     if (!hydrated) throw new Error("资产还在加载中，请稍后重试");
-    const kind = input.kind === "text" || input.kind === "image" || input.kind === "video" ? input.kind : "all";
+    const kind = input.kind === "text" || input.kind === "image" || input.kind === "video" || input.kind === "audio" ? input.kind : "all";
     const keyword = String(input.keyword || "")
         .trim()
         .toLowerCase();

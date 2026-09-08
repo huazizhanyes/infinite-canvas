@@ -62,18 +62,18 @@ export type VideoModelCapabilities = {
     faceFriendly?: boolean;
     displayNotice?: string | null;
     freePromotion?: { active: boolean; label: string; startsAt?: string | null; endsAt?: string | null } | null;
-    statsRecent10?: {
+    statsRecent3?: {
         successRate: number | null;
         successRateBps?: number | null;
         successCount: number;
         failedCount: number;
         sampleCount: number;
-        targetCount: number;
+        targetCount: 3;
         calculatedAt?: string;
     };
-    recent10?: {
+    recent3?: {
         sampleCount: number;
-        targetCount: number;
+        targetCount: 3;
         avgDurationSeconds: number | null;
         medianDurationSeconds?: number | null;
         minDurationSeconds?: number | null;
@@ -81,6 +81,28 @@ export type VideoModelCapabilities = {
         durationsSeconds?: number[];
     };
 };
+
+/**
+ * Normalize known XKMJAI routes while the backend catalog is being rolled out.
+ * The adapter only narrows capabilities; pricing details and unrelated fields
+ * remain sourced from the API response.
+ */
+export function adaptVideoCapabilitiesForModel(modelName: string, channel: string | undefined, capabilities: VideoModelCapabilities) {
+    const modelKeys = [modelName, capabilities.upstreamModel].map((value) => String(value || "").trim().toLowerCase());
+    const channelKey = String(channel || "").trim().toLowerCase();
+    if (!channelKey.includes("xkmjai")) return capabilities;
+
+    const quality = modelKeys.includes("wan-3.0-cc") || modelKeys.includes("sd-2.5-hm-2") ? "720p" : "";
+    if (!quality) return capabilities;
+
+    const sourceQuality = capabilities.qualities.find((item) => item.quality.replace(/p$/i, "") === quality.replace(/p$/i, "")) || capabilities.qualities[0];
+    const pricing = sourceQuality?.pricing || { type: "fixed_total" };
+    return {
+        ...capabilities,
+        qualities: [{ ...(sourceQuality || { pricing }), quality, pricing: { ...pricing, type: "fixed_total" } }],
+        duration: { ...capabilities.duration, min: 5, max: 30, options: null },
+    };
+}
 
 export function normalizeVideoDuration(value: string | number | undefined, range?: VideoModelCapabilities["duration"] | null) {
     const requested = Math.floor(Number(value));

@@ -106,7 +106,10 @@ export type CanvasNodeMetadata = {
     videoProvider?: "canvas-video";
     serverStorageKey?: string;
     videoProgress?: number;
-    videoPhase?: "queued" | "generating" | "submission_unknown" | "archiving";
+    videoProgressStartedAt?: number;
+    videoProgressEstimateMs?: number;
+    videoProgressSampleCount?: number;
+    videoPhase?: "preparing" | "queued" | "generating" | "submission_unknown" | "archiving";
     videoCanCancel?: boolean;
     videoQueuePosition?: number | null;
     estimatedCostCredits?: number;

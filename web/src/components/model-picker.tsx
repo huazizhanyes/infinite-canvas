@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { Bot, Boxes, BrainCircuit, Clapperboard, Code2, Cpu, Image, MessageSquareCode, Mic, Sparkles, WandSparkles } from "lucide-react";
+import { Tooltip } from "antd";
+import { BadgeCheck, Bot, Boxes, BrainCircuit, CircleHelp, Clock3, Clapperboard, Code2, Cpu, Image, MessageSquareCode, Mic, Sparkles, WandSparkles } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
@@ -62,7 +63,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             <SelectContent
                 data-canvas-no-zoom
                 hideScrollButtons
-                className="z-[1200] !max-h-[min(var(--radix-select-content-available-height),29rem)] w-72 max-w-[calc(100vw-24px)] !overflow-hidden rounded-lg border border-border/70 bg-popover p-1 text-xs shadow-xl"
+                className="z-[1200] !max-h-[min(var(--radix-select-content-available-height),29rem)] w-72 max-w-[calc(100vw-24px)] !overflow-hidden rounded-lg border border-border/70 bg-popover p-0.5 text-xs shadow-xl"
                 viewportClassName="!h-auto !max-h-[min(var(--radix-select-content-available-height),29rem)] overscroll-contain"
                 position="popper"
                 align="start"
@@ -73,7 +74,12 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             >
                 {options.length ? (
                     options.map((model) => (
-                        <SelectItem key={model} value={model} textValue={modelOptionLabel(config, model)} className="w-full border-b border-white/10 py-2 last:border-b-0 [&>span:last-child]:min-w-0 [&>span:last-child]:w-full">
+                        <SelectItem
+                            key={model}
+                            value={model}
+                            textValue={modelOptionLabel(config, model)}
+                            className="my-1 w-full rounded-none border-0 border-b border-white/12 py-1.5 first:mt-0 last:mb-0 data-[state=checked]:border-b-sky-300/35 data-[state=checked]:bg-sky-400/12 data-[state=checked]:shadow-[inset_3px_0_0_rgba(56,189,248,.95)] [&>span:last-child]:min-w-0 [&>span:last-child]:w-full"
+                        >
                             <ModelLabel config={config} model={model} />
                         </SelectItem>
                     ))
@@ -99,11 +105,12 @@ function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
         const name = `${video.displayBaseName || video.displayName}${video.faceFriendly ? " · 不卡人脸" : ""}`;
         const suffix = video.displaySuffix?.trim();
         return (
-            <span className="grid w-full min-w-0 grid-cols-[28px_minmax(0,1fr)] items-start gap-x-3 gap-y-1" title={video.displayName}>
+            <span className="grid w-full min-w-0 grid-cols-[32px_minmax(0,1fr)] items-center gap-x-2.5 gap-y-0" aria-label={video.displayName}>
                 <ModelIcon config={config} model={model} large />
-                <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium leading-5">{name}</span>
-                    {video.freePromotion?.active ? <span className="mt-0.5 block truncate text-[11px] font-medium leading-4 text-emerald-500">{video.freePromotion.label || "限时免费"}</span> : suffix ? <span className="mt-0.5 block truncate text-[11px] leading-4 opacity-55">{suffix}</span> : null}
+                <span className="relative min-w-0 flex-1">
+                    <span className="block truncate pr-20 text-[13px] font-medium leading-4">{name}</span>
+                    {video.freePromotion?.active ? <span className="mt-0.5 block truncate text-[10px] font-medium leading-3.5 text-emerald-500">{video.freePromotion.label || "限时免费"}</span> : suffix ? <span className="mt-0.5 block truncate text-[10px] leading-3.5 opacity-55">{suffix}</span> : null}
+                    <VideoBillingBadge video={video} />
                 </span>
                 <ModelHealthSummary video={video} />
             </span>
@@ -125,21 +132,22 @@ function ModelIcon({ config, model, large = false }: { config: AiConfig; model: 
     const url = candidates.find((candidate) => !failedUrls.includes(candidate));
 
     useEffect(() => setFailedUrls([]), [model, metadata?.iconUrl]);
-    const sizeClass = large ? "size-6" : "size-4";
+    const sizeClass = large ? "size-7" : "size-4";
     if (url) return <img src={url} alt="" className={`${sizeClass} shrink-0 object-contain ${fallbackUrls.includes(url) ? "dark:invert" : ""}`} onError={() => setFailedUrls((current) => (current.includes(url) ? current : [...current, url]))} />;
     const Icon = namedModelIcon(metadata?.icon) || capabilityIcon(metadata?.capability);
     return <Icon className={`${sizeClass} shrink-0 opacity-70`} />;
 }
 
 function ModelHealthSummary({ video }: { video: NonNullable<ReturnType<typeof videoCapabilitiesOf>> }) {
-    const stats = video.statsRecent10;
-    const recent = video.recent10;
+    const stats = video.statsRecent3;
+    const recent = video.recent3;
     const successRate = stats?.successRate;
     const successPercent = successRate == null ? 0 : Math.max(0, Math.min(100, successRate));
     const avgDuration = recent?.avgDurationSeconds;
     const durationBaselineSeconds = 8 * 60;
     const durationPercent = avgDuration == null ? 0 : avgDuration <= durationBaselineSeconds ? 100 : Math.max(8, Math.min(100, durationBaselineSeconds / avgDuration * 100));
     const durationColor = avgDuration == null || avgDuration <= durationBaselineSeconds ? "bg-emerald-400" : avgDuration <= 12 * 60 ? "bg-amber-400" : "bg-red-400";
+    const durationIconColor = avgDuration == null || avgDuration <= durationBaselineSeconds ? "text-emerald-300" : avgDuration <= 12 * 60 ? "text-amber-300" : "text-red-300";
     const formatDuration = (seconds: number | null | undefined) => {
         if (seconds == null || !Number.isFinite(seconds)) return "暂无数据";
         if (seconds < 60) return `${Number(seconds.toFixed(1))} 秒`;
@@ -148,20 +156,76 @@ function ModelHealthSummary({ video }: { video: NonNullable<ReturnType<typeof vi
         const remainder = wholeSeconds % 60;
         return `${minutes} 分 ${String(remainder).padStart(2, "0")} 秒`;
     };
+    const formatDurationCompact = (seconds: number | null | undefined) => {
+        if (seconds == null || !Number.isFinite(seconds)) return "--";
+        if (seconds < 60) return `${Number(seconds.toFixed(1))}″`;
+        const wholeSeconds = Math.round(seconds);
+        const minutes = Math.floor(wholeSeconds / 60);
+        return `${minutes}′${String(wholeSeconds % 60).padStart(2, "0")}″`;
+    };
     return (
-        <span className="col-span-2 mt-2 grid w-full gap-2 border-t border-white/10 pt-2 text-[10px] leading-3.5">
-            <span className="grid w-full grid-cols-[52px_minmax(0,1fr)_58px] items-center gap-1.5" title={`最近${stats?.sampleCount || 0}条任务：${stats?.successCount || 0}次成功，${stats?.failedCount || 0}次失败`}>
-                <span className="font-medium text-white/70">成功率</span>
-                <span className="h-1.5 min-w-0 overflow-hidden rounded-full bg-white/10"><span className={cn("block h-full rounded-full transition-[width] duration-300", successPercent < 60 ? "bg-red-400" : "bg-emerald-400")} style={{ width: `${successPercent}%` }} /></span>
-                <span className="text-right font-medium tabular-nums text-white/80">{`${Math.round(successPercent)}%`}</span>
-            </span>
-            <span className="grid w-full grid-cols-[52px_minmax(0,1fr)_58px] items-center gap-1.5" title={avgDuration == null ? "最近10条任务中没有成功样本" : `最近10条任务中的${recent?.sampleCount || 0}次成功，平均周转 ${formatDuration(avgDuration)}`}>
-                <span className="font-medium text-white/70">平均耗时</span>
-                <span className="h-1.5 min-w-0 overflow-hidden rounded-full bg-white/10"><span className={cn("block h-full rounded-full transition-[width] duration-300", durationColor)} style={{ width: `${durationPercent}%` }} /></span>
-                <span className="text-right font-medium tabular-nums text-white/80">{avgDuration == null ? "--" : formatDuration(avgDuration)}</span>
-            </span>
+        <span className="col-span-2 mt-1.5 grid w-full gap-1 border-t border-white/10 pt-1.5 text-[10px] leading-3">
+            <ModelHealthMetric
+                icon={BadgeCheck}
+                iconClassName={successPercent < 60 ? "text-red-300" : "text-emerald-300"}
+                value={`${Math.round(successPercent)}%`}
+                percent={successPercent}
+                barClassName={successPercent < 60 ? "bg-red-400" : "bg-emerald-400"}
+                title={`成功率：${Math.round(successPercent)}% · 最近${stats?.sampleCount || 0}条任务：${stats?.successCount || 0}次成功，${stats?.failedCount || 0}次失败`}
+            />
+            <ModelHealthMetric
+                icon={Clock3}
+                iconClassName={durationIconColor}
+                value={formatDurationCompact(avgDuration)}
+                percent={durationPercent}
+                barClassName={durationColor}
+                title={avgDuration == null ? "平均耗时：最近3条任务中没有成功样本" : `平均耗时：${formatDuration(avgDuration)} · 最近3条任务中的${recent?.sampleCount || 0}次成功样本`}
+            />
         </span>
     );
+}
+
+function ModelHealthMetric({ icon: Icon, iconClassName, value, percent, barClassName, title }: { icon: typeof BadgeCheck; iconClassName: string; value: string; percent: number; barClassName: string; title: string }) {
+    return (
+        <span className="grid w-full grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-1">
+            <span className="flex w-full min-w-0 items-center gap-1 font-medium tabular-nums text-white/80">
+                <Icon aria-hidden className={cn("size-3.5 shrink-0", iconClassName)} />
+                <span className="truncate">{value}</span>
+            </span>
+            <span className="h-1 min-w-0 overflow-hidden rounded-full bg-white/10"><span className={cn("block h-full rounded-full transition-[width] duration-300", barClassName)} style={{ width: `${percent}%` }} /></span>
+            <Tooltip
+                title={title}
+                placement="top"
+                mouseEnterDelay={0.15}
+                zIndex={1600}
+                color="#1f2937"
+                styles={{
+                    container: {
+                        maxWidth: 280,
+                        color: "#f8fafc",
+                        border: "1px solid rgba(148, 163, 184, 0.28)",
+                        boxShadow: "0 8px 24px rgba(0, 0, 0, 0.28)",
+                    },
+                }}
+            >
+                <span className="flex size-4 shrink-0 cursor-help items-center justify-center rounded-full text-white/45 transition-colors hover:bg-white/10 hover:text-white/80" aria-label={title}>
+                    <CircleHelp aria-hidden className="size-3.5" />
+                </span>
+            </Tooltip>
+        </span>
+    );
+}
+
+function VideoBillingBadge({ video }: { video: NonNullable<ReturnType<typeof videoCapabilitiesOf>> }) {
+    const units = Array.from(new Set(video.qualities.map((item) => item.pricing.type === "fixed_total" ? "task" : item.pricing.type === "per_second" ? "second" : null).filter((unit): unit is "task" | "second" => Boolean(unit))));
+    if (!units.length) return null;
+    const label = units.length === 1 ? units[0] === "task" ? "按条" : "按秒" : "按所选清晰度";
+    const tone = units.length === 1 && units[0] === "task"
+        ? "border-amber-300/30 bg-amber-300/12 text-amber-200"
+        : units.length === 1
+            ? "border-cyan-300/30 bg-cyan-300/12 text-cyan-200"
+            : "border-violet-300/30 bg-violet-300/12 text-violet-200";
+    return <span className={cn("pointer-events-none absolute -right-3 top-0 rounded border px-1.5 py-0.5 text-[10px] font-medium leading-3", tone)} title={units.length === 1 ? `${label}计费` : "不同清晰度可能使用不同计费方式"}>{label}</span>;
 }
 
 function resolveModelIcons(model: string) {

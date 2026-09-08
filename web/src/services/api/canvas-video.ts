@@ -109,59 +109,59 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
     const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
     const capabilities = videoCapabilitiesOf(config, config.model || config.videoModel);
     if (!capabilities) throw new Error("视频模型能力配置已失效，请重新打开画布");
-
-    const referenceImages = input.referenceImages || [];
-    const referenceVideos = input.referenceVideos || [];
-    const referenceAudios = input.referenceAudios || [];
-    const references = input.references || buildMediaReferenceSlots(referenceImages, referenceVideos, referenceAudios);
-    if (references.some((reference) => reference.status !== "ready" || !reference.mediaId)) throw new Error("部分参考素材尚未上传完成，请等待上传成功后再生成");
-    if (referenceImages.length > capabilities.inputImagesMax) throw new Error(`参考图片最多 ${capabilities.inputImagesMax} 张`);
-    if (referenceVideos.length > capabilities.inputVideosMax) throw new Error(`参考视频最多 ${capabilities.inputVideosMax} 个`);
-    if (referenceAudios.length > capabilities.inputAudiosMax) throw new Error(`参考音频最多 ${capabilities.inputAudiosMax} 个`);
-
-    let mode = capabilities.modes.includes(config.videoMode) ? config.videoMode : capabilities.modes[0];
-    const modeRule = capabilities.modeRules?.find((rule) => rule.mode === mode);
-    assertReferenceCount(referenceImages.length, modeRule?.inputImagesMin, modeRule?.inputImagesMax, "参考图片");
-    assertReferenceCount(referenceVideos.length, modeRule?.inputVideosMin, modeRule?.inputVideosMax, "参考视频");
-    assertReferenceCount(referenceAudios.length, modeRule?.inputAudiosMin, modeRule?.inputAudiosMax, "参考音频");
-
-    const structuredMediaIds = new Set(references.map((reference) => reference.mediaId));
-    const legacyImages = referenceImages.filter((reference) => !reference.mediaId || !structuredMediaIds.has(reference.mediaId));
-    const legacyVideos = referenceVideos.filter((reference) => !reference.mediaId || !structuredMediaIds.has(reference.mediaId));
-    const legacyAudios = referenceAudios.filter((reference) => !reference.mediaId || !structuredMediaIds.has(reference.mediaId));
-    if ([...legacyImages, ...legacyVideos, ...legacyAudios].some((reference) => reference.storageKey)) throw new Error("部分参考素材尚未上传完成，请等待上传成功后再生成");
-    const imageAssetIds = await uploadAssets(requestConfig, "image", legacyImages, signal);
-    const videoAssetIds = await uploadAssets(requestConfig, "video", legacyVideos, signal);
-    const audioAssetIds = await uploadAssets(requestConfig, "audio", legacyAudios, signal);
-    if (typeof window !== "undefined" && window.localStorage.getItem("canvas.debug.references") === "1") {
-        console.log("[Canvas] uploaded asset order", {
-            imageSourceIds: referenceImages.map((reference) => reference.id),
-            imageAssetIds,
-            videoSourceIds: referenceVideos.map((reference) => reference.id),
-            videoAssetIds,
-            audioSourceIds: referenceAudios.map((reference) => reference.id),
-            audioAssetIds,
-        });
-    }
-    const aspectRatio = capabilities.aspectRatios.includes(config.size) ? config.size : capabilities.aspectRatios[0];
-    const quality = capabilities.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities.qualities[0]?.quality;
-    const duration = normalizeVideoDuration(config.videoSeconds, capabilities.duration);
-    const selectedQuality = capabilities.qualities.find((item) => item.quality === quality) || capabilities.qualities[0];
-    const pricingVersion = Number(selectedQuality?.pricingVersion || capabilities.pricingVersion || 0);
-    if (!aspectRatio || !quality || !mode) throw new Error("视频模型能力配置不完整，请稍后重试");
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const connection = useUserStore.getState().connection;
     if (!connection) throw new Error("请先登录后生成视频");
-    const quotePayload = {
-        feature: "canvas.video.generate", requestId: input.clientRequestId,
-        modelId: modelOptionName(config.model || config.videoModel), prompt: input.prompt,
-        aspectRatio, quality, duration, mode, imageAssetIds, videoAssetIds, audioAssetIds,
-        references,
-        parameters: config.videoParameters || {},
-    };
-    const quote = await canvasBillingApi.quote(connection, quotePayload, signal);
 
-    try {
+    const attempt = async (forceLegacyUpload: boolean) => {
+        const referenceImages = forceLegacyUpload ? (input.referenceImages || []).map(stripReferenceMediaId) : (input.referenceImages || []);
+        const referenceVideos = forceLegacyUpload ? (input.referenceVideos || []).map(stripReferenceMediaId) : (input.referenceVideos || []);
+        const referenceAudios = forceLegacyUpload ? (input.referenceAudios || []).map(stripReferenceMediaId) : (input.referenceAudios || []);
+        const references = forceLegacyUpload ? [] : (input.references || buildMediaReferenceSlots(referenceImages, referenceVideos, referenceAudios));
+        if (references.some((reference) => reference.status !== "ready" || !reference.mediaId)) throw new Error("部分参考素材尚未上传完成，请等待上传成功后再生成");
+        if (referenceImages.length > capabilities.inputImagesMax) throw new Error(`参考图片最多 ${capabilities.inputImagesMax} 张`);
+        if (referenceVideos.length > capabilities.inputVideosMax) throw new Error(`参考视频最多 ${capabilities.inputVideosMax} 个`);
+        if (referenceAudios.length > capabilities.inputAudiosMax) throw new Error(`参考音频最多 ${capabilities.inputAudiosMax} 个`);
+
+        const mode = capabilities.modes.includes(config.videoMode) ? config.videoMode : capabilities.modes[0];
+        const modeRule = capabilities.modeRules?.find((rule) => rule.mode === mode);
+        assertReferenceCount(referenceImages.length, modeRule?.inputImagesMin, modeRule?.inputImagesMax, "参考图片");
+        assertReferenceCount(referenceVideos.length, modeRule?.inputVideosMin, modeRule?.inputVideosMax, "参考视频");
+        assertReferenceCount(referenceAudios.length, modeRule?.inputAudiosMin, modeRule?.inputAudiosMax, "参考音频");
+
+        const structuredMediaIds = new Set(references.map((reference) => reference.mediaId));
+        const legacyImages = referenceImages.filter((reference) => !reference.mediaId || !structuredMediaIds.has(reference.mediaId));
+        const legacyVideos = referenceVideos.filter((reference) => !reference.mediaId || !structuredMediaIds.has(reference.mediaId));
+        const legacyAudios = referenceAudios.filter((reference) => !reference.mediaId || !structuredMediaIds.has(reference.mediaId));
+        if ([...legacyImages, ...legacyVideos, ...legacyAudios].some((reference) => reference.storageKey)) throw new Error("部分参考素材尚未上传完成，请等待上传成功后再生成");
+        const imageAssetIds = await uploadAssets(requestConfig, "image", legacyImages, signal);
+        const videoAssetIds = await uploadAssets(requestConfig, "video", legacyVideos, signal);
+        const audioAssetIds = await uploadAssets(requestConfig, "audio", legacyAudios, signal);
+        if (typeof window !== "undefined" && window.localStorage.getItem("canvas.debug.references") === "1") {
+            console.log("[Canvas] uploaded asset order", {
+                imageSourceIds: referenceImages.map((reference) => reference.id),
+                imageAssetIds,
+                videoSourceIds: referenceVideos.map((reference) => reference.id),
+                videoAssetIds,
+                audioSourceIds: referenceAudios.map((reference) => reference.id),
+                audioAssetIds,
+                forcedLegacyUpload: forceLegacyUpload,
+            });
+        }
+        const aspectRatio = capabilities.aspectRatios.includes(config.size) ? config.size : capabilities.aspectRatios[0];
+        const quality = capabilities.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities.qualities[0]?.quality;
+        const duration = normalizeVideoDuration(config.videoSeconds, capabilities.duration);
+        const selectedQuality = capabilities.qualities.find((item) => item.quality === quality) || capabilities.qualities[0];
+        const pricingVersion = Number(selectedQuality?.pricingVersion || capabilities.pricingVersion || 0);
+        if (!aspectRatio || !quality || !mode) throw new Error("视频模型能力配置不完整，请稍后重试");
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        const quotePayload = {
+            feature: "canvas.video.generate", requestId: input.clientRequestId,
+            modelId: modelOptionName(config.model || config.videoModel), prompt: input.prompt,
+            aspectRatio, quality, duration, mode, imageAssetIds, videoAssetIds, audioAssetIds,
+            references,
+            parameters: config.videoParameters || {},
+        };
+        const quote = await canvasBillingApi.quote(connection, quotePayload, signal);
         const response = await axios.post<CanvasVideoTask>(canvasVideoUrl(requestConfig, "/tasks"), {
             clientRequestId: input.clientRequestId,
             projectId: input.projectId,
@@ -182,7 +182,9 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
         }, { headers: canvasVideoHeaders(requestConfig) });
         window.dispatchEvent(new CustomEvent("canvas-video-balance-changed"));
         return response.data;
-    } catch (error) {
+    };
+
+    const handleCreateError = async (error: unknown, allowLegacyRetry: boolean): Promise<CanvasVideoTask> => {
         if (isRequestTimeout(error)) {
             const recovered = await listCanvasVideoTasks(config, { clientRequestId: input.clientRequestId }, signal).catch(() => null);
             const task = recovered?.find((item) => item.clientRequestId === input.clientRequestId);
@@ -198,7 +200,20 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
             window.dispatchEvent(new CustomEvent("canvas-video-recharge-required", { detail: payload }));
             throw new CanvasVideoApiError("WALLET_INSUFFICIENT", "AI 钱包余额不足，请充值后重试", payload);
         }
+        if (allowLegacyRetry && hasStructuredMediaReferences(input) && shouldRetryCanvasVideoWithLegacyAssets(error)) {
+            try {
+                return await attempt(true);
+            } catch (retryError) {
+                return handleCreateError(retryError, false);
+            }
+        }
         throw new Error(readCanvasVideoError(error, "视频任务创建失败"));
+    };
+
+    try {
+        return await attempt(false);
+    } catch (error) {
+        return handleCreateError(error, true);
     }
 }
 
@@ -412,6 +427,23 @@ function readCanvasVideoError(error: unknown, fallback: string) {
         if (message) return String(message);
     }
     return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function hasStructuredMediaReferences(input: CreateInput) {
+    return [...(input.referenceImages || []), ...(input.referenceVideos || []), ...(input.referenceAudios || [])].some((reference) => Boolean(reference.mediaId));
+}
+
+function shouldRetryCanvasVideoWithLegacyAssets(error: unknown) {
+    if (!axios.isAxiosError(error)) return false;
+    const payload = error.response?.data as any;
+    const code = String(payload?.code || payload?.error?.code || "").toUpperCase();
+    const message = readCanvasVideoError(error, "").toLowerCase();
+    return code.includes("MEDIA_NOT_FOUND") || message.includes("媒体不存在") || message.includes("media not found");
+}
+
+function stripReferenceMediaId<T extends { mediaId?: string }>(reference: T): T {
+    const { mediaId: _mediaId, ...rest } = reference;
+    return rest as T;
 }
 
 function isRequestTimeout(error: unknown) {

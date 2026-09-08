@@ -1,5 +1,6 @@
 import { Popover } from "antd";
 import { Image as ImageIcon, Music2, Video, X } from "lucide-react";
+import type { CSSProperties } from "react";
 
 import type { CanvasConnectionPreview } from "@/lib/canvas/canvas-connection-previews";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -17,7 +18,7 @@ export function CanvasConnectionPreviewStrip({ items, onMention, onRemove, onFoc
     if (!items.length) return null;
 
     return (
-        <div className="thin-scrollbar flex min-h-14 max-w-full items-center gap-2 overflow-x-auto overflow-y-hidden pb-2 pr-1" data-canvas-no-zoom>
+        <div className="thin-scrollbar flex min-h-12 max-w-full items-center gap-1.5 overflow-x-auto overflow-y-hidden pb-1.5 pr-1" data-canvas-no-zoom>
             {items.map((item) => (
                 <Popover
                     key={item.connectionId}
@@ -30,8 +31,8 @@ export function CanvasConnectionPreviewStrip({ items, onMention, onRemove, onFoc
                 >
                     <div
                         data-connection-preview-id={item.connectionId}
-                        className="group relative size-12 shrink-0 cursor-zoom-in overflow-hidden rounded-[7px] border transition-colors"
-                        style={{ background: theme.node.fill, borderColor: theme.node.stroke }}
+                        className="group relative size-10 shrink-0 cursor-zoom-in overflow-hidden rounded-md border transition-colors hover:bg-[var(--connection-preview-hover)]"
+                        style={{ background: theme.node.fill, borderColor: theme.node.stroke, "--connection-preview-hover": theme.toolbar.activeBg } as CSSProperties}
                         title={item.title || item.label}
                         onDoubleClick={(event) => {
                             event.stopPropagation();
@@ -39,12 +40,12 @@ export function CanvasConnectionPreviewStrip({ items, onMention, onRemove, onFoc
                         }}
                     >
                         <ConnectionPreviewMedia item={item} />
-                        <span className="pointer-events-none absolute left-1 top-1 max-w-[calc(100%-0.5rem)] truncate rounded bg-black/75 px-1 py-0.5 text-[9px] font-semibold leading-none text-white transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
+                        <span className="pointer-events-none absolute left-0.5 top-0.5 max-w-[calc(100%-0.25rem)] truncate rounded bg-black/75 px-0.5 py-0.5 text-[8px] font-semibold leading-none text-white transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
                             {item.label}
                         </span>
                         <button
                             type="button"
-                            className="absolute right-px top-px grid size-3.5 place-items-center rounded-full bg-black/75 text-white opacity-0 transition hover:bg-red-500 group-hover:opacity-100 group-focus-within:opacity-100"
+                            className="absolute right-px top-px grid size-3 place-items-center rounded-full bg-black/75 text-white opacity-0 transition hover:bg-red-500 group-hover:opacity-100 group-focus-within:opacity-100"
                             title="删除连接"
                             aria-label={`删除${item.label}连接`}
                             onMouseDown={(event) => {
@@ -60,11 +61,11 @@ export function CanvasConnectionPreviewStrip({ items, onMention, onRemove, onFoc
                                 onRemove(item);
                             }}
                         >
-                            <X className="size-2" />
+                            <X className="size-1.5" />
                         </button>
                         <button
                             type="button"
-                            className="absolute bottom-px right-px grid size-3.5 place-items-center rounded-full bg-black/75 text-[10px] font-semibold leading-none text-white transition hover:bg-blue-500"
+                            className="absolute bottom-px right-px grid size-3 place-items-center rounded-full bg-black/75 text-[9px] font-semibold leading-none text-white transition hover:bg-blue-500"
                             title={`引用${item.label}`}
                             aria-label={`引用${item.label}`}
                             onMouseDown={(event) => {

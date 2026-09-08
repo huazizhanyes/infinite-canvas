@@ -990,6 +990,26 @@
     filter: none !important;
 }
 
+[data-canvas-node-dragging="true"] .node-element,
+[data-canvas-node-dragging="true"] .node-element * {
+    transition-duration: 0s !important;
+}
+
+[data-canvas-node-dragging="true"] .node-element {
+    box-shadow: none !important;
+    filter: none !important;
+    will-change: transform;
+}
+
+[data-canvas-node-dragging="true"] svg path {
+    filter: none !important;
+}
+
+[data-canvas-node-dragging="true"] [data-canvas-multi-selection],
+[data-canvas-node-dragging="true"] [data-canvas-node-toolbar] {
+    display: none !important;
+}
+
 .canvas-video-progress {
     --canvas-video-progress: 0%;
     height: 14px;

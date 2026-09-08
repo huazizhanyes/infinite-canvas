@@ -4,6 +4,7 @@ import { ChevronRight, Group, Image as ImageIcon, Maximize2, Music2, Pause, Play
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
+import { useVideoGenerationProgress } from "@/hooks/use-video-generation-progress";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { buildNodeContext } from "@/lib/canvas/plugin-node-context";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -52,8 +53,7 @@ type CanvasNodeProps = {
     batchRecovering?: boolean;
     batchMotion?: { x: number; y: number; index: number };
     isBatchPrimary?: boolean;
-    onMouseDown: (event: React.MouseEvent, nodeId: string) => void;
-    onSelectCapture?: (event: React.MouseEvent, nodeId: string) => void;
+    onPointerDown: (event: React.PointerEvent, nodeId: string) => void;
     onHoverStart: (nodeId: string) => void;
     onHoverEnd: (nodeId: string) => void;
     onConnectStart: (event: React.MouseEvent, nodeId: string, handleType: "source" | "target") => void;
@@ -68,7 +68,7 @@ type CanvasNodeProps = {
     onRetry?: (node: CanvasNodeData) => void;
     onRetryOriginal?: (node: CanvasNodeData) => void;
     onRetryMedia?: (node: CanvasNodeData) => void;
-    onUpload?: () => void;
+    onUpload?: (nodeId: string) => void;
     mediaUploadProgress?: number;
     onViewImage?: (node: CanvasNodeData) => void;
     onVideoMetadata?: (nodeId: string, width: number, height: number) => void;
@@ -95,7 +95,7 @@ type NodeContentRendererProps = {
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
     onRetryOriginal?: (node: CanvasNodeData) => void;
-    onUpload?: () => void;
+    onUpload?: (nodeId: string) => void;
     onVideoMetadata?: (nodeId: string, width: number, height: number) => void;
     onToggleBatch?: () => void;
     groupChildCount: number;
@@ -128,8 +128,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     batchRecovering = false,
     batchMotion,
     isBatchPrimary = false,
-    onMouseDown,
-    onSelectCapture,
+    onPointerDown,
     onHoverStart,
     onHoverEnd,
     onConnectStart,
@@ -369,10 +368,6 @@ export const CanvasNode = React.memo(function CanvasNode({
                 setHovered(false);
                 onHoverEnd(data.id);
             }}
-            onMouseDownCapture={(event) => {
-                if (event.target instanceof Element && event.target.closest("[data-group-color-picker],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
-                onSelectCapture?.(event, data.id);
-            }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
             onWheel={(event) => {
                 if (data.type !== CanvasNodeType.Text) return;
@@ -477,7 +472,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     boxShadow: [shellOutline, shellElevation, connectionElevation].filter(Boolean).join(", ") || undefined,
                     transition: "box-shadow 180ms ease",
                 }}
-                onMouseDown={(event) => onMouseDown(event, data.id)}
+                onPointerDown={(event) => onPointerDown(event, data.id)}
                 onDoubleClick={(event) => {
                     if (isBatchRoot) {
                         event.stopPropagation();
@@ -496,6 +491,11 @@ export const CanvasNode = React.memo(function CanvasNode({
                     if (data.type !== CanvasNodeType.Text) return;
                     event.stopPropagation();
                     setIsEditingContent(true);
+                }}
+                onClick={(event) => {
+                    const target = event.target instanceof Element ? event.target : null;
+                    if (target?.closest("[data-canvas-node-panel],[data-canvas-interactive]")) return;
+                    if (data.type !== CanvasNodeType.Group && !definition?.hidePanel) onOpenPanel?.(data.id);
                 }}
             >
                 {connectionFocus ? (
@@ -597,7 +597,62 @@ export const CanvasNode = React.memo(function CanvasNode({
             ) : null}
         </div>
     );
-});
+}, areCanvasNodePropsEqual);
+
+function areCanvasNodePropsEqual(previous: CanvasNodeProps, next: CanvasNodeProps) {
+    // Keep the hot canvas path shallow: unrelated hover/connection changes
+    // should not repaint every visible node.
+    const sameResourceLabel = previous.resourceLabel?.nodeId === next.resourceLabel?.nodeId
+        && previous.resourceLabel?.label === next.resourceLabel?.label
+        && previous.resourceLabel?.active === next.resourceLabel?.active;
+    const samePanelProps = !previous.showPanel && !next.showPanel
+        || (previous.showPanel === next.showPanel && previous.renderPanel === next.renderPanel && previous.mentionReferences === next.mentionReferences);
+    return previous.data === next.data
+        && previous.scale === next.scale
+        && previous.isSelected === next.isSelected
+        && previous.isRelated === next.isRelated
+        && previous.isFocusRelated === next.isFocusRelated
+        && previous.isConnectionTarget === next.isConnectionTarget
+        && previous.isConnecting === next.isConnecting
+        && previous.connectionHoverPoint?.x === next.connectionHoverPoint?.x
+        && previous.connectionHoverPoint?.y === next.connectionHoverPoint?.y
+        && previous.hideConnectionHandles === next.hideConnectionHandles
+        && previous.editRequestNonce === next.editRequestNonce
+        && previous.showPanel === next.showPanel
+        && previous.showImageInfo === next.showImageInfo
+        && sameResourceLabel
+        && samePanelProps
+        && previous.pluginHost === next.pluginHost
+        && previous.registryVersion === next.registryVersion
+        && previous.batchCount === next.batchCount
+        && previous.groupChildCount === next.groupChildCount
+        && previous.isGroupDropTarget === next.isGroupDropTarget
+        && previous.batchExpanded === next.batchExpanded
+        && previous.batchClosing === next.batchClosing
+        && previous.batchOpening === next.batchOpening
+        && previous.batchRecovering === next.batchRecovering
+        && previous.batchMotion === next.batchMotion
+        && previous.isBatchPrimary === next.isBatchPrimary
+        && previous.onPointerDown === next.onPointerDown
+        && previous.onHoverStart === next.onHoverStart
+        && previous.onHoverEnd === next.onHoverEnd
+        && previous.onConnectStart === next.onConnectStart
+        && previous.onResize === next.onResize
+        && previous.onContentChange === next.onContentChange
+        && previous.onTextSelectionChange === next.onTextSelectionChange
+        && previous.onOpenPanel === next.onOpenPanel
+        && previous.onTitleChange === next.onTitleChange
+        && previous.onToggleBatch === next.onToggleBatch
+        && previous.onSetBatchPrimary === next.onSetBatchPrimary
+        && previous.onRetry === next.onRetry
+        && previous.onRetryOriginal === next.onRetryOriginal
+        && previous.onRetryMedia === next.onRetryMedia
+        && previous.onUpload === next.onUpload
+        && previous.mediaUploadProgress === next.mediaUploadProgress
+        && previous.onViewImage === next.onViewImage
+        && previous.onVideoMetadata === next.onVideoMetadata
+        && previous.onContextMenu === next.onContextMenu;
+}
 
 function NodeContent(props: NodeContentRendererProps) {
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
@@ -609,7 +664,7 @@ function NodeContent(props: NodeContentRendererProps) {
             return <PluginContent ctx={props.pluginContext} />;
         }
     }
-    if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
+    if (props.node.metadata?.status === "loading" && props.node.type !== CanvasNodeType.Video) return <LoadingContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onRetryOriginal={props.onRetryOriginal} />;
 
     const Renderer = nodeContentRenderers[props.node.type as keyof typeof nodeContentRenderers];
@@ -822,11 +877,11 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     );
 }
 
-function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, onUpload }: NodeContentRendererProps) {
+function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, onUpload }: NodeContentRendererProps) {
     const content = (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
             <ImageIcon className="size-12 opacity-30" strokeWidth={1.35} />
-            <button type="button" data-canvas-no-zoom className="inline-flex items-center gap-1.5 bg-transparent p-0 text-xs font-medium transition hover:underline" style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onUpload?.(); }}><Upload className="size-4" strokeWidth={1.6} />上传图片</button>
+                <button type="button" data-canvas-no-zoom data-canvas-interactive className="inline-flex items-center gap-1.5 bg-transparent p-0 text-xs font-medium transition hover:underline" style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onUpload?.(node.id); }}><Upload className="size-4" strokeWidth={1.6} />上传图片</button>
         </div>
     );
     if (isBatchRoot)
@@ -847,21 +902,24 @@ function VideoNodeContent({ node, theme, scale, onVideoMetadata, onUpload }: Nod
     const [duration, setDuration] = useState(0);
     const playerRef = useRef<HTMLDivElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
+    const isGenerating = !node.metadata?.content && node.metadata?.status === "loading";
+    const progress = useVideoGenerationProgress(node.metadata?.videoProgressStartedAt, node.metadata?.videoProgressEstimateMs, isGenerating);
     if (!node.metadata?.content) {
-        if (node.metadata?.status === "loading" && node.metadata?.videoProvider === "canvas-video") {
-            const phase = node.metadata.videoPhase === "archiving" ? "正在归档" : node.metadata.videoPhase === "queued" ? `正在排队${node.metadata.videoQueuePosition ? ` · 前方 ${Math.max(0, node.metadata.videoQueuePosition - 1)} 条` : ""}` : node.metadata.videoPhase === "submission_unknown" ? "提交结果未知，请勿重复生成" : "正在生成";
+        if (isGenerating) {
+            const phase = node.metadata?.videoPhase === "preparing" ? "正在准备" : node.metadata?.videoPhase === "archiving" ? "正在归档" : node.metadata?.videoPhase === "queued" ? `正在排队${node.metadata?.videoQueuePosition ? ` · 前方 ${Math.max(0, node.metadata.videoQueuePosition - 1)} 条` : ""}` : node.metadata?.videoPhase === "submission_unknown" ? "提交结果未知，请勿重复生成" : "正在生成";
+            const displayedProgress = progress ?? 1;
             return (
-                <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-center" style={{ color: theme.node.text }}>
+                <div className="relative flex h-full w-full flex-col items-center justify-center gap-2 px-4 pb-2 text-center" style={{ color: theme.node.text }}>
                     <RefreshCw className="size-6 animate-spin opacity-55" />
-                    <div className="text-[12px] font-medium">{phase} · {Math.max(0, node.metadata.videoProgress || 0)}%</div>
-                    <div className="h-1.5 w-full max-w-48 overflow-hidden rounded-full" style={{ background: theme.node.stroke }}><div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${Math.max(3, node.metadata.videoProgress || 0)}%` }} /></div>
+                    <div className="text-[12px] font-medium">{phase} · {displayedProgress}%</div>
+                    <div className="absolute inset-x-0 bottom-0 h-1 overflow-hidden" style={{ background: theme.node.stroke }}><div className="h-full transition-[width] duration-700" style={{ width: `${displayedProgress}%`, background: theme.node.activeStroke }} /></div>
                 </div>
             );
         }
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
                 <Video className="size-12 opacity-30" strokeWidth={1.35} />
-                <button type="button" data-canvas-no-zoom className="inline-flex items-center gap-1.5 bg-transparent p-0 text-xs font-medium transition hover:underline" style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onUpload?.(); }}><Upload className="size-4" strokeWidth={1.6} />上传视频</button>
+                <button type="button" data-canvas-no-zoom data-canvas-interactive className="inline-flex items-center gap-1.5 bg-transparent p-0 text-xs font-medium transition hover:underline" style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onUpload?.(node.id); }}><Upload className="size-4" strokeWidth={1.6} />上传视频</button>
             </div>
         );
     }
@@ -870,7 +928,7 @@ function VideoNodeContent({ node, theme, scale, onVideoMetadata, onUpload }: Nod
             <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-center" style={{ color: theme.node.text }}>
                 <Video className="size-6 opacity-40" />
                 <span className="text-[12px]">视频加载失败</span>
-                <button type="button" className="inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-[11px]" style={{ borderColor: theme.node.stroke }} onClick={(event) => { event.stopPropagation(); setLoadError(false); setReloadKey((value) => value + 1); }}><RefreshCw className="size-3.5" />重新加载</button>
+                <button type="button" data-canvas-interactive className="inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-[11px]" style={{ borderColor: theme.node.stroke }} onClick={(event) => { event.stopPropagation(); setLoadError(false); setReloadKey((value) => value + 1); }}><RefreshCw className="size-3.5" />重新加载</button>
             </div>
         );
     }
@@ -926,7 +984,7 @@ function VideoNodeContent({ node, theme, scale, onVideoMetadata, onUpload }: Nod
                 onError={() => setLoadError(true)}
             />
             <div className="canvas-video-gradient pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/80 via-black/35 to-transparent opacity-0 transition-opacity duration-200 group-hover/video:opacity-100" />
-            <div className="canvas-video-controls absolute inset-x-3 bottom-2.5 z-10 flex items-center gap-2 text-white opacity-0 transition-opacity duration-200 group-hover/video:opacity-100" onMouseDown={stopPlayerInteraction} onPointerDown={stopPlayerInteraction}>
+            <div data-canvas-interactive className="canvas-video-controls absolute inset-x-3 bottom-2.5 z-10 flex items-center gap-2 text-white opacity-0 transition-opacity duration-200 group-hover/video:opacity-100" onMouseDown={stopPlayerInteraction} onPointerDown={stopPlayerInteraction}>
                 <button type="button" className="grid size-7 shrink-0 place-items-center rounded-md transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/80" title={playing ? "暂停" : "播放"} aria-label={playing ? "暂停" : "播放"} onClick={() => void togglePlayback()}>
                     {playing ? <Pause className="size-4 fill-current" /> : <Play className="size-4 fill-current" />}
                 </button>

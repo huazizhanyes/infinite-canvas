@@ -1,7 +1,11 @@
 import type { CSSProperties } from "react";
-import { Modal, Tag, Timeline } from "antd";
+import { useState } from "react";
+import { Button, Modal, Space, Tag, Timeline } from "antd";
 import { useVersionCheck } from "@/hooks/use-version-check";
 import { APP_VERSION } from "@/constant/env";
+import { flushCanvasPersistence } from "@/stores/canvas/use-canvas-store";
+import { flushCanvasAssetSync } from "@/services/canvas-asset-sync";
+import { flushSucaiCanvasSync } from "@/services/sucai-canvas-sync";
 
 function getTagColor(type: string) {
     if (type === "新增") return "green";
@@ -18,25 +22,36 @@ function getReleaseTitle(version: string) {
 type VersionReleaseModalProps = {
     className?: string;
     style?: CSSProperties;
+    autoOpen?: boolean;
+    showTrigger?: boolean;
 };
 
-export function VersionReleaseModal({ className, style }: VersionReleaseModalProps) {
-    const { open, setOpen, openReleaseModal, latestVersion, releases, checking, hasNewVersion, checkLatestRelease } = useVersionCheck();
+export function VersionReleaseModal({ className, style, autoOpen = false, showTrigger = true }: VersionReleaseModalProps) {
+    const { open, setOpen, openReleaseModal, latestVersion, releases, checking, hasNewVersion, checkLatestRelease } = useVersionCheck({ autoOpen });
+    const [reloading, setReloading] = useState(false);
+
+    const reloadApplication = async () => {
+        setReloading(true);
+        await Promise.race([Promise.allSettled([flushCanvasPersistence(), flushSucaiCanvasSync(), flushCanvasAssetSync()]), new Promise<void>((resolve) => window.setTimeout(resolve, 2000))]);
+        window.location.reload();
+    };
 
     return (
         <>
-            <button
-                type="button"
-                className={className || "shrink-0 cursor-pointer text-xs font-medium text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-white"}
-                style={style}
-                onClick={openReleaseModal}
-                title="查看版本更新"
-            >
-                <span className="relative inline-flex">
-                    {APP_VERSION}
-                    {hasNewVersion ? <span className="absolute -right-1.5 -top-1 size-1.5 rounded-full bg-green-500" /> : null}
-                </span>
-            </button>
+            {showTrigger ? (
+                <button
+                    type="button"
+                    className={className || "shrink-0 cursor-pointer text-xs font-medium text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-white"}
+                    style={style}
+                    onClick={openReleaseModal}
+                    title="查看版本更新"
+                >
+                    <span className="relative inline-flex">
+                        {APP_VERSION}
+                        {hasNewVersion ? <span className="absolute -right-1.5 -top-1 size-1.5 rounded-full bg-green-500" /> : null}
+                    </span>
+                </button>
+            ) : null}
             <Modal title="版本更新" open={open} width={680} centered footer={null} onCancel={() => setOpen(false)}>
                 <div className="mb-5 grid grid-cols-2 gap-3">
                     <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
@@ -84,6 +99,16 @@ export function VersionReleaseModal({ className, style }: VersionReleaseModalPro
                             ),
                         }))}
                     />
+                </div>
+                <div className="mt-5 flex justify-end">
+                    <Space>
+                        <Button onClick={() => setOpen(false)} disabled={reloading}>
+                            稍后再说
+                        </Button>
+                        <Button type="primary" loading={reloading} onClick={() => void reloadApplication()}>
+                            立即更新
+                        </Button>
+                    </Space>
                 </div>
             </Modal>
         </>

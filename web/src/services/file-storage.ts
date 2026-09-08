@@ -2,7 +2,7 @@ import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { cacheObjectUrl, revokeCachedObjectUrl } from "@/services/object-url-cache";
 import { getCanvasStorageScopeId, getCanvasSessionEpoch } from "@/lib/canvas-account-scope";
-import { uploadCanvasMedia, resolveCanvasMediaUrl } from "@/services/canvas-media";
+import { uploadCanvasMedia, resolveCanvasMediaUrl, type CanvasMediaUploadOptions } from "@/services/canvas-media";
 
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number; mediaId?: string; mediaStatus?: "uploading" | "synced" | "failed" };
 
@@ -34,14 +34,14 @@ export async function storeMediaFileLocally(input: string | Blob, prefix = "file
     return { url, storageKey, bytes: blob.size, mimeType: blob.type || "application/octet-stream", ...meta, mediaStatus: "uploading" };
 }
 
-export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
+export async function uploadMediaFile(input: string | Blob, prefix = "file", options: Pick<CanvasMediaUploadOptions, "onProgress" | "onStatus"> = {}): Promise<UploadedFile> {
     const epoch = getCanvasSessionEpoch();
     const local = await storeMediaFileLocally(input, prefix);
     const blob = await store.getItem<Blob>(local.storageKey);
     if (!blob) throw new Error("本地媒体保存失败");
     let remote: Awaited<ReturnType<typeof uploadCanvasMedia>> = null;
     const kind = blob.type.startsWith("video/") ? "video" : blob.type.startsWith("audio/") ? "audio" : null;
-    if (kind) { try { remote = await uploadCanvasMedia(blob, kind); } catch { remote = { mediaId: "", mediaStatus: "failed" }; } }
+    if (kind) { try { remote = await uploadCanvasMedia(blob, kind, {}, options); } catch { remote = { mediaId: "", mediaStatus: "failed" }; } }
     if (epoch !== getCanvasSessionEpoch()) throw new Error("账号已切换，已忽略旧媒体请求");
     return { ...local, ...(remote?.mediaId ? { mediaId: remote.mediaId } : {}), mediaStatus: remote?.mediaStatus || (kind ? "failed" : undefined) };
 }
