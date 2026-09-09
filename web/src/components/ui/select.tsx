@@ -113,8 +113,9 @@ function SelectLabel({
 function SelectItem({
   className,
   children,
+  hideIndicator = false,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Item>) {
+}: React.ComponentProps<typeof SelectPrimitive.Item> & { hideIndicator?: boolean }) {
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
@@ -124,7 +125,7 @@ function SelectItem({
       )}
       {...props}
     >
-      <span className="pointer-events-none absolute right-2 flex size-4 items-center justify-center">
+      <span className={cn("pointer-events-none absolute right-2 flex size-4 items-center justify-center", hideIndicator && "hidden")}>
         <SelectPrimitive.ItemIndicator>
           <CheckIcon className="pointer-events-none" />
         </SelectPrimitive.ItemIndicator>

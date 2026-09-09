@@ -1,4 +1,4 @@
-import type { CanvasConnection, CanvasNodeData, Position } from "@/types/canvas";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type Position } from "@/types/canvas";
 
 const PASTE_LAYOUT_GAP = 48;
 const PASTE_COLLISION_GAP = 24;
@@ -45,6 +45,50 @@ export function prepareCanvasNodeForClipboard(node: CanvasNodeData): CanvasNodeD
             submittedReferenceLabelMap: undefined,
             submittedImageReferences: undefined,
             submissionPrompt: undefined,
+        },
+    };
+}
+
+export function prepareCanvasNodeForDuplicate(node: CanvasNodeData): CanvasNodeData {
+    if (node.type !== CanvasNodeType.Video || !node.metadata) return prepareCanvasNodeForClipboard(node);
+
+    return {
+        ...node,
+        position: { ...node.position },
+        metadata: {
+            ...node.metadata,
+            content: undefined,
+            status: "idle",
+            errorDetails: undefined,
+            generationRequestId: undefined,
+            videoTaskId: undefined,
+            videoProvider: undefined,
+            videoResultUrl: undefined,
+            videoServerStorageKey: undefined,
+            videoCompletedAt: undefined,
+            regenerationError: undefined,
+            serverStorageKey: undefined,
+            videoProgress: undefined,
+            videoProgressStartedAt: undefined,
+            videoProgressEstimateMs: undefined,
+            videoProgressSampleCount: undefined,
+            videoPhase: undefined,
+            videoErrorCode: undefined,
+            videoErrorMessage: undefined,
+            videoCanCancel: undefined,
+            videoQueuePosition: undefined,
+            estimatedCostCredits: undefined,
+            chargedCredits: undefined,
+            videoBalanceAfter: undefined,
+            videoBillingStatus: undefined,
+            videoRouteLabel: undefined,
+            pricingVersion: undefined,
+            storageKey: undefined,
+            mediaId: undefined,
+            mediaStatus: undefined,
+            mimeType: undefined,
+            bytes: undefined,
+            durationMs: undefined,
         },
     };
 }

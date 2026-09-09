@@ -61,6 +61,7 @@ export type VideoModelCapabilities = {
     modeRules?: VideoModeRule[];
     faceFriendly?: boolean;
     displayNotice?: string | null;
+    marked?: boolean;
     freePromotion?: { active: boolean; label: string; startsAt?: string | null; endsAt?: string | null } | null;
     statsRecent3?: {
         successRate: number | null;
@@ -223,6 +224,7 @@ type ConfigStore = {
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+    setVideoModelMarked: (modelValue: string, marked: boolean) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean, tab?: ConfigTabKey) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
@@ -295,6 +297,20 @@ export const useConfigStore = create<ConfigStore>()(
                     config: {
                         ...state.config,
                         [key]: value,
+                    },
+                })),
+            setVideoModelMarked: (modelValue, marked) =>
+                set((state) => ({
+                    config: {
+                        ...state.config,
+                        channels: state.config.channels.map((channel) => ({
+                            ...channel,
+                            models: channel.models.map((model) =>
+                                encodeChannelModel(channel.id, model.name) === modelValue && model.videoCapabilities
+                                    ? { ...model, videoCapabilities: { ...model.videoCapabilities, marked } }
+                                    : model,
+                            ),
+                        })),
                     },
                 })),
             isAiConfigReady: (config, model) => isAiConfigReady(config, model),

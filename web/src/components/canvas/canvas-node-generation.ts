@@ -34,6 +34,32 @@ export type NodeGenerationInput = {
     label?: string;
 };
 
+export const MAX_VIDEO_REFERENCE_AUDIO_DURATION_MS = 15_000;
+
+export async function videoReferenceAudioDurationError(referenceAudios: ReferenceAudio[], resolveDurationMs = resolveReferenceAudioDurationMs) {
+    const inspected = await Promise.all(referenceAudios.map(async (audio) => {
+        const savedDurationMs = Number(audio.durationMs);
+        if (Number.isFinite(savedDurationMs) && savedDurationMs > 0) return { audio, durationMs: savedDurationMs };
+        try {
+            return { audio, durationMs: await resolveDurationMs(audio) };
+        } catch {
+            return { audio, durationMs: undefined };
+        }
+    }));
+    const unreadable = inspected.find(({ durationMs }) => !Number.isFinite(durationMs) || Number(durationMs) <= 0);
+    if (unreadable) return `无法读取参考音频“${unreadable.audio.name}”的时长，请重新上传后再试`;
+    const oversized = inspected.find(({ durationMs }) => Number(durationMs) > MAX_VIDEO_REFERENCE_AUDIO_DURATION_MS);
+    if (!oversized) return null;
+    const seconds = Number(oversized.durationMs) / 1000;
+    return `参考音频“${oversized.audio.name}”时长为 ${Number(seconds.toFixed(1))} 秒，单个参考音频不能超过 15 秒，请裁剪后再生成`;
+}
+
+async function resolveReferenceAudioDurationMs(audio: ReferenceAudio) {
+    const { readAudioDurationMs, resolvePersistedMediaUrl } = await import("@/services/file-storage");
+    const url = await resolvePersistedMediaUrl(audio.mediaId, audio.storageKey, audio.url);
+    return url ? readAudioDurationMs(url) : undefined;
+}
+
 export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string, mentionReferences: CanvasResourceReference[] = []): NodeGenerationContext {
     const targetNode = nodes.find((node) => node.id === nodeId);
     const labelByNodeId = new Map(mentionReferences.map((reference) => [reference.nodeId, reference.label]));
@@ -49,7 +75,7 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     ].filter((input, index, all) => all.findIndex((candidate) => candidate.nodeId === input.nodeId) === index);
     // An uploaded audio node doubles as the reference and the source of the generated child.
     // It has no connection yet, so include it explicitly without reusing generated TTS output.
-    if (targetNode?.type === CanvasNodeType.Audio && targetNode.metadata?.content && targetNode.metadata.sourceType !== "tts" && !inputs.some((input) => input.type === "audio")) {
+    if (targetNode?.type === CanvasNodeType.Audio && (targetNode.metadata?.content || targetNode.metadata?.mediaId || targetNode.metadata?.storageKey) && targetNode.metadata.sourceType !== "tts" && !inputs.some((input) => input.type === "audio")) {
         const audio = readReferenceAudio(targetNode);
         if (audio) inputs.push({ nodeId: targetNode.id, type: "audio", title: targetNode.title, audio });
     }
@@ -222,9 +248,17 @@ export function buildNodeResponseMessages(context: NodeGenerationContext): AiTex
     ];
 }
 
-export async function hydrateNodeGenerationContext(context: NodeGenerationContext) {
+export async function hydrateNodeGenerationContext(context: NodeGenerationContext, options?: { allowStructuredMedia?: boolean }) {
     const { imageToDataUrl } = await import("@/services/image-storage");
-    return { ...context, referenceImages: await Promise.all(context.referenceImages.map(async (image) => ({ ...image, dataUrl: await imageToDataUrl(image) }))) };
+    return {
+        ...context,
+        referenceImages: await Promise.all(context.referenceImages.map(async (image) => {
+            if (options?.allowStructuredMedia && image.mediaId) return image;
+            const dataUrl = await imageToDataUrl(image);
+            if (!dataUrl) throw new Error("参考图片无法恢复，请重新加载素材后再试");
+            return { ...image, dataUrl };
+        })),
+    };
 }
 
 export function restoreVideoGenerationSnapshot(
@@ -301,26 +335,26 @@ function readNodeTextInput(node: CanvasNodeData) {
 }
 
 function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
-    if (!node.metadata?.content) return null;
+    if (!node.metadata?.content && !node.metadata?.mediaId && !node.metadata?.storageKey) return null;
     const resourceKind = node.type === CanvasNodeType.Image || node.type === CanvasNodeType.ScriptAsset ? "image" : getNodeDefinition(node.type)?.resource?.(node)?.kind;
     if (resourceKind !== "image") return null;
     return {
         id: node.id,
         name: `${node.title || node.id}.png`,
         type: node.metadata.mimeType || "image/png",
-        dataUrl: node.metadata.content,
+        dataUrl: node.metadata.content || "",
         storageKey: node.metadata.storageKey,
         ...(node.metadata.mediaId ? { mediaId: node.metadata.mediaId } : {}),
     };
 }
 
 function readReferenceVideo(node: CanvasNodeData): ReferenceVideo | null {
-    if (node.type !== CanvasNodeType.Video || !node.metadata?.content) return null;
+    if (node.type !== CanvasNodeType.Video || (!node.metadata?.content && !node.metadata?.mediaId && !node.metadata?.storageKey)) return null;
     return {
         id: node.id,
         name: `${node.title || node.id}.mp4`,
         type: node.metadata.mimeType || "video/mp4",
-        url: node.metadata.content,
+        url: node.metadata.content || "",
         storageKey: node.metadata.storageKey,
         ...(node.metadata.mediaId ? { mediaId: node.metadata.mediaId } : {}),
         bytes: node.metadata.bytes,
@@ -331,12 +365,12 @@ function readReferenceVideo(node: CanvasNodeData): ReferenceVideo | null {
 }
 
 function readReferenceAudio(node: CanvasNodeData): ReferenceAudio | null {
-    if (node.type !== CanvasNodeType.Audio || !node.metadata?.content) return null;
+    if (node.type !== CanvasNodeType.Audio || (!node.metadata?.content && !node.metadata?.mediaId && !node.metadata?.storageKey)) return null;
     return {
         id: node.id,
         name: node.title || `${node.id}.mp3`,
         type: node.metadata.mimeType || "audio/mpeg",
-        url: node.metadata.content,
+        url: node.metadata.content || "",
         storageKey: node.metadata.storageKey,
         mediaId: node.metadata.mediaId,
         durationMs: node.metadata.durationMs,

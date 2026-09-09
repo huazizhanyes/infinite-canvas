@@ -40,6 +40,12 @@ export type CanvasVideoLedgerRow = {
     quality: string;
     duration: number;
     outputDuration?: number | null;
+    resultUrl?: string | null;
+    serverStorageKey?: string | null;
+    storageType?: "local" | "oss" | null;
+    mimeType?: string | null;
+    width?: number | null;
+    height?: number | null;
     promptPreview?: string;
     parameters?: Record<string, unknown>;
     referenceCounts?: { images: number; videos: number; audios: number };

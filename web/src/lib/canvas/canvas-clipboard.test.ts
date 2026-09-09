@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { arrangePastedCanvasNodes, prepareCanvasNodeForClipboard, remapCanvasClipboardConnections, selectCanvasClipboardConnections } from "./canvas-clipboard";
+import { arrangePastedCanvasNodes, prepareCanvasNodeForClipboard, prepareCanvasNodeForDuplicate, remapCanvasClipboardConnections, selectCanvasClipboardConnections } from "./canvas-clipboard";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const connections = [
@@ -78,6 +78,66 @@ describe("prepareCanvasNodeForClipboard", () => {
         expect(copied.metadata?.status).toBe("success");
         expect(copied.metadata?.content).toBe("https://old.example/video.mp4");
         expect(copied.metadata?.mediaId).toBe("old-media");
+    });
+});
+
+describe("prepareCanvasNodeForDuplicate", () => {
+    it("clears a completed video while preserving its setup and references", () => {
+        const referenceSlots = [{ slotId: "image:image-a", sourceNodeId: "image-a", mediaId: "reference-media", mediaType: "image" as const, order: 0, status: "ready" as const }];
+        const duplicated = prepareCanvasNodeForDuplicate({
+            id: "video",
+            type: CanvasNodeType.Video,
+            title: "视频",
+            position: { x: 10, y: 20 },
+            width: 320,
+            height: 240,
+            metadata: {
+                prompt: "人物向前走",
+                model: "video-model",
+                referenceOrder: ["image-a"],
+                referenceSlots,
+                status: "success",
+                content: "https://old.example/video.mp4",
+                videoTaskId: "task-1",
+                videoProvider: "canvas-video",
+                videoResultUrl: "https://old.example/video.mp4",
+                videoServerStorageKey: "generated/old.mp4",
+                serverStorageKey: "generated/old.mp4",
+                mediaId: "old-media",
+                videoProgress: 100,
+                durationMs: 5000,
+            },
+        });
+
+        expect(duplicated.metadata).toMatchObject({
+            prompt: "人物向前走",
+            model: "video-model",
+            referenceOrder: ["image-a"],
+            referenceSlots,
+            status: "idle",
+        });
+        expect(duplicated.metadata?.content).toBeUndefined();
+        expect(duplicated.metadata?.videoTaskId).toBeUndefined();
+        expect(duplicated.metadata?.videoResultUrl).toBeUndefined();
+        expect(duplicated.metadata?.videoServerStorageKey).toBeUndefined();
+        expect(duplicated.metadata?.serverStorageKey).toBeUndefined();
+        expect(duplicated.metadata?.mediaId).toBeUndefined();
+        expect(duplicated.metadata?.videoProgress).toBeUndefined();
+        expect(duplicated.metadata?.durationMs).toBeUndefined();
+    });
+
+    it("does not change completed non-video nodes", () => {
+        const image = prepareCanvasNodeForDuplicate({
+            id: "image",
+            type: CanvasNodeType.Image,
+            title: "图片",
+            position: { x: 0, y: 0 },
+            width: 100,
+            height: 100,
+            metadata: { content: "https://old.example/image.png", status: "success", mediaId: "image-media" },
+        });
+
+        expect(image.metadata).toMatchObject({ content: "https://old.example/image.png", status: "success", mediaId: "image-media" });
     });
 });
 

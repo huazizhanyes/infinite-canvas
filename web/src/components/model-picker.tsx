@@ -1,10 +1,13 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { Tooltip } from "antd";
-import { BadgeCheck, Bot, Boxes, BrainCircuit, CircleHelp, Clock3, Clapperboard, Code2, Cpu, Image, MessageSquareCode, Mic, Sparkles, WandSparkles } from "lucide-react";
+import { Popover, Tooltip } from "antd";
+import { Bot, Boxes, BrainCircuit, CircleHelp, Clapperboard, Code2, Cpu, Image, MessageSquareCode, Mic, Sparkles, Star, WandSparkles } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { modelIconOf, modelOptionLabel, modelOptionName, selectableModelsByCapability, videoCapabilitiesOf, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { canvasThemes } from "@/lib/canvas-theme";
+import { decodeChannelModel, modelIconOf, modelOptionLabel, modelOptionName, selectableModelsByCapability, useConfigStore, videoCapabilitiesOf, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { useThemeStore } from "@/stores/use-theme-store";
+import { markCanvasVideoModel, unmarkCanvasVideoModel } from "@/services/api/canvas-video";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -21,9 +24,12 @@ type ModelPickerProps = {
 export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, compactVideo = false }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
-    const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
+    const options = useMemo(() => {
+        const base = Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model))));
+        return sortVideoModelsByMark(base, config);
+    }, [capability, config, value]);
     const current = value || "";
-    const currentLabel = current ? modelOptionLabel(config, current) : placeholder;
+    const currentLabel = current ? displayedModelName(config, current) : placeholder;
 
     useEffect(() => {
         const closeOtherPicker = (event: Event) => {
@@ -49,7 +55,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                     "canvas-composer-model-picker h-8 w-fit max-w-full gap-1.5 rounded-md border border-input bg-transparent px-2 text-xs font-normal shadow-none transition-colors",
                     fullWidth ? "w-full min-w-0 justify-start" : "min-w-[9rem] justify-start",
                     compactVideo
-                        ? "!w-[160px] !min-w-0 !max-w-[160px] !flex-none justify-start !shadow-none focus-visible:!border-transparent focus-visible:!outline-none focus-visible:!ring-0 data-[state=open]:!border-transparent data-[state=open]:!shadow-none data-[state=open]:!ring-0 dark:!bg-transparent dark:hover:!bg-transparent"
+                        ? "!w-[190px] !min-w-0 !max-w-[190px] !flex-none justify-start !shadow-none focus-visible:!border-transparent focus-visible:!outline-none focus-visible:!ring-0 data-[state=open]:!border-transparent data-[state=open]:!shadow-none data-[state=open]:!ring-0 dark:!bg-transparent dark:hover:!bg-transparent"
                         : "data-[state=open]:border-ring data-[state=open]:ring-2 data-[state=open]:ring-ring/20",
                     className,
                 )}
@@ -77,8 +83,9 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                         <SelectItem
                             key={model}
                             value={model}
-                            textValue={modelOptionLabel(config, model)}
-                            className="my-1 w-full rounded-none border-0 border-b border-white/12 py-1.5 first:mt-0 last:mb-0 data-[state=checked]:border-b-sky-300/35 data-[state=checked]:bg-sky-400/12 data-[state=checked]:shadow-[inset_3px_0_0_rgba(56,189,248,.95)] [&>span:last-child]:min-w-0 [&>span:last-child]:w-full"
+                            hideIndicator={Boolean(videoCapabilitiesOf(config, model))}
+                            textValue={displayedModelName(config, model)}
+                            className="my-1 w-full rounded-none border-0 border-b border-white/12 py-1.5 !pr-1.5 first:mt-0 last:mb-0 data-[state=checked]:border-b-sky-300/35 data-[state=checked]:bg-sky-400/12 data-[state=checked]:shadow-[inset_3px_0_0_rgba(56,189,248,.95)] [&>span:last-child]:min-w-0 [&>span:last-child]:w-full"
                         >
                             <ModelLabel config={config} model={model} />
                         </SelectItem>
@@ -93,27 +100,82 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     );
 }
 
+/** 已标记的模型排在最前，其余保持原有顺序（sort 稳定排序）。 */
+export function sortVideoModelsByMark(models: string[], config: AiConfig): string[] {
+    return [...models].sort((left, right) => Number(Boolean(videoCapabilitiesOf(config, right)?.marked)) - Number(Boolean(videoCapabilitiesOf(config, left)?.marked)));
+}
+
 function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
     const label = capability === "image" ? "生图" : capability === "video" ? "视频" : capability === "text" ? "文本" : capability === "audio" ? "音频" : "";
     if (capability && config.models.length) return `请先在渠道里为${label}指定模型`;
     return config.models.length ? `暂无匹配的${label}模型` : "请先到配置里添加渠道和模型";
 }
 
+function displayedModelName(config: AiConfig, model: string) {
+    const video = videoCapabilitiesOf(config, model);
+    return video?.displayBaseName?.trim() || video?.displayName?.trim() || modelOptionLabel(config, model);
+}
+
 function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
     const video = videoCapabilitiesOf(config, model);
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const setVideoModelMarked = useConfigStore((state) => state.setVideoModelMarked);
+    const [markPending, setMarkPending] = useState(false);
     if (video) {
-        const name = `${video.displayBaseName || video.displayName}${video.faceFriendly ? " · 不卡人脸" : ""}`;
-        const suffix = video.displaySuffix?.trim();
-        return (
-            <span className="grid w-full min-w-0 grid-cols-[32px_minmax(0,1fr)] items-center gap-x-2.5 gap-y-0" aria-label={video.displayName}>
+        const name = displayedModelName(config, model);
+        const toggleMark = async (event: React.MouseEvent) => {
+            event.stopPropagation();
+            event.preventDefault();
+            if (markPending) return;
+            const decoded = decodeChannelModel(model);
+            const modelKey = decoded ? decoded.model : model;
+            const next = !video.marked;
+            setMarkPending(true);
+            setVideoModelMarked(model, next);
+            try {
+                if (next) await markCanvasVideoModel(config, modelKey, video.displayName);
+                else await unmarkCanvasVideoModel(config, modelKey);
+            } catch {
+                setVideoModelMarked(model, !next);
+            } finally {
+                setMarkPending(false);
+            }
+        };
+        const primaryRow = (
+            <span className="grid min-h-9 w-full min-w-0 grid-cols-[32px_minmax(0,1fr)_auto_auto] items-center gap-x-2.5" aria-label={name}>
                 <ModelIcon config={config} model={model} large />
                 <span className="relative min-w-0 flex-1">
-                    <span className="block truncate pr-20 text-[13px] font-medium leading-4">{name}</span>
-                    {video.freePromotion?.active ? <span className="mt-0.5 block truncate text-[10px] font-medium leading-3.5 text-emerald-500">{video.freePromotion.label || "限时免费"}</span> : suffix ? <span className="mt-0.5 block truncate text-[10px] leading-3.5 opacity-55">{suffix}</span> : null}
-                    <VideoBillingBadge video={video} />
+                    <span className="block truncate text-[13px] font-medium leading-4">{name}</span>
                 </span>
-                <ModelHealthSummary video={video} />
+                <VideoBillingBadge video={video} />
+                <button
+                    type="button"
+                    className="group flex size-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-amber-400/10"
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={toggleMark}
+                    title={video.marked ? "取消标记" : "标记该模型，下次置顶显示"}
+                    aria-label={video.marked ? "取消标记" : "标记该模型"}
+                >
+                    <Star className={cn("size-3.5 transition-colors group-hover:!text-yellow-200", video.marked ? "!text-yellow-300" : "!text-amber-400")} fill={video.marked ? "currentColor" : "none"} />
+                </button>
             </span>
+        );
+
+        return (
+            <Popover
+                trigger="hover"
+                placement="rightTop"
+                align={{ offset: [14, 0] }}
+                arrow={false}
+                zIndex={1300}
+                mouseEnterDelay={0.12}
+                mouseLeaveDelay={0.16}
+                content={<ModelDetail video={video} config={config} model={model} />}
+                styles={{ container: { background: theme.toolbar.panel, border: `1px solid ${theme.toolbar.border}`, borderRadius: 8, boxShadow: "0 16px 36px rgba(0, 0, 0, .28)" }, content: { padding: 0, overflow: "hidden" } }}
+            >
+                {primaryRow}
+            </Popover>
         );
     }
     return (
@@ -138,7 +200,40 @@ function ModelIcon({ config, model, large = false }: { config: AiConfig; model: 
     return <Icon className={`${sizeClass} shrink-0 opacity-70`} />;
 }
 
+function ModelDetail({ video, config, model }: { video: NonNullable<ReturnType<typeof videoCapabilitiesOf>>; config: AiConfig; model: string }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const name = displayedModelName(config, model);
+    const suffix = video.displaySuffix?.trim();
+    const channelDescription = [video.routeLabel?.trim(), suffix].filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index).join(" · ") || "视频模型";
+    const durationLabel = formatVideoDurationRange(video.duration);
+    const ratioLabel = video.aspectRatios.length ? video.aspectRatios.join("、") : "不限";
+    const modeLabel = video.modes.length ? video.modes.map(videoModeLabel).join("、") : "未提供";
+
+    return (
+        <div className="w-[292px] max-w-[calc(100vw-32px)] p-3 text-xs" data-canvas-no-zoom style={{ color: theme.node.text }}>
+            <div className="flex min-w-0 items-start gap-2.5">
+                <ModelIcon config={config} model={model} large />
+                <div className="min-w-0 flex-1">
+                    <div className="break-words text-sm font-semibold leading-5" title={name}>{name}</div>
+                    <div className="mt-0.5 break-words text-[11px] leading-4" style={{ color: theme.node.muted }}>{channelDescription}</div>
+                </div>
+                <VideoBillingBadge video={video} />
+            </div>
+            {video.freePromotion?.active ? <div className="mt-2 rounded-md px-2 py-1 text-[11px] font-medium text-emerald-500" style={{ background: "rgba(16, 185, 129, .12)" }}>{video.freePromotion.label || "限时优惠"}</div> : null}
+            {video.displayNotice ? <div className="mt-2 rounded-md px-2 py-1 text-[11px]" style={{ color: theme.node.muted, background: theme.toolbar.activeBg }}>{video.displayNotice}</div> : null}
+            <div className="mt-3 grid gap-1.5 border-t pt-2.5 text-[11px]" style={{ borderColor: theme.toolbar.border, color: theme.node.muted }}>
+                <div className="flex items-start justify-between gap-3"><span className="shrink-0">输入上限</span><span className="whitespace-normal break-words text-right" style={{ color: theme.node.text }}>图片 {video.inputImagesMax} · 视频 {video.inputVideosMax} · 音频 {video.inputAudiosMax}</span></div>
+                <div className="flex items-start justify-between gap-3"><span className="shrink-0">支持画幅</span><span className="whitespace-normal break-words text-right" style={{ color: theme.node.text }}>{ratioLabel}</span></div>
+                <div className="flex items-start justify-between gap-3"><span className="shrink-0">生成时长</span><span className="whitespace-normal break-words text-right" style={{ color: theme.node.text }}>{durationLabel}</span></div>
+                <div className="flex items-start justify-between gap-3"><span className="shrink-0">生成模式</span><span className="max-w-[190px] whitespace-normal break-words text-right" style={{ color: theme.node.text }}>{modeLabel}</span></div>
+            </div>
+            <ModelHealthSummary video={video} />
+        </div>
+    );
+}
+
 function ModelHealthSummary({ video }: { video: NonNullable<ReturnType<typeof videoCapabilitiesOf>> }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const stats = video.statsRecent3;
     const recent = video.recent3;
     const successRate = stats?.successRate;
@@ -147,7 +242,7 @@ function ModelHealthSummary({ video }: { video: NonNullable<ReturnType<typeof vi
     const durationBaselineSeconds = 8 * 60;
     const durationPercent = avgDuration == null ? 0 : avgDuration <= durationBaselineSeconds ? 100 : Math.max(8, Math.min(100, durationBaselineSeconds / avgDuration * 100));
     const durationColor = avgDuration == null || avgDuration <= durationBaselineSeconds ? "bg-emerald-400" : avgDuration <= 12 * 60 ? "bg-amber-400" : "bg-red-400";
-    const durationIconColor = avgDuration == null || avgDuration <= durationBaselineSeconds ? "text-emerald-300" : avgDuration <= 12 * 60 ? "text-amber-300" : "text-red-300";
+    const durationValueColor = avgDuration == null || avgDuration <= durationBaselineSeconds ? "text-emerald-300" : avgDuration <= 12 * 60 ? "text-amber-300" : "text-red-300";
     const formatDuration = (seconds: number | null | undefined) => {
         if (seconds == null || !Number.isFinite(seconds)) return "暂无数据";
         if (seconds < 60) return `${Number(seconds.toFixed(1))} 秒`;
@@ -164,35 +259,37 @@ function ModelHealthSummary({ video }: { video: NonNullable<ReturnType<typeof vi
         return `${minutes}′${String(wholeSeconds % 60).padStart(2, "0")}″`;
     };
     return (
-        <span className="col-span-2 mt-1.5 grid w-full gap-1 border-t border-white/10 pt-1.5 text-[10px] leading-3">
+        <span className="col-span-2 mt-3 grid w-full gap-1 border-t pt-2.5 text-[10px] leading-3" style={{ borderColor: theme.toolbar.border }}>
             <ModelHealthMetric
-                icon={BadgeCheck}
-                iconClassName={successPercent < 60 ? "text-red-300" : "text-emerald-300"}
+                label="成功率"
                 value={`${Math.round(successPercent)}%`}
+                valueClassName={successPercent < 60 ? "text-red-300" : "text-emerald-300"}
                 percent={successPercent}
                 barClassName={successPercent < 60 ? "bg-red-400" : "bg-emerald-400"}
                 title={`成功率：${Math.round(successPercent)}% · 最近${stats?.sampleCount || 0}条任务：${stats?.successCount || 0}次成功，${stats?.failedCount || 0}次失败`}
+                theme={theme}
             />
             <ModelHealthMetric
-                icon={Clock3}
-                iconClassName={durationIconColor}
+                label="平均耗时"
                 value={formatDurationCompact(avgDuration)}
+                valueClassName={durationValueColor}
                 percent={durationPercent}
                 barClassName={durationColor}
                 title={avgDuration == null ? "平均耗时：最近3条任务中没有成功样本" : `平均耗时：${formatDuration(avgDuration)} · 最近3条任务中的${recent?.sampleCount || 0}次成功样本`}
+                theme={theme}
             />
         </span>
     );
 }
 
-function ModelHealthMetric({ icon: Icon, iconClassName, value, percent, barClassName, title }: { icon: typeof BadgeCheck; iconClassName: string; value: string; percent: number; barClassName: string; title: string }) {
+function ModelHealthMetric({ label, value, valueClassName, percent, barClassName, title, theme }: { label: string; value: string; valueClassName: string; percent: number; barClassName: string; title: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     return (
-        <span className="grid w-full grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-1">
-            <span className="flex w-full min-w-0 items-center gap-1 font-medium tabular-nums text-white/80">
-                <Icon aria-hidden className={cn("size-3.5 shrink-0", iconClassName)} />
-                <span className="truncate">{value}</span>
+        <span className="grid w-full grid-cols-[108px_minmax(0,1fr)_auto] items-center gap-1">
+            <span className="flex w-full min-w-0 items-center justify-between gap-1.5 font-medium tabular-nums">
+                <span style={{ color: theme.node.muted }}>{label}</span>
+                <span className={valueClassName}>{value}</span>
             </span>
-            <span className="h-1 min-w-0 overflow-hidden rounded-full bg-white/10"><span className={cn("block h-full rounded-full transition-[width] duration-300", barClassName)} style={{ width: `${percent}%` }} /></span>
+            <span className="h-1 min-w-0 overflow-hidden rounded-full" style={{ background: theme.node.stroke }}><span className={cn("block h-full rounded-full transition-[width] duration-300", barClassName)} style={{ width: `${percent}%` }} /></span>
             <Tooltip
                 title={title}
                 placement="top"
@@ -208,7 +305,7 @@ function ModelHealthMetric({ icon: Icon, iconClassName, value, percent, barClass
                     },
                 }}
             >
-                <span className="flex size-4 shrink-0 cursor-help items-center justify-center rounded-full text-white/45 transition-colors hover:bg-white/10 hover:text-white/80" aria-label={title}>
+                <span className="flex size-4 shrink-0 cursor-help items-center justify-center rounded-full transition-colors hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.muted }} aria-label={title}>
                     <CircleHelp aria-hidden className="size-3.5" />
                 </span>
             </Tooltip>
@@ -219,13 +316,54 @@ function ModelHealthMetric({ icon: Icon, iconClassName, value, percent, barClass
 function VideoBillingBadge({ video }: { video: NonNullable<ReturnType<typeof videoCapabilitiesOf>> }) {
     const units = Array.from(new Set(video.qualities.map((item) => item.pricing.type === "fixed_total" ? "task" : item.pricing.type === "per_second" ? "second" : null).filter((unit): unit is "task" | "second" => Boolean(unit))));
     if (!units.length) return null;
-    const label = units.length === 1 ? units[0] === "task" ? "按条" : "按秒" : "按所选清晰度";
+    const label = videoBillingBadgeLabel(video);
     const tone = units.length === 1 && units[0] === "task"
         ? "border-amber-300/30 bg-amber-300/12 text-amber-200"
         : units.length === 1
             ? "border-cyan-300/30 bg-cyan-300/12 text-cyan-200"
             : "border-violet-300/30 bg-violet-300/12 text-violet-200";
-    return <span className={cn("pointer-events-none absolute -right-3 top-0 rounded border px-1.5 py-0.5 text-[10px] font-medium leading-3", tone)} title={units.length === 1 ? `${label}计费` : "不同清晰度可能使用不同计费方式"}>{label}</span>;
+    return <span className={cn("pointer-events-none shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium leading-3 tabular-nums", tone)} title={units.length === 1 ? `普通价 ${label}` : "不同清晰度可能使用不同计费方式"}>{label}</span>;
+}
+
+export function videoBillingBadgeLabel(video: NonNullable<ReturnType<typeof videoCapabilitiesOf>>) {
+    const declaredUnits = Array.from(new Set(video.qualities.map((item) => item.pricing.type === "fixed_total" ? "task" : item.pricing.type === "per_second" ? "second" : null).filter((unit): unit is "task" | "second" => Boolean(unit))));
+    const entries = video.qualities.map((item) => {
+        const unit = item.pricing.type === "fixed_total" ? "task" : item.pricing.type === "per_second" ? "second" : null;
+        const micros = Number(item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0);
+        return unit && Number.isFinite(micros) && micros > 0 ? { unit, micros } : null;
+    }).filter((item): item is { unit: "task" | "second"; micros: number } => Boolean(item));
+    const units = Array.from(new Set(entries.map((item) => item.unit)));
+    if (!entries.length && declaredUnits.length === 1) return declaredUnits[0] === "task" ? "按条" : "按秒";
+    if (!entries.length) return units.length ? "按所选清晰度" : "";
+    return units.map((unit) => {
+        const prices = entries.filter((item) => item.unit === unit).map((item) => item.micros);
+        const minimum = Math.min(...prices);
+        return `¥${formatVideoBadgePrice(minimum / 1_000_000)}/${unit === "task" ? "条" : "秒"}`;
+    }).join(" · ");
+}
+
+function formatVideoBadgePrice(value: number) {
+    return value.toFixed(2);
+}
+
+function formatVideoDurationRange(duration: NonNullable<NonNullable<ReturnType<typeof videoCapabilitiesOf>>["duration"]>) {
+    const options = duration.options?.filter((value) => Number.isFinite(value) && value > 0) || [];
+    if (options.length) return options.map((value) => `${value}s`).join("、");
+    const min = duration.min;
+    const max = duration.max;
+    if (min != null && max != null) return min === max ? `${min}s` : `${min}-${max}s`;
+    if (min != null) return `${min}s 起`;
+    if (max != null) return `最长 ${max}s`;
+    return "未提供";
+}
+
+function videoModeLabel(mode: string) {
+    if (mode === "text2video") return "文生视频";
+    if (mode === "image2video") return "全能参考";
+    if (mode === "reference2video") return "全能参考";
+    if (mode === "frames2video") return "首尾帧";
+    if (mode === "first-frame-to-video") return "首帧生视频";
+    return mode || "视频模式";
 }
 
 function resolveModelIcons(model: string) {

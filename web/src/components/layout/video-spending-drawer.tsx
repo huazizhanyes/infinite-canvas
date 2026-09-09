@@ -90,7 +90,7 @@ function LedgerSummary({ ledger }: { ledger: CanvasVideoLedger | null }) {
     return <div className="mb-5 grid grid-cols-3 divide-x divide-stone-200 border-y border-stone-200 py-3 dark:divide-stone-800 dark:border-stone-800">{items.map(([label, value]) => <div key={label} className="px-3 first:pl-0 last:pr-0"><div className="text-xs text-stone-500">{label}</div><strong className="mt-1 block text-base sm:text-lg">{formatCnyMicros(value, "")}</strong></div>)}</div>;
 }
 
-function SpendingRow({ row, index }: { row: CanvasVideoLedgerRow; index: number }) {
+export function SpendingRow({ row, index }: { row: CanvasVideoLedgerRow; index: number }) {
     const status = taskStatus(row);
     const refs = row.referenceCounts || { images: 0, videos: 0, audios: 0 };
     const charged = Number(row.chargedAmountMicros || 0);
@@ -114,6 +114,11 @@ function SpendingRow({ row, index }: { row: CanvasVideoLedgerRow; index: number 
             <ChevronDown className="size-4 text-stone-400 transition-transform group-open:rotate-180" />
         </summary>
         <div className="border-t border-stone-200 bg-stone-500/[0.035] px-3 py-3 text-xs dark:border-stone-800">
+            {row.status === "completed" && row.resultUrl ? (
+                <div className="mb-3 overflow-hidden rounded-md bg-black">
+                    <video src={row.resultUrl} controls playsInline preload="none" aria-label={`任务 ${row.taskId} 的生成视频`} className="aspect-video max-h-[420px] w-full object-contain" />
+                </div>
+            ) : row.status === "completed" ? <div className="mb-3 rounded-md bg-stone-500/10 px-3 py-2 text-stone-500">视频结果暂不可用</div> : null}
             <div className="grid gap-x-6 sm:grid-cols-2">
                 <DetailRow label="普通原价" value={formatCnyMicros(row.originalAmountMicros || row.quotedAmountMicros, "")} />
                 <DetailRow label="优惠节省" value={formatCnyMicros(row.savingsMicros || "0", "")} />

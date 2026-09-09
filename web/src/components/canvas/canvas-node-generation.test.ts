@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildNodeGenerationContext, restoreVideoGenerationSnapshot } from "./canvas-node-generation";
+import { buildNodeGenerationContext, restoreVideoGenerationSnapshot, videoReferenceAudioDurationError } from "./canvas-node-generation";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { buildNodeMentionReferences, serializeCanvasResourceMention, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import type { ImageAsset } from "@/stores/use-asset-store";
@@ -15,7 +15,31 @@ const target: CanvasNodeData = {
     metadata: {},
 };
 
+describe("video reference audio duration", () => {
+    const audio = (durationMs?: number) => ({ id: "audio", name: "参考音频.wav", type: "audio/wav", url: "blob:audio", durationMs });
+
+    it("allows a reference audio of exactly 15 seconds", async () => {
+        await expect(videoReferenceAudioDurationError([audio(15_000)])).resolves.toBeNull();
+    });
+
+    it("blocks any single reference audio longer than 15 seconds", async () => {
+        await expect(videoReferenceAudioDurationError([audio(15_001)])).resolves.toContain("单个参考音频不能超过 15 秒");
+    });
+
+    it("measures legacy audio without saved duration before allowing submission", async () => {
+        await expect(videoReferenceAudioDurationError([audio()], async () => 16_000)).resolves.toContain("时长为 16 秒");
+    });
+});
+
 describe("buildNodeGenerationContext asset mentions", () => {
+    it("treats a synced mediaId-only image as a valid reference", () => {
+        const video: CanvasNodeData = { ...target, id: "video", type: CanvasNodeType.Video, title: "视频", metadata: {} };
+        const image: CanvasNodeData = { ...target, id: "image", title: "图片", metadata: { mediaId: "media-1", mediaStatus: "synced", mimeType: "image/png" } };
+        const references = buildNodeMentionReferences(video, [video, image], [{ id: "line", fromNodeId: image.id, toNodeId: video.id }]);
+        const context = buildNodeGenerationContext(video.id, [video, image], [{ id: "line", fromNodeId: image.id, toNodeId: video.id }], "@图片1 让图片动起来", references);
+        expect(context.referenceImages).toEqual([expect.objectContaining({ id: image.id, mediaId: "media-1", dataUrl: "" })]);
+    });
+
     it("passes connected script asset images as generation references", () => {
         const assetNode: CanvasNodeData = {
             id: "script-asset-1",

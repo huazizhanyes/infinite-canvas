@@ -64,6 +64,26 @@ export async function resolvePersistedMediaUrl(mediaId?: string, storageKey?: st
     return resolveCanvasMediaUrl(mediaId, fallback);
 }
 
+export async function readAudioDurationMs(url: string) {
+    return new Promise<number | undefined>((resolve) => {
+        const audio = document.createElement("audio");
+        let settled = false;
+        const done = () => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            audio.onloadedmetadata = null;
+            audio.onerror = null;
+            resolve(Number.isFinite(audio.duration) && audio.duration > 0 ? Math.round(audio.duration * 1000) : undefined);
+        };
+        const timer = window.setTimeout(done, 8_000);
+        audio.preload = "metadata";
+        audio.onloadedmetadata = done;
+        audio.onerror = done;
+        audio.src = url;
+    });
+}
+
 export async function getMediaBlob(storageKey: string) {
     return store.getItem<Blob>(storageKey);
 }

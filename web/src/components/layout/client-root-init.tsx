@@ -105,6 +105,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 modeRules: Array.isArray(item.modeRules || item.mode_rules) ? (item.modeRules || item.mode_rules) : [],
                 faceFriendly: Boolean(item.faceFriendly || item.face_friendly || item.channel === "59" && item.upstream_model === "minimax-h3"),
                 displayNotice: item.displayNotice || item.display_notice || null,
+                marked: Boolean(item.marked),
                 freePromotion: item.free_promotion || null,
                 statsRecent3: item.statsRecent3 || null,
                 recent3: item.recent3 || null,

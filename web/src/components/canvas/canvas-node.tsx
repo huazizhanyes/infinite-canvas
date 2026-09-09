@@ -736,11 +736,18 @@ function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" |
     );
 }
 
+/** 精简用户可见的错误文案：肖像类错误给出简短中文提示，其余保留原文（原文可在悬停 title 中查看）。 */
+function friendlyVideoError(details: string | undefined) {
+    if (!details) return "生成失败";
+    if (/肖像|肖像保护|portrait/i.test(details)) return "参考图涉及肖像保护，请更换参考图，或改用文字生视频";
+    return details;
+}
+
 function ErrorContent({ node, theme, onRetry, onRetryOriginal }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry" | "onRetryOriginal">) {
     const canRetryOriginal = node.type === CanvasNodeType.Video && node.metadata?.videoProvider === "canvas-video" && Boolean(node.metadata.videoTaskId);
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-2 px-4 text-center" style={{ transform: `scale(${imageContentScale(node)})` }}>
-            <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || "生成失败"}</div>
+            <div className="text-xs leading-5 text-red-300" title={node.metadata?.errorDetails}>{friendlyVideoError(node.metadata?.errorDetails)}</div>
             <div className="flex flex-wrap items-center justify-center gap-1.5">
                 {canRetryOriginal ? (
                     <button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition hover:bg-white/5" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onClick={(event) => { event.stopPropagation(); onRetryOriginal?.(node); }} onMouseDown={(event) => event.stopPropagation()}>

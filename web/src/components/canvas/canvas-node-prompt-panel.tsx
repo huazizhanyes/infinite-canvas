@@ -42,6 +42,7 @@ type CanvasNodePromptPanelProps = {
     onReferenceSelect?: (nodeId: string, reference: CanvasResourceReference) => boolean | void;
     onImageSettingsOpenChange?: (open: boolean) => void;
     selectedText?: string;
+    mediaHydrationState?: "loading" | "ready" | "failed";
 };
 
 const TEXT_ACTIONS: Array<{ value: CanvasTextOperation; label: string; instruction: string }> = [
@@ -54,7 +55,7 @@ const TEXT_ACTIONS: Array<{ value: CanvasTextOperation; label: string; instructi
     { value: "custom", label: "自定义", instruction: "" },
 ];
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], connectionPreviews = [], onRemoveConnection, onFocusReferenceNode, onReferenceSelect, onImageSettingsOpenChange, selectedText = "" }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], connectionPreviews = [], onRemoveConnection, onFocusReferenceNode, onReferenceSelect, onImageSettingsOpenChange, selectedText = "", mediaHydrationState = "ready" }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -90,6 +91,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const [quoteState, setQuoteState] = useState<"idle" | "loading" | "ready" | "error">("idle");
     const [quoteError, setQuoteError] = useState("");
     const quoteEligible = mode === "image" || mode === "video" || (mode === "audio" && !isVoiceDesign && Boolean(prompt.trim()));
+    const videoHydrationBlocked = mode === "video" && mediaHydrationState !== "ready";
     const activeReferences = activeGenerationReferences(mode, prompt, resolvedMentionReferences);
     const promptCharacterCount = mode === "video" ? countCanvasPromptCharacters(prompt) : 0;
     const promptCharacterWarning = mode === "video" ? canvasPromptCharacterWarning(videoCapabilities?.channel, promptCharacterCount) : null;
@@ -117,7 +119,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     }, [config.videoMode, mode, node.id, onConfigChange, prompt, resolvedMentionReferences, videoCapabilities]);
 
     useEffect(() => {
-        if (mode === "text" || !official || !connection || !quoteEligible) {
+        if (mode === "text" || !official || !connection || !quoteEligible || videoHydrationBlocked) {
             setQuote(null);
             setQuoteState("idle");
             setQuoteError("");
@@ -142,7 +144,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             window.clearTimeout(timer);
             controller.abort();
         };
-    }, [connection, mode, official, quoteEligible, stableQuotePayload]);
+    }, [connection, mode, official, quoteEligible, stableQuotePayload, videoHydrationBlocked]);
 
     const quoteBlocked = mode !== "text" && official && quoteEligible && (quoteState !== "ready" || !quote?.canSubmit);
     const quoteLabel = isVoiceDesign ? "免费" : mode === "text"
@@ -301,7 +303,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     type="primary"
                     className={`${isMediaComposer ? "!h-8 !w-8 !min-w-8 !rounded-full" : "!h-8 !w-8 !min-w-8 !rounded-md"} shrink-0 !p-0`}
                     danger={isRunning && !videoGenerationLocked}
-                    disabled={videoGenerationLocked || (!isRunning && (!prompt.trim() || quoteBlocked))}
+                    disabled={videoGenerationLocked || videoHydrationBlocked || (!isRunning && (!prompt.trim() || quoteBlocked))}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={videoGenerationLocked ? "视频生成中，不可暂停" : isRunning ? "停止生成" : "生成"}
                     icon={videoGenerationLocked ? <LoaderCircle className="size-3.5 animate-spin" /> : isRunning ? <Square className="size-3 fill-current" /> : <ArrowUp className="size-3.5" />}
@@ -354,6 +356,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     </>
                 ) : mode === "image" ? renderComposerToolbar(true) : undefined}
             />
+
+            {mode === "video" && mediaHydrationState === "failed" ? (
+                <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-red-400/30 bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-200">
+                    <span>参考素材恢复失败，请点击重新加载</span>
+                    <Button size="small" type="text" onClick={() => window.location.reload()}>重新加载</Button>
+                </div>
+            ) : null}
 
             {mode === "video" ? <PromptCharacterCount count={promptCharacterCount} color={theme.node.muted} warning={promptCharacterWarning} /> : null}
 

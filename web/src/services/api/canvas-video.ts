@@ -19,6 +19,8 @@ export type CanvasVideoTask = {
     aspectRatio: string;
     quality: string;
     duration: number;
+    createdAt?: string;
+    completedAt?: string | null;
     resultUrl?: string | null;
     serverStorageKey?: string | null;
     storageType?: "local" | "oss" | null;
@@ -73,6 +75,7 @@ export type CanvasVideoTaskEvent = {
 };
 
 export type CanvasVideoStoredResult = {
+    taskId: string;
     url: string;
     storageKey: string;
     bytes: number;
@@ -86,6 +89,7 @@ export type CanvasVideoStoredResult = {
     billingStatus?: string;
     pricingVersion?: number;
     routeLabel?: string;
+    completedAt?: string;
 };
 
 type CreateInput = {
@@ -189,6 +193,7 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
             const recovered = await listCanvasVideoTasks(config, { clientRequestId: input.clientRequestId }, signal).catch(() => null);
             const task = recovered?.find((item) => item.clientRequestId === input.clientRequestId);
             if (task) return task;
+            throw new CanvasVideoApiError("submission_unknown", "视频提交结果尚未确认，请勿重复提交，系统将按请求记录继续恢复", { clientRequestId: input.clientRequestId });
         }
         if (axios.isAxiosError(error) && error.response?.status === 409 && (error.response.data as any)?.code === "PRICE_CHANGED") {
             const payload = error.response.data as any;
@@ -252,10 +257,15 @@ function buildMediaReferenceSlots(images: ReferenceImage[], videos: ReferenceVid
 
 export async function listCanvasVideoTasks(config: AiConfig, params: Record<string, unknown> = {}, signal?: AbortSignal) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
-    const response = await axios.get<{ object: "list"; data: CanvasVideoTask[] }>(canvasVideoUrl(requestConfig, "/tasks"), {
-        headers: canvasVideoHeaders(requestConfig), params, signal,
-    });
-    return response.data.data || [];
+    try {
+        const response = await axios.get<{ object: "list"; data: CanvasVideoTask[] }>(canvasVideoUrl(requestConfig, "/tasks"), {
+            headers: canvasVideoHeaders(requestConfig), params, signal,
+        });
+        return response.data.data || [];
+    } catch (error) {
+        if (signal?.aborted) throw error;
+        throw classifyTaskQueryError(error);
+    }
 }
 
 export async function getCanvasVideoTask(config: AiConfig, taskId: string, signal?: AbortSignal) {
@@ -270,7 +280,7 @@ export async function getCanvasVideoTask(config: AiConfig, taskId: string, signa
         if (axios.isAxiosError(error)) {
             const status = error.response?.status;
             const retryable = !status || status === 408 || status === 429 || status >= 500 || error.code === "ECONNABORTED" || error.code === "ETIMEDOUT";
-            if (retryable) throw new CanvasVideoApiError("POLL_RETRYABLE", readCanvasVideoError(error, "视频任务查询暂时不可用"), { status });
+            if (retryable) throw new CanvasVideoApiError("transient_poll_error", "视频状态暂时不可用，正在自动恢复", { status });
         }
         throw new Error(readCanvasVideoError(error, "视频任务查询失败"));
     }
@@ -318,7 +328,7 @@ export async function waitForCanvasVideoTask(
             retryDelayMs = 10_000;
         } catch (error) {
             if (signal?.aborted) throw error;
-            if (error instanceof CanvasVideoApiError && error.code === "POLL_RETRYABLE") {
+            if (error instanceof CanvasVideoApiError && error.code === "transient_poll_error") {
                 await delay(retryDelayMs, signal);
                 retryDelayMs = Math.min(30_000, retryDelayMs * 2);
                 continue;
@@ -332,7 +342,11 @@ export async function waitForCanvasVideoTask(
         }
         if (task.status === "failed") {
             window.dispatchEvent(new CustomEvent("canvas-video-balance-changed"));
-            throw new Error(task.error?.message || "视频生成失败");
+            throw new CanvasVideoApiError("task_failed", task.error?.message || "视频生成失败", { errorCode: task.error?.code || undefined });
+        }
+        if (task.status === "submission_unknown" && task.billingStatus === "refunded") {
+            window.dispatchEvent(new CustomEvent("canvas-video-balance-changed"));
+            throw new CanvasVideoApiError("task_refunded", task.error?.message || "任务已被退款终止，请重新生成", { errorCode: task.error?.code || undefined });
         }
         await delay(10_000, signal);
     }
@@ -341,6 +355,7 @@ export async function waitForCanvasVideoTask(
 export function canvasVideoResult(task: CanvasVideoTask): CanvasVideoStoredResult {
     if (!task.resultUrl) throw new Error("视频任务已完成但没有可播放地址");
     return {
+        taskId: task.id,
         url: task.resultUrl,
         storageKey: task.serverStorageKey || "",
         bytes: 0,
@@ -354,6 +369,7 @@ export function canvasVideoResult(task: CanvasVideoTask): CanvasVideoStoredResul
         billingStatus: task.billingStatus,
         pricingVersion: task.pricingVersion,
         routeLabel: task.pricingSnapshot?.routeLabel,
+        completedAt: task.completedAt || undefined,
     };
 }
 
@@ -374,7 +390,7 @@ async function uploadAssets(
             if (!response.data.assetId) throw new Error("素材上传接口未返回 assetId");
             ids.push(response.data.assetId);
         } catch (error) {
-            throw new Error(readCanvasVideoError(error, `${kindLabel(kind)}上传失败`));
+            throw new CanvasVideoApiError("media_unavailable", `${kindLabel(kind)}无法恢复，请重新上传后重试`, { cause: readCanvasVideoError(error, "上传失败") });
         }
     }
     return ids;
@@ -393,7 +409,7 @@ async function referenceFile(reference: ReferenceImage | ReferenceVideo | Refere
             return response.blob();
         });
     }
-    if (!blob?.size) throw new Error(`${kindLabel(kind)}读取失败，请重新上传后重试`);
+    if (!blob?.size) throw new CanvasVideoApiError("media_unavailable", `${kindLabel(kind)}无法恢复，请重新上传后重试`);
     const fallbackType = kind === "image" ? "image/png" : kind === "video" ? "video/mp4" : "audio/mpeg";
     return new File([blob], reference.name || `reference.${extensionForMime(blob.type || fallbackType)}`, { type: blob.type || fallbackType });
 }
@@ -447,7 +463,16 @@ function stripReferenceMediaId<T extends { mediaId?: string }>(reference: T): T 
 }
 
 function isRequestTimeout(error: unknown) {
-    return axios.isAxiosError(error) && (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT" || String(error.message || "").toLowerCase().includes("timeout"));
+    return axios.isAxiosError(error) && ([502, 503, 504].includes(Number(error.response?.status)) || error.code === "ECONNABORTED" || error.code === "ETIMEDOUT" || String(error.message || "").toLowerCase().includes("timeout"));
+}
+
+function classifyTaskQueryError(error: unknown) {
+    if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const retryable = !status || status === 408 || status === 429 || status >= 500 || error.code === "ECONNABORTED" || error.code === "ETIMEDOUT";
+        if (retryable) return new CanvasVideoApiError("transient_poll_error", "视频状态暂时不可用，正在自动恢复", { status });
+    }
+    return new CanvasVideoApiError("task_query_failed", readCanvasVideoError(error, "视频任务查询失败"));
 }
 
 function kindLabel(kind: "image" | "video" | "audio") {
@@ -467,4 +492,25 @@ function delay(ms: number, signal?: AbortSignal) {
             reject(new DOMException("Aborted", "AbortError"));
         }, { once: true });
     });
+}
+
+export type CanvasVideoModelMarkItem = {
+    modelKey: string;
+    displayName: string | null;
+    createdAt: string;
+};
+
+export async function listCanvasVideoModelMarks(config: AiConfig, signal?: AbortSignal) {
+    const response = await axios.get<{ object: "list"; data: CanvasVideoModelMarkItem[] }>(canvasVideoUrl(config, "/models/marks"), { headers: canvasVideoHeaders(config), signal });
+    return response.data.data;
+}
+
+export async function markCanvasVideoModel(config: AiConfig, modelKey: string, displayName?: string | null) {
+    const response = await axios.put<{ marked: boolean; modelKey: string }>(canvasVideoUrl(config, `/models/marks/${encodeURIComponent(modelKey)}`), { displayName }, { headers: canvasVideoHeaders(config) });
+    return response.data;
+}
+
+export async function unmarkCanvasVideoModel(config: AiConfig, modelKey: string) {
+    const response = await axios.delete<{ marked: boolean; modelKey: string }>(canvasVideoUrl(config, `/models/marks/${encodeURIComponent(modelKey)}`), { headers: canvasVideoHeaders(config) });
+    return response.data;
 }
