@@ -103,7 +103,7 @@ export async function resolvePersistedImage(mediaId?: string, storageKey?: strin
         const resolutionKey = `${forceRefresh ? "refresh" : "load"}:${localKey || mediaId}`;
         const pending = pendingResolutions.get(resolutionKey);
         if (pending) return pending;
-        const resolution = resolveRemoteImage(mediaId, localKey);
+        const resolution = resolveRemoteImage(mediaId, localKey, fallback);
         pendingResolutions.set(resolutionKey, resolution);
         try {
             return await resolution;
@@ -179,8 +179,9 @@ function normalizedImageStorageKey(storageKey?: string, mediaId?: string) {
     return `${imageScopePrefix()}media-${encodeURIComponent(mediaId)}`;
 }
 
-async function resolveRemoteImage(mediaId: string, storageKey?: string): Promise<ResolvedImage> {
-    const remoteUrl = await resolveCanvasMediaUrl(mediaId, "");
+async function resolveRemoteImage(mediaId: string, storageKey?: string, fallback = ""): Promise<ResolvedImage> {
+    // 媒体记录不可用时回退到调用方已有的地址，避免把仍可显示的内容判定为丢失。
+    const remoteUrl = await resolveCanvasMediaUrl(mediaId, fallback);
     if (!remoteUrl) {
         failedMediaResolutions.add(mediaId);
         return { url: "", storageKey };

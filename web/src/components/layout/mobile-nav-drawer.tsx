@@ -1,8 +1,10 @@
 import { Drawer } from "antd";
+import { Bug } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { cn } from "@/lib/utils";
+import { SHOW_CANVAS_DEBUG_UI } from "@/constant/env";
 
 type MobileNavDrawerProps = {
     open: boolean;
@@ -24,6 +26,12 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                         </Link>
                     );
                 })}
+                {SHOW_CANVAS_DEBUG_UI ? (
+                    <Link to="/admin/canvas-debug" onClick={onClose} className="flex items-center gap-3 rounded-lg px-3 py-3 text-base text-amber-700 transition hover:bg-amber-500/10 dark:text-amber-300">
+                        <Bug className="size-5" />
+                        <span>画布问题复现</span>
+                    </Link>
+                ) : null}
             </div>
         </Drawer>
     );

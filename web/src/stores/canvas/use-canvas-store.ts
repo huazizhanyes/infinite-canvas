@@ -19,6 +19,10 @@ export type CanvasProject = {
     backgroundMode: CanvasBackgroundMode;
     showImageInfo: boolean;
     viewport: ViewportTransform;
+    debugReadOnly?: boolean;
+    debugSessionId?: string;
+    debugSourceUserId?: string;
+    debugSourceProjectId?: string;
 };
 
 type CanvasStore = {
@@ -245,6 +249,10 @@ export const useCanvasStore = create<CanvasStore>()(
                     backgroundMode: source.backgroundMode || "lines",
                     showImageInfo: source.showImageInfo || false,
                     viewport: source.viewport || initialViewport,
+                    debugReadOnly: source.debugReadOnly,
+                    debugSessionId: source.debugSessionId,
+                    debugSourceUserId: source.debugSourceUserId,
+                    debugSourceProjectId: source.debugSourceProjectId,
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
                 return project.id;

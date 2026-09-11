@@ -5,7 +5,24 @@ const PASTE_COLLISION_GAP = 24;
 
 export function prepareCanvasNodeForClipboard(node: CanvasNodeData): CanvasNodeData {
     const metadata = node.metadata ? { ...node.metadata } : undefined;
-    if (metadata?.status !== "loading") return { ...node, position: { ...node.position }, metadata };
+    if (metadata?.status !== "loading") {
+        return {
+            ...node,
+            position: { ...node.position },
+            metadata: metadata ? {
+                ...metadata,
+                generationRequestId: undefined,
+                imageTaskId: undefined,
+                imageTaskStatus: undefined,
+                imageTaskProgress: undefined,
+                imageTaskStartedAt: undefined,
+                imageTaskUpdatedAt: undefined,
+                imageTaskTargetIds: undefined,
+                imageErrorCode: undefined,
+                imageErrorMessage: undefined,
+            } : undefined,
+        };
+    }
     return {
         ...node,
         position: { ...node.position },
@@ -15,6 +32,14 @@ export function prepareCanvasNodeForClipboard(node: CanvasNodeData): CanvasNodeD
             status: "idle",
             errorDetails: undefined,
             generationRequestId: undefined,
+            imageTaskId: undefined,
+            imageTaskStatus: undefined,
+            imageTaskProgress: undefined,
+            imageTaskStartedAt: undefined,
+            imageTaskUpdatedAt: undefined,
+            imageTaskTargetIds: undefined,
+            imageErrorCode: undefined,
+            imageErrorMessage: undefined,
             videoTaskId: undefined,
             videoProvider: undefined,
             serverStorageKey: undefined,
@@ -61,6 +86,14 @@ export function prepareCanvasNodeForDuplicate(node: CanvasNodeData): CanvasNodeD
             status: "idle",
             errorDetails: undefined,
             generationRequestId: undefined,
+            imageTaskId: undefined,
+            imageTaskStatus: undefined,
+            imageTaskProgress: undefined,
+            imageTaskStartedAt: undefined,
+            imageTaskUpdatedAt: undefined,
+            imageTaskTargetIds: undefined,
+            imageErrorCode: undefined,
+            imageErrorMessage: undefined,
             videoTaskId: undefined,
             videoProvider: undefined,
             videoResultUrl: undefined,

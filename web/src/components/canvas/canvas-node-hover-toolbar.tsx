@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented } from "antd";
-import { Camera, CopyPlus, Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
+import { AudioLines, Camera, CopyPlus, Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
@@ -27,6 +27,7 @@ type CanvasNodeHoverToolbarProps = {
     onUpload: (node: CanvasNodeData) => void;
     onDownload: (node: CanvasNodeData) => void;
     onCaptureVideoFrame?: (node: CanvasNodeData, kind: CanvasVideoFrameKind) => void;
+    onExtractAudio?: (node: CanvasNodeData) => void;
     onSaveAsset: (node: CanvasNodeData) => void;
     onMaskEdit: (node: CanvasNodeData) => void;
     onCrop: (node: CanvasNodeData) => void;
@@ -67,6 +68,7 @@ export function CanvasNodeHoverToolbar({
     onUpload,
     onDownload,
     onCaptureVideoFrame,
+    onExtractAudio,
     onSaveAsset,
     onMaskEdit,
     onCrop,
@@ -154,6 +156,7 @@ export function CanvasNodeHoverToolbar({
         ...(hasImage || hasVideo || hasAudio || isText ? [{ id: "saveAsset", title: "加入我的资产", label: "存资产", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
         ...(hasImage || hasVideo || hasAudio ? [{ id: "download", title: hasAudio ? "下载音频" : hasVideo ? "下载视频" : "下载图片", label: "下载", icon: <Download className="size-4" />, onClick: () => onDownload(node) }] : []),
         ...(hasVideo ? [{ id: "captureFrame", title: "从视频截取图片帧", label: "截取帧", icon: <Camera className="size-4" />, active: frameMenuOpen, onClick: () => setFrameMenuOpen((current) => !current) }] : []),
+        ...(hasVideo && onExtractAudio ? [{ id: "extractAudio", title: "选择视频片段并分离音频", label: "分离音频", icon: <AudioLines className="size-4" />, onClick: () => onExtractAudio(node) }] : []),
         ...(canOpenDialog ? [{ id: "edit", title: isText ? "打开 AI 文本处理" : "编辑", label: isText ? "AI处理" : "编辑", icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "editText", title: "编辑文本内容", label: "编辑内容", icon: <Pencil className="size-4" />, onClick: () => onEditText(node) }] : []),
         ...(isText ? [{ id: "generateMedia", title: "从文本生成媒体", label: "生成媒体", icon: <ImageIcon className="size-4" />, active: mediaMenuOpen, onClick: () => setMediaMenuOpen((current) => !current) }] : []),

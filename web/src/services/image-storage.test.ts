@@ -97,6 +97,17 @@ describe("image OSS persistence", () => {
         expect(mocks.resolveCanvasMediaUrl).toHaveBeenCalledTimes(2);
     });
 
+    it("keeps the persisted address when the media record is no longer resolvable", async () => {
+        mocks.resolveCanvasMediaUrl.mockImplementation(async (_mediaId: string, fallback = "") => fallback);
+        vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+
+        await expect(resolvePersistedImage("gone-media", undefined, "https://oss.example.com/legacy.png")).resolves.toEqual({
+            url: "https://oss.example.com/legacy.png",
+            storageKey: "image:u1:media-gone-media",
+        });
+        expect(mocks.resolveCanvasMediaUrl).toHaveBeenCalledWith("gone-media", "https://oss.example.com/legacy.png");
+    });
+
     it("retries remote sync from the existing IndexedDB image", async () => {
         await storeImageLocally(new Blob(["image"], { type: "image/png" }));
         mocks.uploadCanvasMedia.mockResolvedValue({ mediaId: "media-2", mediaStatus: "synced" });

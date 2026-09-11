@@ -12,6 +12,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { clearCanvasStoreMemory } from "@/stores/canvas/use-canvas-store";
 import { clearAssetStoreMemory } from "@/stores/use-asset-store";
 import { clearCanvasHostTaskStoreMemory } from "@/stores/canvas/use-canvas-host-task-store";
+import { clearCanvasClipboardMemory } from "@/stores/canvas/use-canvas-clipboard-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 import type { InsertAssetPayload } from "./asset-picker-modal";
@@ -62,6 +63,7 @@ export function CanvasSidePanel({ nodes, selectedNodeIds, onFocusNode, onInsertA
                 clearCanvasStoreMemory();
                 clearAssetStoreMemory();
                 clearCanvasHostTaskStoreMemory();
+                clearCanvasClipboardMemory();
                 setOpen(false);
                 return;
             }

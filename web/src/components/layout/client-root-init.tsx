@@ -11,6 +11,7 @@ import { setCanvasAccountScope, migrateLegacyCanvasData, clearCanvasAccountScope
 import { rehydrateCanvasStoreForAccount, clearCanvasStoreMemory } from "@/stores/canvas/use-canvas-store";
 import { rehydrateAssetStoreForAccount, clearAssetStoreMemory } from "@/stores/use-asset-store";
 import { rehydrateCanvasHostTaskStoreForAccount, clearCanvasHostTaskStoreMemory } from "@/stores/canvas/use-canvas-host-task-store";
+import { clearCanvasClipboardMemory } from "@/stores/canvas/use-canvas-clipboard-store";
 
 const SUCAI_MODE_KEY = "infinite-canvas:sucai-mode";
 const SUCAI_TOKEN_KEY = "sucai_token";
@@ -241,6 +242,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 clearCanvasStoreMemory();
                 clearAssetStoreMemory();
                 clearCanvasHostTaskStoreMemory();
+                clearCanvasClipboardMemory();
                 clearCanvasAccountScope();
                 window.location.reload();
             });
@@ -263,6 +265,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             clearCanvasStoreMemory();
             clearAssetStoreMemory();
             clearCanvasHostTaskStoreMemory();
+            clearCanvasClipboardMemory();
             clearCanvasAccountScope();
             useUserStore.getState().clearSession();
         }

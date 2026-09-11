@@ -69,13 +69,15 @@ type ResponseApiPayload = {
 };
 type ResponseStreamState = { buffer: string; text: string; payload?: ResponseApiPayload; error?: string };
 
-type ImageApiResponse = {
+export type CanvasImageTask = {
     data?: Array<Record<string, unknown>>;
-    error?: { message?: string };
+    error?: { message?: string; code?: string };
     code?: number;
     msg?: string;
     task_id?: string;
     status?: string;
+    progress?: number;
+    stage?: string;
 };
 type GeminiPart = {
     text?: string;
@@ -95,7 +97,12 @@ type GeminiPayload = {
     promptFeedback?: { blockReason?: string };
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
-type RequestOptions = { signal?: AbortSignal };
+type RequestOptions = {
+    signal?: AbortSignal;
+    clientRequestId?: string;
+    onTaskCreated?: (taskId: string, task: CanvasImageTask) => void;
+    onTaskProgress?: (task: CanvasImageTask) => void;
+};
 
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
@@ -239,7 +246,7 @@ function resolveImageDataUrl(item: Record<string, unknown>) {
     return null;
 }
 
-function parseImagePayload(payload: ImageApiResponse) {
+function parseImagePayload(payload: CanvasImageTask) {
     if (typeof payload.code === "number" && payload.code !== 0) {
         throw new Error(payload.msg || "请求失败");
     }
@@ -258,23 +265,42 @@ function parseImagePayload(payload: ImageApiResponse) {
 
 const IMAGE_TASK_POLL_INTERVAL = 3000;
 const IMAGE_TASK_TIMEOUT = 10 * 60 * 1000;
-const IMAGE_TASK_TERMINAL_STATUSES = new Set(["success", "partial_success", "failed"]);
+const IMAGE_TASK_SUCCESS_STATUSES = new Set(["success", "succeeded", "completed", "partial_success"]);
+const IMAGE_TASK_FAILED_STATUSES = new Set(["failed", "error", "cancelled", "canceled", "timeout", "expired"]);
 
-async function resolveAsyncImagePayload(config: AiConfig, payload: ImageApiResponse, signal?: AbortSignal) {
-    if (!payload.task_id) return payload;
+export async function getCanvasImageTask(config: AiConfig, taskId: string, signal?: AbortSignal) {
+    const response = await axios.get<CanvasImageTask>(aiApiUrl(config, `/tasks/${encodeURIComponent(taskId)}`), {
+        headers: aiHeaders(config),
+        signal,
+    });
+    return response.data;
+}
+
+export async function waitForCanvasImageTask(config: AiConfig, taskId: string, signal?: AbortSignal, onProgress?: (task: CanvasImageTask) => void) {
     const deadline = Date.now() + IMAGE_TASK_TIMEOUT;
     while (Date.now() < deadline) {
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        const task = await getCanvasImageTask(config, taskId, signal);
+        onProgress?.(task);
+        if (task.data?.length && (!task.status || IMAGE_TASK_SUCCESS_STATUSES.has(task.status))) return task;
+        if (IMAGE_TASK_SUCCESS_STATUSES.has(task.status || "")) return task;
+        if (IMAGE_TASK_FAILED_STATUSES.has(task.status || "")) throw new Error(task.error?.message || "图片生成失败");
         await waitForImageTaskPoll(IMAGE_TASK_POLL_INTERVAL, signal);
-        const response = await axios.get<ImageApiResponse>(aiApiUrl(config, `/tasks/${encodeURIComponent(payload.task_id)}`), {
-            headers: aiHeaders(config),
-            signal,
-        });
-        const task = response.data;
-        if (!IMAGE_TASK_TERMINAL_STATUSES.has(task.status || "")) continue;
-        if (task.status === "failed") throw new Error(task.error?.message || "图片生成失败");
-        return task;
     }
     throw new Error("图片生成等待超时，任务仍在后台处理中");
+}
+
+export function parseCanvasImageTaskPayload(payload: CanvasImageTask) {
+    return parseImagePayload(payload);
+}
+
+async function resolveAsyncImagePayload(config: AiConfig, payload: CanvasImageTask, options?: RequestOptions) {
+    if (!payload.task_id) return payload;
+    options?.onTaskCreated?.(payload.task_id, payload);
+    options?.onTaskProgress?.(payload);
+    if (payload.data?.length && (!payload.status || IMAGE_TASK_SUCCESS_STATUSES.has(payload.status))) return payload;
+    if (IMAGE_TASK_SUCCESS_STATUSES.has(payload.status || "")) return payload;
+    return waitForCanvasImageTask(config, payload.task_id, options?.signal, options?.onTaskProgress);
 }
 
 function waitForImageTaskPoll(delay: number, signal?: AbortSignal) {
@@ -741,13 +767,13 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     try {
-        const requestId = nanoid();
+        const requestId = options?.clientRequestId || nanoid();
         const quote = usesCanvasBilling ? await canvasBillingApi.quote(connection, {
             feature: "canvas.image.generate", requestId, model: requestConfig.model,
             prompt: withSystemPrompt(requestConfig, prompt), count: n, ...(quality ? { quality } : {}),
             ...(requestSize ? { size: requestSize } : {}), outputFormat: IMAGE_OUTPUT_FORMAT,
         }, options?.signal) : null;
-        const response = await axios.post<ImageApiResponse>(
+        const response = await axios.post<CanvasImageTask>(
             aiApiUrl(requestConfig, "/images/generations"),
             {
                 model: requestConfig.model,
@@ -764,7 +790,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 signal: options?.signal,
             },
         );
-        const payload = await resolveAsyncImagePayload(requestConfig, response.data, options?.signal);
+        const payload = await resolveAsyncImagePayload(requestConfig, response.data, options);
         const images = parseImagePayload(payload);
         return images;
     } catch (error) {
@@ -833,7 +859,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     try {
         let quotePayload: Record<string, unknown> | null = null;
         if (usesCanvasBilling) {
-            const requestId = nanoid();
+            const requestId = options?.clientRequestId || nanoid();
             // 后端的计费输入只统计会进入 `references` 的 image/reference 文件；蒙版字段
             // 用于编辑处理，不属于参考图数量，否则报价 hash 会与提交阶段必然不一致。
             const referenceCount = files.length;
@@ -847,18 +873,18 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
             formData.set("quoteToken", quote.quoteToken);
             formData.set("referenceCount", String(referenceCount));
         }
-        let response: AxiosResponse<ImageApiResponse>;
+        let response: AxiosResponse<CanvasImageTask>;
         try {
-            response = await axios.post<ImageApiResponse>(usesCanvasBilling && connection ? `${connection.canvasBaseUrl.replace(/\/+$/, "")}/v1/images/edits` : aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
+            response = await axios.post<CanvasImageTask>(usesCanvasBilling && connection ? `${connection.canvasBaseUrl.replace(/\/+$/, "")}/v1/images/edits` : aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
         } catch (error) {
             const code = axios.isAxiosError<{ code?: string }>(error) ? error.response?.data?.code : undefined;
             if (code !== "QUOTE_PARAMETERS_CHANGED" || !connection || !quotePayload) throw error;
             // 报价期间模型/价格配置可能刚刚刷新；409 发生在扣费前，重新报价一次即可安全重试。
             const refreshedQuote = await canvasBillingApi.quote(connection, quotePayload, options?.signal);
             formData.set("quoteToken", refreshedQuote.quoteToken);
-            response = await axios.post<ImageApiResponse>(usesCanvasBilling && connection ? `${connection.canvasBaseUrl.replace(/\/+$/, "")}/v1/images/edits` : aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
+            response = await axios.post<CanvasImageTask>(usesCanvasBilling && connection ? `${connection.canvasBaseUrl.replace(/\/+$/, "")}/v1/images/edits` : aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
         }
-        const payload = await resolveAsyncImagePayload(requestConfig, response.data, options?.signal);
+        const payload = await resolveAsyncImagePayload(requestConfig, response.data, options);
         const images = parseImagePayload(payload);
         return images;
     } catch (error) {
@@ -892,7 +918,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
             if (answer === "没有返回内容") onDelta(answer);
             return answer;
         }
-        const requestId = nanoid();
+        const requestId = options?.clientRequestId || nanoid();
         const input = toResponseInput(withSystemMessage(requestConfig, messages));
         const answer = (await requestStreamingResponse(requestConfig, {
             model: requestConfig.model,

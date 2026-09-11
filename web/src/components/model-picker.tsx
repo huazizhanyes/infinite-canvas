@@ -227,9 +227,24 @@ function ModelDetail({ video, config, model }: { video: NonNullable<ReturnType<t
                 <div className="flex items-start justify-between gap-3"><span className="shrink-0">生成时长</span><span className="whitespace-normal break-words text-right" style={{ color: theme.node.text }}>{durationLabel}</span></div>
                 <div className="flex items-start justify-between gap-3"><span className="shrink-0">生成模式</span><span className="max-w-[190px] whitespace-normal break-words text-right" style={{ color: theme.node.text }}>{modeLabel}</span></div>
             </div>
+            <VideoTierPriceSummary video={video} theme={theme} />
             <ModelHealthSummary video={video} />
         </div>
     );
+}
+
+function VideoTierPriceSummary({ video, theme }: { video: NonNullable<ReturnType<typeof videoCapabilitiesOf>>; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const rows = video.qualities.filter((item) => item.pricing.tierPricesMicros || item.pricing.normalPriceMicros || item.pricing.unitPriceMicros);
+    if (!rows.length) return null;
+    const tiers = ["NORMAL", "SILVER", "GOLD", "DIAMOND"] as const;
+    const labels = { NORMAL: "普通", SILVER: "白银", GOLD: "黄金", DIAMOND: "钻石" } as const;
+    return <div className="mt-3 border-t pt-2.5 text-[10px]" style={{ borderColor: theme.toolbar.border }}><div className="mb-1.5 font-medium" style={{ color: theme.node.text }}>会员价格</div><div className="overflow-hidden rounded-md border" style={{ borderColor: theme.toolbar.border }}><table className="w-full table-fixed border-collapse" style={{ color: theme.node.muted }}><thead><tr className="border-b" style={{ borderColor: theme.toolbar.border }}><th className="w-[17%] px-1.5 py-1 text-left font-medium">清晰度</th>{tiers.map((tier) => <th key={tier} className="border-l px-1 py-1 text-left font-medium" style={{ borderColor: theme.toolbar.border }}>{labels[tier]}</th>)}</tr></thead><tbody>{rows.map((item) => <PriceRow key={item.quality} item={item} tiers={tiers} theme={theme} />)}</tbody></table></div></div>;
+}
+
+function PriceRow({ item, tiers, theme }: { item: NonNullable<ReturnType<typeof videoCapabilitiesOf>>["qualities"][number]; tiers: readonly ["NORMAL", "SILVER", "GOLD", "DIAMOND"]; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const unit = item.pricing.type === "fixed_total" ? "条" : "秒";
+    const fallback = Number(item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0);
+    return <tr className="border-b last:border-b-0" style={{ borderColor: theme.toolbar.border }}><th className="px-1.5 py-1 text-left font-medium" style={{ color: theme.node.text }}>{item.quality}</th>{tiers.map((tier) => { const value = Number(item.pricing.tierPricesMicros?.[tier] || (tier === "NORMAL" ? fallback : 0)); return <td key={tier} className={`border-l px-1 py-1 text-left whitespace-nowrap ${tier === "DIAMOND" ? "font-medium text-emerald-400" : ""}`} style={{ borderColor: theme.toolbar.border }}>{value > 0 ? `¥${(value / 1_000_000).toFixed(2)}/${unit}` : "--"}</td>; })}</tr>;
 }
 
 function ModelHealthSummary({ video }: { video: NonNullable<ReturnType<typeof videoCapabilitiesOf>> }) {
@@ -318,18 +333,18 @@ function VideoBillingBadge({ video }: { video: NonNullable<ReturnType<typeof vid
     if (!units.length) return null;
     const label = videoBillingBadgeLabel(video);
     const tone = units.length === 1 && units[0] === "task"
-        ? "border-amber-300/30 bg-amber-300/12 text-amber-200"
+        ? "border-amber-300 bg-amber-100 text-amber-700 dark:border-amber-300/30 dark:bg-amber-300/12 dark:text-amber-200"
         : units.length === 1
-            ? "border-cyan-300/30 bg-cyan-300/12 text-cyan-200"
-            : "border-violet-300/30 bg-violet-300/12 text-violet-200";
-    return <span className={cn("pointer-events-none shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium leading-3 tabular-nums", tone)} title={units.length === 1 ? `普通价 ${label}` : "不同清晰度可能使用不同计费方式"}>{label}</span>;
+            ? "border-cyan-300 bg-cyan-50 text-cyan-700 dark:border-cyan-300/30 dark:bg-cyan-300/12 dark:text-cyan-200"
+            : "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-300/30 dark:bg-violet-300/12 dark:text-violet-200";
+    return <span className={cn("pointer-events-none shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium leading-3 tabular-nums", tone)} title={units.length === 1 ? `钻石会员价 ${label}` : "不同清晰度可能使用不同计费方式"}>{label}</span>;
 }
 
 export function videoBillingBadgeLabel(video: NonNullable<ReturnType<typeof videoCapabilitiesOf>>) {
     const declaredUnits = Array.from(new Set(video.qualities.map((item) => item.pricing.type === "fixed_total" ? "task" : item.pricing.type === "per_second" ? "second" : null).filter((unit): unit is "task" | "second" => Boolean(unit))));
     const entries = video.qualities.map((item) => {
         const unit = item.pricing.type === "fixed_total" ? "task" : item.pricing.type === "per_second" ? "second" : null;
-        const micros = Number(item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0);
+        const micros = Number(item.pricing.tierPricesMicros?.DIAMOND || item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0);
         return unit && Number.isFinite(micros) && micros > 0 ? { unit, micros } : null;
     }).filter((item): item is { unit: "task" | "second"; micros: number } => Boolean(item));
     const units = Array.from(new Set(entries.map((item) => item.unit)));

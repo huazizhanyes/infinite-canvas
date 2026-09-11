@@ -12,6 +12,7 @@ const MembershipPage = lazy(() => import("@/pages/membership"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const PromptsPage = lazy(() => import("@/pages/prompts"));
 const VideoPage = lazy(() => import("@/pages/video"));
+const CanvasDebugPage = lazy(() => import("@/pages/admin/canvas-debug"));
 
 function routeElement(element: React.ReactNode) {
     return <Suspense fallback={<div className="h-full min-h-0 bg-background" />}>{element}</Suspense>;
@@ -32,6 +33,7 @@ const routes = [
             { path: "/prompts", element: routeElement(<PromptsPage />) },
             { path: "/canvas", element: routeElement(<CanvasPage />) },
             { path: "/canvas/:id", element: routeElement(<CanvasProjectPage />) },
+            { path: "/admin/canvas-debug", element: routeElement(<CanvasDebugPage />) },
             { path: "/config", element: routeElement(<ConfigPage />) },
             { path: "/membership", element: routeElement(<MembershipPage />) },
         ],

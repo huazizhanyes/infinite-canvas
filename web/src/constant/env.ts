@@ -5,6 +5,7 @@ export const SUCAI_HOME_URL = import.meta.env.VITE_SUCAI_HOME_URL || "/";
 export const SUCAI_INTEGRATION = import.meta.env.VITE_SUCAI_INTEGRATION === "true";
 export const SHOW_AGENT_UI = import.meta.env.VITE_SHOW_AGENT_UI === "true";
 export const SHOW_PROMPT_LIBRARY_UI = import.meta.env.VITE_SHOW_PROMPT_LIBRARY_UI === "true";
+export const SHOW_CANVAS_DEBUG_UI = import.meta.env.VITE_SHOW_CANVAS_DEBUG_UI === "true" || Boolean(import.meta.env.VITE_SUCAI_ADMIN_API_BASE);
 
 // 官方插件清单地址:CI 发布到 plugins-dist 分支,经 jsDelivr 远程拉取;可用环境变量覆盖成自建来源
 export const PLUGIN_REGISTRY_URL = import.meta.env.VITE_PLUGIN_REGISTRY_URL || "https://cdn.jsdelivr.net/gh/basketikun/infinite-canvas@plugins-dist/official-plugins.json";

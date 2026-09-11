@@ -50,7 +50,7 @@ export type VideoModelCapabilities = {
     routeLabel?: string;
     upstreamModel: string;
     pricingVersion?: number;
-    qualities: Array<{ quality: string; pricingVersion?: number; pricing: { type: string; currency?: "CNY"; unitPriceMicros?: number; normalPriceMicros?: number; credits?: number; inputVideoMultiplier?: number } }>;
+    qualities: Array<{ quality: string; pricingVersion?: number; pricing: { type: string; currency?: "CNY"; unitPriceMicros?: number; normalPriceMicros?: number; tierPricesMicros?: Partial<Record<"NORMAL" | "SILVER" | "GOLD" | "DIAMOND", number>>; credits?: number; inputVideoMultiplier?: number } }>;
     aspectRatios: string[];
     duration: { min?: number | null; max?: number | null; options?: number[] | null };
     modes: string[];

@@ -114,7 +114,7 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
     const duration = normalizeVideoDuration(config.videoSeconds, { ...capabilities.duration, options: durationOptions });
     const selectedQuality = capabilities.qualities.find((item) => item.quality === quality) || capabilities.qualities[0];
     const billingType = selectedQuality?.pricing.type === "fixed_total" ? "fixed_total" : "per_second";
-    const normalUnitPrice = Number(selectedQuality?.pricing.normalPriceMicros || selectedQuality?.pricing.unitPriceMicros || 0) / 1_000_000;
+    const normalUnitPrice = Number(selectedQuality?.pricing.tierPricesMicros?.DIAMOND || selectedQuality?.pricing.normalPriceMicros || selectedQuality?.pricing.unitPriceMicros || 0) / 1_000_000;
     const quoteTier = quote?.breakdown?.tierCode;
     const tierUnitPrice = Number(quote?.breakdown?.tierUnitPriceMicros || 0) / 1_000_000;
     const payablePrice = Number(quote?.breakdown?.payableAmountMicros || quote?.maximumAmountMicros || 0) / 1_000_000;
@@ -148,7 +148,7 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
                             <OptionPill key={item.quality} selected={quality === item.quality} className="h-14" theme={theme} onClick={() => onConfigChange("vquality", item.quality)}>
                                 <span className="flex flex-col items-center gap-0.5 leading-tight">
                                     <span className="text-base font-semibold leading-5">{item.quality}</span>
-                                    <span className="whitespace-nowrap text-[11px] font-normal leading-4" style={{ color: quality === item.quality ? theme.toolbar.activeText : theme.node.muted, opacity: quality === item.quality ? 0.72 : 1 }}>¥{(Number(item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0) / 1_000_000).toFixed(2)}/{item.pricing.type === "fixed_total" ? "任务" : "秒"}</span>
+                                    <span className="whitespace-nowrap text-[11px] font-normal leading-4" style={{ color: quality === item.quality ? theme.toolbar.activeText : theme.node.muted, opacity: quality === item.quality ? 0.72 : 1 }}>¥{(Number(item.pricing.tierPricesMicros?.DIAMOND || item.pricing.normalPriceMicros || item.pricing.unitPriceMicros || 0) / 1_000_000).toFixed(2)}/{item.pricing.type === "fixed_total" ? "任务" : "秒"}</span>
                                 </span>
                             </OptionPill>
                         ))}

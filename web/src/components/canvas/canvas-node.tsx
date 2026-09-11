@@ -151,7 +151,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 }: CanvasNodeProps) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
-    const selectionWhite = "#ffffff";
+    const selectionWhite = theme.canvas.selectionStroke;
     const [hovered, setHovered] = useState(false);
     const definition = getNodeDefinition(data.type);
     const pluginContext = useMemo<CanvasNodeContext | null>(() => (pluginHost ? buildNodeContext(pluginHost, data, theme, scale, isSelected) : null), [pluginHost, data, theme, scale, isSelected]);
@@ -1060,20 +1060,97 @@ function imageLoadCacheKey(node: CanvasNodeData, source: string) {
 }
 
 function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
-    if (!node.metadata?.content)
+    const audioRef = useRef<HTMLAudioElement>(null);
+    const [playing, setPlaying] = useState(false);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(Math.max(0, (node.metadata?.durationMs || 0) / 1000));
+    const [muted, setMuted] = useState(false);
+    const content = node.metadata?.content;
+
+    useEffect(() => {
+        setPlaying(false);
+        setCurrentTime(0);
+        setDuration(Math.max(0, (node.metadata?.durationMs || 0) / 1000));
+        setMuted(false);
+    }, [content, node.metadata?.durationMs]);
+
+    if (!content)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
                 <Music2 className="size-10 opacity-30" strokeWidth={1.35} />
                 <span className="text-xs">{node.metadata?.audioMode === "design" ? "输入音色描述开始设计" : node.metadata?.sourceType === "tts" ? "输入文本开始配音" : "空音频节点"}</span>
             </div>
         );
+
+    const sourceLabel = node.metadata?.audioMode === "design" ? "VoxCPM 音色设计" : node.metadata?.sourceType === "tts" ? (node.metadata.audioEngine ? `${node.metadata.audioEngine === "voxcpm2" ? "VoxCPM2" : "Speech"} 配音` : "生成音频") : node.metadata?.sourceType === "extracted" ? "视频分离音频" : "上传音频";
+    const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+
+    const togglePlayback = async () => {
+        const audio = audioRef.current;
+        if (!audio) return;
+        if (audio.paused) {
+            await audio.play().catch(() => undefined);
+        } else {
+            audio.pause();
+        }
+    };
+
+    const seekAudio = (event: React.MouseEvent<HTMLDivElement>) => {
+        const audio = audioRef.current;
+        if (!audio || duration <= 0) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        audio.currentTime = duration * Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+        setCurrentTime(audio.currentTime);
+    };
+
+    const toggleMuted = () => {
+        const audio = audioRef.current;
+        if (!audio) return;
+        audio.muted = !audio.muted;
+        setMuted(audio.muted);
+    };
+
     return (
-        <div className="flex h-full w-full flex-col justify-center gap-2 px-3" style={{ background: theme.node.fill, color: theme.node.text }}>
+        <div className="flex h-full w-full flex-col justify-center gap-3 px-3 py-2" style={{ background: theme.node.fill, color: theme.node.text }}>
             <div className="flex min-w-0 items-center gap-2 text-xs">
                 <Music2 className="size-4 shrink-0" />
-                <span className="truncate">{node.metadata?.audioMode === "design" ? "VoxCPM 音色设计" : node.metadata?.sourceType === "tts" ? (node.metadata.audioEngine ? `${node.metadata.audioEngine === "voxcpm2" ? "VoxCPM2" : "Speech"} 配音` : "生成音频") : "上传音频"}</span>
+                <span className="truncate">{sourceLabel}</span>
             </div>
-            <audio src={node.metadata.content} controls className="w-full" data-canvas-no-zoom data-canvas-exclusive-media onPlay={(event) => pauseOtherCanvasMedia(event.currentTarget)} />
+            <div className="flex min-w-0 items-center gap-2" data-canvas-interactive>
+                <button type="button" className="grid size-7 shrink-0 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" aria-label={playing ? "暂停音频" : "播放音频"} onClick={() => void togglePlayback()}>
+                    {playing ? <Pause className="size-3.5" /> : <Play className="ml-0.5 size-3.5" />}
+                </button>
+                <span className="w-8 shrink-0 text-[10px] tabular-nums opacity-65">{formatVideoTime(currentTime)}</span>
+                <div className="relative h-1.5 min-w-10 flex-1 cursor-pointer rounded-full" style={{ background: theme.node.stroke }} onClick={seekAudio}>
+                    <div className="absolute inset-y-0 left-0 rounded-full bg-[#a855f7]" style={{ width: `${progress}%` }} />
+                </div>
+                <span className="w-8 shrink-0 text-right text-[10px] tabular-nums opacity-65">{formatVideoTime(duration)}</span>
+                <button type="button" className="grid size-6 shrink-0 place-items-center rounded-md opacity-65 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10" aria-label={muted ? "取消静音" : "静音"} onClick={toggleMuted}>
+                    {muted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
+                </button>
+            </div>
+            <audio
+                ref={audioRef}
+                src={content}
+                preload="metadata"
+                className="sr-only"
+                data-canvas-no-zoom
+                data-canvas-exclusive-media
+                onLoadedMetadata={(event) => {
+                    const nextDuration = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0;
+                    if (nextDuration > 0) setDuration(nextDuration);
+                }}
+                onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+                onPlay={(event) => {
+                    pauseOtherCanvasMedia(event.currentTarget);
+                    setPlaying(true);
+                }}
+                onPause={() => setPlaying(false)}
+                onEnded={() => {
+                    setPlaying(false);
+                    setCurrentTime(0);
+                }}
+            />
         </div>
     );
 }

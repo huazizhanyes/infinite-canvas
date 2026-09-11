@@ -1,9 +1,9 @@
-import { Bot, Home, Menu } from "lucide-react";
+import { Bot, Bug, Home, Menu } from "lucide-react";
 import { Button, Tooltip } from "antd";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-tools";
-import { SHOW_AGENT_UI, SUCAI_HOME_URL, SUCAI_INTEGRATION } from "@/constant/env";
+import { SHOW_AGENT_UI, SHOW_CANVAS_DEBUG_UI, SUCAI_HOME_URL, SUCAI_INTEGRATION } from "@/constant/env";
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { cn } from "@/lib/utils";
@@ -102,13 +102,13 @@ export function AppTopNav() {
     return (
         <>
             {!hideHeader ? (
-                <header className="sticky top-0 z-20 h-14 shrink-0 border-b border-stone-200 bg-background/90 backdrop-blur-xl dark:border-stone-800">
-                    <div className="mx-auto flex h-full max-w-7xl items-stretch justify-between gap-5 px-6">
+                <header className="sticky top-0 z-20 h-16 shrink-0 border-b border-stone-200/80 bg-background/85 backdrop-blur-xl dark:border-white/[0.06] dark:bg-[#05070b]/85">
+                    <div className="mx-auto flex h-full max-w-[1480px] items-stretch justify-between gap-5 px-6">
                         <div className="flex min-w-0 items-center">
                             {!SUCAI_INTEGRATION || window.parent === window ? (
                                 <a
                                     href={SUCAI_HOME_URL}
-                                    className="mr-4 flex h-14 shrink-0 items-center gap-2 text-sm text-stone-500 transition hover:text-stone-950 md:mr-7 dark:text-stone-400 dark:hover:text-stone-100"
+                                    className="mr-3 flex h-16 shrink-0 items-center gap-2 rounded-full px-3 text-sm text-stone-500 transition hover:bg-stone-100 hover:text-stone-950 md:mr-5 dark:text-stone-400 dark:hover:bg-white/[0.05] dark:hover:text-stone-100"
                                     aria-label="返回主页"
                                     title="返回主页"
                                 >
@@ -126,7 +126,7 @@ export function AppTopNav() {
                                 <Menu className="size-5" />
                             </button>
 
-                            <nav className="hide-scrollbar hidden h-14 min-w-0 items-center gap-7 overflow-x-auto md:flex">
+                            <nav className="hide-scrollbar hidden h-16 min-w-0 items-center gap-2 overflow-x-auto md:flex">
                                 {navigationTools.map((tool) => {
                                     const Icon = tool.icon;
                                     const active = tool.slug === activeToolSlug;
@@ -134,13 +134,20 @@ export function AppTopNav() {
                                         <Link
                                             key={tool.slug}
                                             to={tool.path}
-                                            className={cn("relative flex h-14 shrink-0 items-center gap-2 text-sm leading-6 transition after:absolute after:inset-x-0 after:bottom-0 after:h-px", navigationAccentClass(tool.slug, active))}
+                                            className={cn("group relative flex h-9 shrink-0 items-center gap-2 rounded-full px-3 text-[13px] leading-6 transition duration-200", navigationAccentClass(tool.slug, active))}
                                         >
-                                            <Icon className={cn("size-4", navigationIconAccentClass(tool.slug))} />
+                                            <Icon className={cn("size-4 transition", active ? "text-cyan-600 dark:text-cyan-300" : "text-stone-400 dark:text-stone-500 group-hover:text-stone-700 dark:group-hover:text-stone-300")} />
                                             <span className="truncate">{tool.label}</span>
+                                            {active ? <span className="absolute -bottom-2 left-1/2 h-px w-5 -translate-x-1/2 rounded-full bg-cyan-500 shadow-[0_0_12px_rgba(34,211,238,0.65)] dark:bg-cyan-300" /> : null}
                                         </Link>
                                     );
                                 })}
+                                {SHOW_CANVAS_DEBUG_UI ? (
+                                    <Link to="/admin/canvas-debug" className={cn("relative flex h-14 shrink-0 items-center gap-2 text-sm leading-6 transition after:absolute after:inset-x-0 after:bottom-0 after:h-px", pathname === "/admin/canvas-debug" ? "font-medium text-amber-600 after:bg-amber-500 dark:text-amber-300 dark:after:bg-amber-400" : "text-stone-500 after:bg-transparent hover:text-amber-600 dark:text-stone-400 dark:hover:text-amber-300")}>
+                                        <Bug className="size-4" />
+                                        <span>画布问题复现</span>
+                                    </Link>
+                                ) : null}
                             </nav>
                         </div>
 
@@ -166,14 +173,8 @@ export function AppTopNav() {
     );
 }
 
-function navigationAccentClass(slug: NavigationToolSlug, active: boolean) {
-    if (slug === "canvas") return active ? "font-medium text-cyan-600 after:bg-cyan-500 dark:text-cyan-300 dark:after:bg-cyan-400" : "text-stone-500 after:bg-transparent hover:text-cyan-600 dark:text-stone-400 dark:hover:text-cyan-300";
-    if (slug === "assets") return active ? "font-medium text-emerald-600 after:bg-emerald-500 dark:text-emerald-300 dark:after:bg-emerald-400" : "text-stone-500 after:bg-transparent hover:text-emerald-600 dark:text-stone-400 dark:hover:text-emerald-300";
-    return active ? "font-medium text-violet-600 after:bg-violet-500 dark:text-violet-300 dark:after:bg-violet-400" : "text-stone-500 after:bg-transparent hover:text-violet-600 dark:text-stone-400 dark:hover:text-violet-300";
-}
-
-function navigationIconAccentClass(slug: NavigationToolSlug) {
-    if (slug === "canvas") return "text-cyan-600 dark:text-cyan-300";
-    if (slug === "assets") return "text-emerald-600 dark:text-emerald-300";
-    return "text-violet-600 dark:text-violet-300";
+function navigationAccentClass(_slug: NavigationToolSlug, active: boolean) {
+    return active
+        ? "bg-stone-100/90 font-medium text-stone-950 dark:bg-white/[0.06] dark:text-white"
+        : "text-stone-500 hover:bg-stone-100/80 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-white/[0.045] dark:hover:text-stone-100";
 }

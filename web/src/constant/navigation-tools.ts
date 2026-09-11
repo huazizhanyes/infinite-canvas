@@ -1,4 +1,4 @@
-import { Images, Maximize2, Settings2 } from "lucide-react";
+import { Images, Maximize2 } from "lucide-react";
 
 export const navigationTools = [
     {
@@ -12,12 +12,6 @@ export const navigationTools = [
         path: "/assets",
         label: "我的资产",
         icon: Images,
-    },
-    {
-        slug: "config",
-        path: "/config",
-        label: "配置",
-        icon: Settings2,
     },
 ] as const;
 

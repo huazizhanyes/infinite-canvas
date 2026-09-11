@@ -159,7 +159,9 @@ export type CanvasNodeMetadata = {
     durationMs?: number;
     videoFrameKind?: "first" | "last" | "current";
     videoFrameTimeMs?: number;
-    sourceType?: "upload" | "tts";
+    sourceType?: "upload" | "tts" | "extracted";
+    sourceStartMs?: number;
+    sourceEndMs?: number;
     audioTaskId?: string;
     audioEngine?: "speech" | "voxcpm2";
     voiceId?: number;
@@ -223,6 +225,14 @@ export type CanvasNodeMetadata = {
     sourceOperation?: CanvasTextOperation;
     sourceScope?: "full" | "selection";
     generationRequestId?: string;
+    imageTaskId?: string;
+    imageTaskStatus?: "submitting" | "queued" | "in_progress" | "success" | "partial_success" | "failed";
+    imageTaskProgress?: number;
+    imageTaskStartedAt?: number;
+    imageTaskUpdatedAt?: number;
+    imageTaskTargetIds?: string[];
+    imageErrorCode?: string;
+    imageErrorMessage?: string;
 };
 
 export type CanvasNodeData = {

@@ -2,6 +2,8 @@ import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject
 import { useEffect, useRef, useState } from "react";
 import { Button, Dropdown, Segmented, Switch } from "antd";
 import {
+    ArrowDown,
+    ArrowRight,
     Check,
     CircleDot,
     Clock3,
@@ -16,10 +18,12 @@ import {
     Mic2,
     MousePointer2,
     Moon,
+    LayoutGrid,
     Palette,
     Puzzle,
     Redo2,
     ScanText,
+    Sparkles,
     Square,
     Sun,
     Trash2,
@@ -35,6 +39,7 @@ import { getNodePluginId, listNodeDefinitions, useNodeRegistryVersion } from "@/
 import { useThemeStore } from "@/stores/use-theme-store";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { useCanvasPersistenceStatus } from "@/stores/canvas/use-canvas-store";
+import type { CanvasArrangeMode } from "@/lib/canvas/canvas-layout";
 
 const SHOW_PLUGIN_UI = import.meta.env.VITE_SHOW_CANVAS_PLUGIN_UI !== "false";
 
@@ -56,6 +61,7 @@ export function CanvasToolbar({
     onRedo,
     onUpload,
     onOpenAssets,
+    onArrangeSelected,
     onDelete,
     onClear,
     onPanModeChange,
@@ -79,6 +85,7 @@ export function CanvasToolbar({
     onRedo: () => void;
     onUpload: () => void;
     onOpenAssets: () => void;
+    onArrangeSelected: (mode: CanvasArrangeMode) => void;
     onDelete: () => void;
     onClear: () => void;
     onPanModeChange: (enabled: boolean) => void;
@@ -240,6 +247,27 @@ export function CanvasToolbar({
                 {selectedCount ? (
                     <>
                         <Divider theme={theme} />
+                        {selectedCount > 1 ? (
+                            <Dropdown
+                                trigger={["click"]}
+                                placement="top"
+                                menu={{
+                                    items: [
+                                        { key: "smart", label: "智能整理", icon: <Sparkles className="size-4" /> },
+                                        { key: "horizontal", label: "横向排列", icon: <ArrowRight className="size-4" /> },
+                                        { key: "vertical", label: "纵向排列", icon: <ArrowDown className="size-4" /> },
+                                        { key: "grid", label: "网格排列", icon: <LayoutGrid className="size-4" /> },
+                                    ],
+                                    onClick: ({ key }) => onArrangeSelected(key as CanvasArrangeMode),
+                                }}
+                            >
+                                <span className="inline-flex">
+                                    <ToolbarButton id="tool-arrange" label="整理选中" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered}>
+                                        <LayoutGrid className="size-4.5" />
+                                    </ToolbarButton>
+                                </span>
+                            </Dropdown>
+                        ) : null}
                         <ToolbarButton id="tool-delete" label="删除选中" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onDelete} danger>
                             <Trash2 className="size-4.5" />
                         </ToolbarButton>
@@ -443,6 +471,7 @@ function toolLabel(id: string) {
     if (id === "tool-extensions") return "扩展节点";
     if (id === "tool-upload") return "上传资产";
     if (id === "tool-style") return "画布外观";
+    if (id === "tool-arrange") return "整理选中节点";
     if (id === "tool-delete") return "删除选中";
     if (id === "tool-clear") return "清空画布";
     return "";

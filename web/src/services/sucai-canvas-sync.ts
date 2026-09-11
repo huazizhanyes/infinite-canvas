@@ -63,6 +63,7 @@ export async function initializeSucaiCanvasSync(nextConfig: SyncConfig) {
 
     const remoteProjects = new Map((remoteData?.projects || []).map((project) => [project.id, project]));
     mergedProjects.forEach((project) => {
+        if (project.debugReadOnly) return;
         const remote = remoteProjects.get(project.id);
         if (!remote || projectTime(project) > projectTime(remote)) pendingProjects.set(project.id, project);
     });
@@ -70,13 +71,18 @@ export async function initializeSucaiCanvasSync(nextConfig: SyncConfig) {
     unsubscribe = useCanvasStore.subscribe((state) => {
         if (applyingRemoteState) return;
         const nextProjects = new Map(state.projects.map((project) => [project.id, project]));
-        previousProjects.forEach((_project, id) => {
+        previousProjects.forEach((previousProject, id) => {
+            if (previousProject.debugReadOnly) return;
             if (!nextProjects.has(id)) {
                 pendingProjects.delete(id);
                 pendingDeletes.add(id);
             }
         });
         nextProjects.forEach((project, id) => {
+            if (project.debugReadOnly) {
+                pendingProjects.delete(id);
+                return;
+            }
             const previous = previousProjects.get(id);
             if (!previous || previous.updatedAt !== project.updatedAt) {
                 pendingDeletes.delete(id);
@@ -110,6 +116,7 @@ export async function syncSucaiCanvasProject(projectId: string) {
     await waitForCanvasHydration();
     const project = useCanvasStore.getState().projects.find((item) => item.id === projectId);
     if (!project) throw new Error("当前画布不存在");
+    if (project.debugReadOnly) return;
     const cloudProject = serializeCanvasProjectForCloud(project);
     const response = await apiRequest<ApiResponse<{ project?: CanvasProject; conflict?: boolean; deleted?: boolean }>>(`/v1/projects/${encodeURIComponent(project.id)}`, {
         method: "PUT",
@@ -173,7 +180,8 @@ export async function flushSucaiCanvasSync(): Promise<boolean> {
 async function flushPendingChanges(): Promise<boolean> {
     if (!config) return false;
     const deletes = [...pendingDeletes];
-    const projects = [...pendingProjects.values()];
+    const projects = [...pendingProjects.values()].filter((project) => !project.debugReadOnly);
+    [...pendingProjects.values()].filter((project) => project.debugReadOnly).forEach((project) => pendingProjects.delete(project.id));
     let saved = true;
     deletes.forEach((id) => pendingDeletes.delete(id));
     projects.forEach((project) => pendingProjects.delete(project.id));
@@ -286,6 +294,7 @@ async function reloadRemoteProjects() {
         previousProjects = new Map(mergedProjects.map((project) => [project.id, project]));
         const remoteProjects = new Map((remoteData.projects || []).map((project) => [project.id, project]));
         mergedProjects.forEach((project) => {
+            if (project.debugReadOnly) return;
             const remote = remoteProjects.get(project.id);
             if (!remote || projectTime(project) > projectTime(remote)) queueProject(project);
         });

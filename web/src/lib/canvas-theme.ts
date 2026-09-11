@@ -7,8 +7,8 @@ export const canvasThemes = {
             background: "#f3f4f6",
             dot: "rgba(17,24,39,.18)",
             line: "rgba(17,24,39,.08)",
-            selectionStroke: "#ffffff",
-            selectionFill: "rgba(255,255,255,.08)",
+            selectionStroke: "#2563eb",
+            selectionFill: "rgba(37,99,235,.08)",
         },
         node: {
             label: "#4b5563",

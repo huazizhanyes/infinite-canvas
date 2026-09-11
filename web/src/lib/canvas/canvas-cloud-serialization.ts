@@ -17,6 +17,10 @@ function sanitizeValue(value: unknown): unknown {
 
     if ("storageKey" in next) delete next.storageKey;
     if ("sourceStorageKey" in next) delete next.sourceStorageKey;
+    if ("debugReadOnly" in next) delete next.debugReadOnly;
+    if ("debugSessionId" in next) delete next.debugSessionId;
+    if ("debugSourceUserId" in next) delete next.debugSourceUserId;
+    if ("debugSourceProjectId" in next) delete next.debugSourceProjectId;
     MEDIA_URL_FIELDS.forEach((field) => {
         if (field in next && (mediaId || isTemporaryUrl(next[field]))) next[field] = "";
     });

@@ -5,6 +5,7 @@ import { App, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 
 import { ClientRootInit } from "@/components/layout/client-root-init";
+import { useAppUpdateCheck } from "@/hooks/use-app-update-check";
 import { getAntThemeConfig } from "@/lib/app-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 
@@ -18,6 +19,11 @@ const queryClient = new QueryClient({
     },
 });
 
+function AppUpdateWatcher() {
+    useAppUpdateCheck();
+    return null;
+}
+
 export function AppProviders({ children }: { children: ReactNode }) {
     const theme = useThemeStore((state) => state.theme);
     const dark = theme === "dark";
@@ -30,6 +36,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
     return (
         <ConfigProvider locale={zhCN} theme={getAntThemeConfig(dark)}>
             <App>
+                <AppUpdateWatcher />
                 <QueryClientProvider client={queryClient}>
                     <ClientRootInit>{children}</ClientRootInit>
                 </QueryClientProvider>

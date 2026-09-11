@@ -26,6 +26,10 @@ describe("video billing badge", () => {
         expect(videoBillingBadgeLabel(capabilities([{ quality: "720p", pricing: { type: "per_second", normalPriceMicros: 180000 } }]))).toBe("¥0.18/秒");
     });
 
+    it("uses the diamond member price when tier prices are available", () => {
+        expect(videoBillingBadgeLabel(capabilities([{ quality: "720p", pricing: { type: "per_second", normalPriceMicros: 420000, tierPricesMicros: { NORMAL: 420000, SILVER: 390000, GOLD: 360000, DIAMOND: 330000 } } }]))).toBe("¥0.33/秒");
+    });
+
     it("always keeps two decimal places", () => {
         expect(videoBillingBadgeLabel(capabilities([{ quality: "720p", pricing: { type: "per_second", normalPriceMicros: 200000 } }]))).toBe("¥0.20/秒");
         expect(videoBillingBadgeLabel(capabilities([{ quality: "720p", pricing: { type: "fixed_total", normalPriceMicros: 4800000 } }]))).toBe("¥4.80/条");

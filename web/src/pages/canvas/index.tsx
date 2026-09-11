@@ -1,7 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { App, Button } from "antd";
-import { Download, FileUp, LayoutDashboard, Plus } from "lucide-react";
+import { App, Button, Dropdown, Input, type MenuProps } from "antd";
+import { Download, FileUp, MoreHorizontal, Plus, Search, Trash2 } from "lucide-react";
 
 import { readZip } from "@/lib/zip";
 import { setMediaBlob } from "@/services/file-storage";
@@ -25,6 +25,25 @@ export default function CanvasPage() {
     const importProject = useCanvasStore((state) => state.importProject);
     const selectedIds = useCanvasUiStore((state) => state.selectedProjectIds);
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
+    const removeSelectedProjectIds = useCanvasUiStore((state) => state.removeSelectedProjectIds);
+
+    const [query, setQuery] = useState("");
+    const filteredProjects = useMemo(() => {
+        const keyword = query.trim().toLocaleLowerCase();
+        if (!keyword) return projects;
+        return projects.filter((project) => project.title.toLocaleLowerCase().includes(keyword));
+    }, [projects, query]);
+    const moreActions: MenuProps["items"] = [
+        {
+            key: "delete-all",
+            danger: true,
+            icon: <Trash2 className="size-4" />,
+            label: "删除全部",
+            disabled: !hydrated || !projects.length,
+            onClick: () => setDeleteIds(projects.map((project) => project.id)),
+        },
+    ];
+    const clearSelection = () => removeSelectedProjectIds(selectedIds);
 
     const mode = searchParams.get("mode");
     const agentMode = mode === "new" || mode === "recent" || mode === "choose";
@@ -69,76 +88,62 @@ export default function CanvasPage() {
 
     return (
         <main className="canvas-library-shell h-full overflow-auto text-stone-950 dark:text-stone-100">
-            <div className="canvas-library-tech-frame" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-                <span />
-            </div>
-            <div className="canvas-library-geometry" aria-hidden="true">
-                <span className="canvas-library-geometry__circle" />
-                <span className="canvas-library-geometry__axes" />
-                <span className="canvas-library-geometry__triangle" />
-                <span className="canvas-library-geometry__hexagon" />
-                <span className="canvas-library-geometry__arc" />
-                <span className="canvas-library-geometry__formula canvas-library-geometry__formula--circle">x² + y² = r²</span>
-                <span className="canvas-library-geometry__formula canvas-library-geometry__formula--golden">φ = (1 + √5) / 2</span>
-            </div>
-            <div className="canvas-library-content mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
-                <header className="canvas-library-header flex flex-wrap items-end justify-between gap-4 border-b pb-6">
-                    <div>
-                        <p className="canvas-library-eyebrow text-xs font-medium">画布库</p>
-                        <div className="mt-3 flex items-center gap-3">
-                            <span className="canvas-library-title-icon grid size-10 shrink-0 place-items-center rounded-lg">
-                                <LayoutDashboard className="size-5" />
-                            </span>
-                            <h1 className="text-3xl font-semibold">闪帧无限画布</h1>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {selectedIds.length ? (
-                            <>
-                                <Button className="canvas-library-action canvas-library-action--export" disabled={!hydrated} icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `无限画布-${selectedIds.length}个项目`)}>
-                                    导出选中
-                                </Button>
-                                <Button className="canvas-library-action canvas-library-action--danger" disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>
-                                    删除选中
-                                </Button>
-                            </>
-                        ) : null}
-                        {projects.length ? (
-                            <Button className="canvas-library-action canvas-library-action--danger" disabled={!hydrated} onClick={() => setDeleteIds(projects.map((project) => project.id))}>
-                                删除全部
-                            </Button>
-                        ) : null}
-                        <Button className="canvas-library-action canvas-library-action--import" disabled={!hydrated} icon={<FileUp className="size-4" />} onClick={() => inputRef.current?.click()}>
+            <div className="canvas-library-content mx-auto flex w-full max-w-[1480px] flex-col gap-7 px-6 py-9 lg:px-10">
+                <header className="canvas-library-header">
+                    <div className="canvas-library-section-title">全部项目</div>
+                    <div className="canvas-library-actions">
+                        <Input
+                            className="canvas-library-search"
+                            allowClear
+                            prefix={<Search className="size-4" />}
+                            placeholder="搜索项目"
+                            value={query}
+                            onChange={(event) => setQuery(event.target.value)}
+                        />
+                        <Button className="canvas-library-action canvas-library-action--ghost" disabled={!hydrated} icon={<FileUp className="size-4" />} onClick={() => inputRef.current?.click()}>
                             导入画布
                         </Button>
-                        <Button className="canvas-library-action canvas-library-action--create" disabled={!hydrated} icon={<Plus className="size-4" />} onClick={createAndEnter}>
-                            新建画布
-                        </Button>
+                        <Dropdown menu={{ items: moreActions }} placement="bottomRight" trigger={["click"]}>
+                            <Button className="canvas-library-action canvas-library-action--more" disabled={!hydrated || !projects.length} icon={<MoreHorizontal className="size-4" />} aria-label="更多操作" />
+                        </Dropdown>
                     </div>
                 </header>
 
-                {!hydrated ? (
-                    <section className="flex min-h-[360px] items-center justify-center border-y border-stone-200 text-sm text-stone-500 dark:border-stone-800">正在加载画布...</section>
-                ) : projects.length ? (
-                    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                        {projects.map((project, index) => (
-                            <CanvasProjectCard key={project.id} project={project} accentIndex={index} />
-                        ))}
+                {selectedIds.length ? (
+                    <div className="canvas-library-selection">
+                        <span>已选择 {selectedIds.length} 个画布</span>
+                        <div>
+                            <Button className="canvas-library-selection__button" icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `无限画布-${selectedIds.length}个项目`)}>
+                                导出
+                            </Button>
+                            <Button className="canvas-library-selection__button canvas-library-selection__button--danger" onClick={() => setDeleteIds(selectedIds)}>删除</Button>
+                            <Button type="text" className="canvas-library-selection__button canvas-library-selection__button--cancel" onClick={clearSelection}>取消选择</Button>
+                        </div>
                     </div>
-                ) : (
-                    <section className="flex min-h-[360px] flex-col items-center justify-center border-y border-stone-200 text-center dark:border-stone-800">
-                        <span className="canvas-library-title-icon grid size-12 place-items-center rounded-lg">
-                            <LayoutDashboard className="size-6" />
-                        </span>
-                        <h2 className="mt-4 text-xl font-medium">还没有画布</h2>
-                        <p className="mt-3 text-sm text-stone-500">新建一个画布后，就可以独立保存节点、连线和画布外观。</p>
-                        <Button className="canvas-library-action canvas-library-action--create mt-6" icon={<Plus className="size-4" />} onClick={createAndEnter}>
-                            新建画布
-                        </Button>
+                ) : null}
+
+                {!hydrated ? (
+                    <section className="canvas-library-loading">
+                        <span />
+                        <span />
+                        <span />
+                        正在加载画布...
                     </section>
+                ) : (
+                    <>
+                        <div className="canvas-project-grid">
+                            <button type="button" className="canvas-project-create-card" onClick={createAndEnter}>
+                                <span className="canvas-project-create-card__cover"><Plus className="size-7" /></span>
+                                <span className="canvas-project-create-card__title">创建新的画布</span>
+                                <span className="canvas-project-create-card__date">立即开始</span>
+                            </button>
+                            {filteredProjects.map((project) => (
+                                <CanvasProjectCard key={project.id} project={project} />
+                            ))}
+                        </div>
+                        {query && !filteredProjects.length ? <p className="canvas-library-empty-text">没有找到匹配的项目</p> : null}
+                        {!query && projects.length ? <p className="canvas-library-empty-text">没有更多了</p> : null}
+                    </>
                 )}
             </div>
 
