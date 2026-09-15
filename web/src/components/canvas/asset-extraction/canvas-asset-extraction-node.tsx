@@ -45,6 +45,7 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
     const ctxRef = useRef(ctx);
     const resumedAnalysisRef = useRef<string | undefined>(undefined);
     const resumedImageBatchesRef = useRef(new Set<string>());
+    const autoStoryboardRef = useRef("");
     const recoveringScriptSetRef = useRef(false);
     const projectId = typeof window === "undefined" ? "" : resolveCanvasProjectId(window.location);
     ctxRef.current = ctx;
@@ -386,6 +387,17 @@ export function CanvasAssetExtractionNode({ ctx }: { ctx: CanvasNodeContext }) {
 
     const sourceContentChanged = Boolean(content.trim() && ctx.node.metadata?.assetExtractionContentHash && assetExtractionContentHash(content) !== ctx.node.metadata.assetExtractionContentHash);
     const storyboardReadiness = inspectAssetReadiness(ctx.node, episodeAssets, ctx.getNodes(), episodePending.length, assetExtractionContentHash(content));
+
+    useEffect(() => {
+        if (!connection || !episodeId || !storyboardReadiness.ready) return;
+        const current = ctxRef.current;
+        const existing = current.getNodes().find((node) => node.type === CanvasNodeType.AssetStoryboard && node.metadata?.assetStoryboardSourceId === current.node.id && node.metadata?.assetStoryboardEpisodeId === episodeId);
+        if (existing) return;
+        const key = `${current.node.id}:${episodeId}:${assetExtractionContentHash(content)}`;
+        if (autoStoryboardRef.current === key) return;
+        autoStoryboardRef.current = key;
+        createStoryboardDraft();
+    }, [connection, content, episodeId, storyboardReadiness.ready]);
 
     const resolvePending = async (item: ScriptPendingMention, decision: "reuse" | "variant" | "new") => {
         if (!connection) return;

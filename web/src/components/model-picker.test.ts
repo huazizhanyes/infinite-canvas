@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { sortVideoModelsByMark, videoBillingBadgeLabel } from "./model-picker";
+import { buildModelGroups, channelAliasForModel, sortVideoModelsByMark, videoBillingBadgeLabel } from "./model-picker";
 import { encodeChannelModel, type AiConfig, type VideoModelCapabilities } from "@/stores/use-config-store";
 
 const capabilities = (qualities: VideoModelCapabilities["qualities"]) => ({
@@ -88,5 +88,76 @@ describe("video model mark sorting", () => {
         } as unknown as AiConfig;
         const models = ["sucai::a", "sucai::b", "sucai::c", "sucai::d"].map((value) => encodeChannelModel("sucai", value.split("::")[1]));
         expect(sortVideoModelsByMark(models, plain)).toEqual(["sucai::a", "sucai::b", "sucai::c", "sucai::d"]);
+    });
+});
+
+describe("video model provider aliases", () => {
+    const videoModel = (name: string, provider: string, channel = `${provider}-route`, routeLabel = `${provider} 线路`) => ({
+        name,
+        displayName: name,
+        capability: "video" as const,
+        videoCapabilities: { ...capabilities([]), displayName: name, channel, upstreamProvider: provider, upstreamModel: name, routeLabel },
+    });
+
+    it("groups one backend provider even when it owns many route channels", () => {
+        const config = {
+            channelMode: "remote",
+            channels: [
+                {
+                    id: "sucai-canvas",
+                    name: "闪帧 AI 画布",
+                    baseUrl: "https://example.com",
+                    apiKey: "k",
+                    apiFormat: "openai",
+                    models: [
+                        videoModel("seedance-a", "modelhub", "modelhub-seedance-a", "Seedance2.0-推荐-专线A"),
+                        videoModel("seedance-b", "modelhub", "modelhub-seedance-b", "Seedance2.0-推荐-专线B"),
+                    ],
+                },
+            ],
+        } as unknown as AiConfig;
+
+        const groups = buildModelGroups(config, ["sucai-canvas::seedance-a", "sucai-canvas::seedance-b"]);
+
+        expect(groups).toHaveLength(1);
+        expect(groups[0].alias).toBe("C");
+        expect(groups[0].models).toHaveLength(2);
+    });
+
+    it("gives each of the four providers its own A/B/C/D alias", () => {
+        const config = {
+            channelMode: "remote",
+            channels: [
+                {
+                    id: "sucai-canvas",
+                    name: "闪帧 AI 画布",
+                    baseUrl: "https://example.com",
+                    apiKey: "k",
+                    apiFormat: "openai",
+                    models: [
+                        videoModel("aistartlab-one", "aistartlab"),
+                        videoModel("hot-one", "hot-apis"),
+                        videoModel("modelhub-one", "modelhub"),
+                        videoModel("xkmjai-one", "xkmjai"),
+                    ],
+                },
+            ],
+        } as unknown as AiConfig;
+        const models = config.channels[0].models.map((model) => `sucai-canvas::${model.name}`);
+
+        expect(buildModelGroups(config, models).map((group) => group.alias)).toEqual(["A", "B", "C", "D"]);
+        expect(channelAliasForModel(config, "sucai-canvas::modelhub-one")).toBe("C");
+    });
+
+    it("keeps a provider alias stable when the backend reorders the catalog", () => {
+        const models = [videoModel("modelhub-one", "modelhub"), videoModel("xkmjai-one", "xkmjai")];
+        const base = {
+            channelMode: "remote",
+            channels: [{ id: "sucai-canvas", name: "闪帧 AI 画布", baseUrl: "https://example.com", apiKey: "k", apiFormat: "openai", models }],
+        } as unknown as AiConfig;
+        const reordered = { ...base, channels: [{ ...base.channels[0], models: [...models].reverse() }] } as unknown as AiConfig;
+
+        expect(channelAliasForModel(reordered, "sucai-canvas::modelhub-one")).toBe("C");
+        expect(channelAliasForModel(reordered, "sucai-canvas::xkmjai-one")).toBe("D");
     });
 });

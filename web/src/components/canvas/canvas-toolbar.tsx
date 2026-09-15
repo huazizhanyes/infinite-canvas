@@ -19,6 +19,7 @@ import {
     MousePointer2,
     Moon,
     LayoutGrid,
+    LayoutTemplate,
     Palette,
     Puzzle,
     Redo2,
@@ -40,6 +41,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { useCanvasPersistenceStatus } from "@/stores/canvas/use-canvas-store";
 import type { CanvasArrangeMode } from "@/lib/canvas/canvas-layout";
+import { CANVAS_TEMPLATES, type CanvasTemplateId } from "@/lib/canvas/canvas-templates";
 
 const SHOW_PLUGIN_UI = import.meta.env.VITE_SHOW_CANVAS_PLUGIN_UI !== "false";
 
@@ -56,6 +58,7 @@ export function CanvasToolbar({
     onAddText,
     onAddGroup,
     onAddAssetExtraction,
+    onCreateTemplate,
     onAddExtensionNode,
     onUndo,
     onRedo,
@@ -80,6 +83,7 @@ export function CanvasToolbar({
     onAddText: () => void;
     onAddGroup: () => void;
     onAddAssetExtraction: () => void;
+    onCreateTemplate: (templateId: CanvasTemplateId) => void;
     onAddExtensionNode: (type: string) => void;
     onUndo: () => void;
     onRedo: () => void;
@@ -104,6 +108,8 @@ export function CanvasToolbar({
     const [panelX, setPanelX] = useState(0);
     const [extensionsOpen, setExtensionsOpen] = useState(false);
     const [extPanelX, setExtPanelX] = useState(0);
+    const [templatesOpen, setTemplatesOpen] = useState(false);
+    const [templatePanelX, setTemplatePanelX] = useState(0);
     const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
     const saveStatus = useCanvasPersistenceStatus((state) => state.status);
     const saveError = useCanvasPersistenceStatus((state) => state.error);
@@ -120,16 +126,17 @@ export function CanvasToolbar({
 
     // 点击工具栏(含弹出面板)以外的地方,关闭弹出的扩展节点/画布外观面板
     useEffect(() => {
-        if (!extensionsOpen && !appearanceOpen) return;
+        if (!extensionsOpen && !appearanceOpen && !templatesOpen) return;
         const handlePointerDown = (event: PointerEvent) => {
             if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
                 setExtensionsOpen(false);
                 setAppearanceOpen(false);
+                setTemplatesOpen(false);
             }
         };
         document.addEventListener("pointerdown", handlePointerDown, true);
         return () => document.removeEventListener("pointerdown", handlePointerDown, true);
-    }, [extensionsOpen, appearanceOpen]);
+    }, [extensionsOpen, appearanceOpen, templatesOpen]);
 
     useEffect(() => {
         if (!uploadMenuOpen) return;
@@ -184,6 +191,23 @@ export function CanvasToolbar({
                 </ToolbarButton>
                 <ToolbarButton id="tool-asset-extraction" label="资产提取" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddAssetExtraction}>
                     <ScanText className="size-4.5" />
+                </ToolbarButton>
+                <ToolbarButton
+                    id="tool-templates"
+                    label="模板"
+                    active={templatesOpen}
+                    hovered={hovered}
+                    wrapRef={wrapRef}
+                    onTipX={setTipX}
+                    onHover={setHovered}
+                    onClick={(event) => {
+                        setTemplatePanelX(getTipX(wrapRef.current, event.currentTarget));
+                        setExtensionsOpen(false);
+                        setAppearanceOpen(false);
+                        setTemplatesOpen((value) => !value);
+                    }}
+                >
+                    <LayoutTemplate className="size-4.5" />
                 </ToolbarButton>
                 {extensionDefs.length ? (
                     <ToolbarButton
@@ -303,6 +327,41 @@ export function CanvasToolbar({
                                     {def.icon}
                                 </span>
                                 <span className="min-w-0 flex-1 truncate">{def.title}</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            ) : null}
+
+            {templatesOpen ? (
+                <div
+                    className="thin-scrollbar pointer-events-auto absolute bottom-[88px] z-30 max-h-[60vh] w-[320px] -translate-x-1/2 overflow-y-auto rounded-xl border p-2.5 shadow-xl backdrop-blur"
+                    style={{ left: templatePanelX || "50%", background: "rgba(15, 23, 42, .97)", borderColor: "rgba(255,255,255,.18)", color: "#ffffff" }}
+                >
+                    <div className="px-1.5 pb-2">
+                        <div className="text-sm font-semibold">模板</div>
+                    </div>
+                    <div className="grid gap-1">
+                        {CANVAS_TEMPLATES.map((template) => (
+                            <button
+                                key={template.id}
+                                type="button"
+                                className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition"
+                                style={{ color: theme.toolbar.item }}
+                                onMouseEnter={(event) => (event.currentTarget.style.background = theme.toolbar.itemHover)}
+                                onMouseLeave={(event) => (event.currentTarget.style.background = "transparent")}
+                                onClick={() => {
+                                    onCreateTemplate(template.id);
+                                    setTemplatesOpen(false);
+                                }}
+                            >
+                                <span className="grid size-8 shrink-0 place-items-center rounded-md" style={{ background: theme.toolbar.itemHover }}>
+                                    {template.kind === "video" ? <LayoutTemplate className="size-4" /> : <ImageIcon className="size-4" />}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                    <span className="block text-sm font-medium">{template.title}</span>
+                                    {template.description ? <span className="mt-0.5 block text-[11px] leading-4 opacity-55">{template.description}</span> : null}
+                                </span>
                             </button>
                         ))}
                     </div>
@@ -468,6 +527,7 @@ function toolLabel(id: string) {
     if (id === "tool-audio") return "配音";
     if (id === "tool-group") return "组";
     if (id === "tool-asset-extraction") return "资产提取";
+    if (id === "tool-templates") return "模板";
     if (id === "tool-extensions") return "扩展节点";
     if (id === "tool-upload") return "上传资产";
     if (id === "tool-style") return "画布外观";

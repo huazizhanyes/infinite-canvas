@@ -2,7 +2,6 @@ import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { accountScopedKey, getCanvasAccountScope, getCanvasSessionEpoch } from "@/lib/canvas-account-scope";
 import { localForageStorage } from "@/lib/localforage-storage";
-import { nanoid } from "nanoid";
 import { serializeCanvasProjectForCloud } from "@/lib/canvas/canvas-cloud-serialization";
 
 type CloudProjectList = {
@@ -36,7 +35,6 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let reloadTimer: ReturnType<typeof setTimeout> | null = null;
 let flushPromise: Promise<boolean> | null = null;
 let applyingRemoteState = false;
-let syncCursor = 0;
 
 export async function initializeSucaiCanvasSync(nextConfig: SyncConfig) {
     if (initialized && config?.token === nextConfig.token && config?.userId === nextConfig.userId) return;
@@ -199,13 +197,6 @@ async function flushPendingChanges(): Promise<boolean> {
         ...projects.map(async (project) => {
             try {
                 const cloudProject = serializeCanvasProjectForCloud(project);
-                const opResponse = await apiRequest<ApiResponse<{ ops?: Array<{ seq?: number }> }>>(`/v1/projects/${encodeURIComponent(project.id)}/ops`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ops: [{ opId: `${config?.userId || "user"}:${project.id}:${project.updatedAt}`, clientId: getClientId(), actorId: config?.userId || "", baseSeq: 0, opType: "project.update", payload: cloudProject }] }),
-                }).catch(() => null);
-                const latestSeq = Math.max(...(opResponse?.data?.ops || []).map((item) => Number(item.seq || 0)), 0);
-                if (latestSeq > syncCursor) syncCursor = latestSeq;
                 const response = await apiRequest<ApiResponse<{ project?: CanvasProject; conflict?: boolean; deleted?: boolean }>>(`/v1/projects/${encodeURIComponent(project.id)}`, {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
@@ -238,27 +229,16 @@ function handleProjectConflict(localProject: CanvasProject, response: { project?
     else if (response.project) applyRemoteProject(response.project);
 }
 
-let clientId = "";
-function getClientId() {
-    if (clientId) return clientId;
-    clientId = `canvas-${nanoid(12)}`;
-    return clientId;
-}
-
 async function persistOutbox() {
     const scope = config?.userId || getCanvasAccountScope()?.userId;
     if (!scope) return;
-    await Promise.all([
-        localForageStorage.setItem(accountScopedKey("canvas_outbox", scope), JSON.stringify({ projects: [...pendingProjects.values()], deletes: [...pendingDeletes] })),
-        localForageStorage.setItem(accountScopedKey("canvas_sync_cursor", scope), String(syncCursor)),
-    ]);
+    await localForageStorage.setItem(accountScopedKey("canvas_outbox", scope), JSON.stringify({ projects: [...pendingProjects.values()], deletes: [...pendingDeletes] }));
 }
 
 async function restoreOutbox() {
     const scope = config?.userId || getCanvasAccountScope()?.userId;
     if (!scope) return;
     const raw = await localForageStorage.getItem(accountScopedKey("canvas_outbox", scope));
-    syncCursor = Number(await localForageStorage.getItem(accountScopedKey("canvas_sync_cursor", scope)) || 0) || 0;
     if (!raw) return;
     try {
         const parsed = JSON.parse(raw) as { projects?: CanvasProject[]; deletes?: string[] };

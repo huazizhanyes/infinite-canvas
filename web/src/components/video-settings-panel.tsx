@@ -99,7 +99,7 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, hasReference
                     </div>
                 </SettingGroup>
                 <SettingGroup title="秒数" color={theme.node.muted}>
-                    <DurationSlider value={normalizeVideoDuration(seconds)} min={MIN_VIDEO_DURATION_SECONDS} max={20} theme={theme} onChange={(value) => onConfigChange("videoSeconds", String(value))} />
+                    <DurationSelector value={normalizeVideoDuration(seconds)} min={MIN_VIDEO_DURATION_SECONDS} max={20} theme={theme} onChange={(value) => onConfigChange("videoSeconds", String(value))} />
                 </SettingGroup>
             </div>
         </ImageSettingsTheme>
@@ -155,7 +155,7 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
                     </div>
                 </SettingGroup>
                 <SettingGroup title="时长" color={theme.node.muted}>
-                    <DurationSlider
+                    <DurationSelector
                         value={duration}
                         min={durationOptions[0] ?? Math.max(MIN_VIDEO_DURATION_SECONDS, capabilities.duration.min ?? MIN_VIDEO_DURATION_SECONDS)}
                         max={durationOptions[durationOptions.length - 1] ?? capabilities.duration.max ?? 60}
@@ -273,7 +273,7 @@ function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, 
                     </div>
                 </SettingGroup>
                 <SettingGroup title="时长" color={theme.node.muted}>
-                    <DurationSlider value={duration} min={MIN_VIDEO_DURATION_SECONDS} max={15} options={Array.from({ length: 11 }, (_, index) => index + MIN_VIDEO_DURATION_SECONDS)} theme={theme} onChange={(value) => onConfigChange("videoSeconds", String(value))} />
+                    <DurationSelector value={duration} min={MIN_VIDEO_DURATION_SECONDS} max={15} options={Array.from({ length: 11 }, (_, index) => index + MIN_VIDEO_DURATION_SECONDS)} theme={theme} onChange={(value) => onConfigChange("videoSeconds", String(value))} />
                 </SettingGroup>
                 <SettingGroup title="输出" color={theme.node.muted}>
                     <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
@@ -363,15 +363,43 @@ function DimensionInput({ prefix, value, disabled, theme, onChange }: { prefix: 
     );
 }
 
-function DurationSlider({ value, min, max, options, theme, onChange }: { value: number; min: number; max: number; options?: number[]; theme: CanvasTheme; onChange: (value: number) => void }) {
-    const values = options?.length ? [...options].sort((left, right) => left - right) : undefined;
-    const marks = values ? Object.fromEntries(values.map((item, index) => [item, index === 0 || index === values.length - 1 ? item === -1 ? "智能" : `${item}s` : ""])) : { [min]: `${min}s`, [max]: `${max}s` };
+/**
+ * Upstream video models publish either a fixed list of allowed durations or a
+ * min/max range. The list must render as real choices: a slider whose marks all
+ * render identical (or only at the ends) made the middle values look unselectable
+ * even though the model accepted them.
+ */
+function DurationSelector({ value, min, max, options, theme, onChange }: { value: number; min: number; max: number; options?: number[]; theme: CanvasTheme; onChange: (value: number) => void }) {
+    const values = options?.length ? Array.from(new Set(options)).sort((left, right) => left - right) : [];
+    if (values.length && values.length <= 8) {
+        return (
+            <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(values.length, 4)}, minmax(0, 1fr))` }}>
+                {values.map((item) => (
+                    <OptionPill key={item} selected={value === item} className="h-9" theme={theme} onClick={() => onChange(item)}>
+                        {item === -1 ? "智能" : `${item} 秒`}
+                    </OptionPill>
+                ))}
+            </div>
+        );
+    }
+    const { step, marks } = durationSliderPresentation(values, min, max);
     return (
         <div className="px-0.5 pb-2 pt-0.5">
             <div className="mb-0.5 flex items-center justify-between text-[11px] leading-5" style={{ color: theme.node.muted }}><span>拖动选择</span><strong className="rounded-md px-2 py-0.5 text-xs font-semibold" style={{ background: theme.node.fill, color: theme.node.text }}>{value === -1 ? "智能" : `${value} 秒`}</strong></div>
-            <Slider min={min} max={max} step={values ? null : 1} marks={marks} value={value} tooltip={{ formatter: (current) => current === -1 ? "智能" : `${current} 秒` }} onChange={onChange} />
+            <Slider min={min} max={max} step={step} marks={marks} value={value} tooltip={{ formatter: (current) => current === -1 ? "智能" : `${current} 秒` }} onChange={onChange} />
         </div>
     );
+}
+
+export function durationSliderPresentation(values: number[], min: number, max: number): { step: number | null; marks: Record<number, string> } {
+    if (!values.length) return { step: 1, marks: { [min]: `${min}s`, [max]: `${max}s` } };
+    const sorted = Array.from(new Set(values)).sort((left, right) => left - right);
+    const continuous = sorted.every((item, index) => index === 0 || item === sorted[index - 1] + 1);
+    const markLabel = (item: number) => item === -1 ? "智能" : `${item}s`;
+    const marks = continuous
+        ? { [sorted[0]]: markLabel(sorted[0]), [sorted[sorted.length - 1]]: markLabel(sorted[sorted.length - 1]) }
+        : Object.fromEntries(sorted.map((item, index) => [item, index === 0 || index === sorted.length - 1 ? markLabel(item) : " "]));
+    return { step: continuous ? 1 : null, marks };
 }
 
 function SizePreview({ width, height, color }: { width: number; height: number; color: string }) {

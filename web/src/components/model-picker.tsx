@@ -2,10 +2,10 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { Popover, Tooltip } from "antd";
 import { Bot, Boxes, BrainCircuit, CircleHelp, Clapperboard, Code2, Cpu, Image, MessageSquareCode, Mic, Sparkles, Star, WandSparkles } from "lucide-react";
 
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { canvasThemes } from "@/lib/canvas-theme";
-import { decodeChannelModel, modelIconOf, modelOptionLabel, modelOptionName, selectableModelsByCapability, useConfigStore, videoCapabilitiesOf, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
+import { decodeChannelModel, encodeChannelModel, modelIconOf, modelOptionLabel, modelOptionName, selectableModelsByCapability, useConfigStore, videoCapabilitiesOf, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { markCanvasVideoModel, unmarkCanvasVideoModel } from "@/services/api/canvas-video";
 
@@ -24,12 +24,15 @@ type ModelPickerProps = {
 export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, compactVideo = false }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
+    const pickerTheme = canvasThemes[useThemeStore((state) => state.theme)];
     const options = useMemo(() => {
         const base = Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model))));
         return sortVideoModelsByMark(base, config);
     }, [capability, config, value]);
+    const groups = useMemo(() => buildModelGroups(config, options), [config, options]);
     const current = value || "";
-    const currentLabel = current ? displayedModelName(config, current) : placeholder;
+    const currentAlias = current ? channelAliasForModel(config, current) : "";
+    const currentLabel = current ? `${displayedModelName(config, current)}${currentAlias ? ` · ${currentAlias}` : ""}` : placeholder;
 
     useEffect(() => {
         const closeOtherPicker = (event: Event) => {
@@ -69,7 +72,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             <SelectContent
                 data-canvas-no-zoom
                 hideScrollButtons
-                className="z-[1200] !max-h-[min(var(--radix-select-content-available-height),29rem)] w-72 max-w-[calc(100vw-24px)] !overflow-hidden rounded-lg border border-border/70 bg-popover p-0.5 text-xs shadow-xl"
+                className="z-[1200] !max-h-[min(var(--radix-select-content-available-height),32rem)] w-[22rem] max-w-[calc(100vw-24px)] !overflow-hidden rounded-lg border border-border/70 bg-popover p-0.5 text-xs shadow-xl"
                 viewportClassName="!h-auto !max-h-[min(var(--radix-select-content-available-height),29rem)] overscroll-contain"
                 position="popper"
                 align="start"
@@ -79,16 +82,27 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 onMouseDown={(event) => event.stopPropagation()}
             >
                 {options.length ? (
-                    options.map((model) => (
-                        <SelectItem
-                            key={model}
-                            value={model}
-                            hideIndicator={Boolean(videoCapabilitiesOf(config, model))}
-                            textValue={displayedModelName(config, model)}
-                            className="my-1 w-full rounded-none border-0 border-b border-white/12 py-1.5 !pr-1.5 first:mt-0 last:mb-0 data-[state=checked]:border-b-sky-300/35 data-[state=checked]:bg-sky-400/12 data-[state=checked]:shadow-[inset_3px_0_0_rgba(56,189,248,.95)] [&>span:last-child]:min-w-0 [&>span:last-child]:w-full"
-                        >
-                            <ModelLabel config={config} model={model} />
-                        </SelectItem>
+                    groups.map((group) => (
+                        <SelectGroup key={group.key} className="!scroll-my-0 p-0 [&+&]:mt-1">
+                            <SelectLabel className="sticky top-0 z-10 mb-0.5 flex h-9 items-center gap-2.5 bg-popover px-3 pt-1 text-[10px] font-normal tracking-wide">
+                                <span className={groupDividerClass()} />
+                                <span className="shrink-0 leading-none" style={{ color: pickerTheme.node.muted }}>
+                                    渠道<span className="font-semibold" style={{ color: groupAliasColor(group.alias, pickerTheme) }}>{group.alias}</span>
+                                </span>
+                                <span className={groupDividerClass()} />
+                            </SelectLabel>
+                            {group.models.map((model) => (
+                                <SelectItem
+                                    key={model}
+                                    value={model}
+                                    hideIndicator={Boolean(videoCapabilitiesOf(config, model))}
+                                    textValue={displayedModelName(config, model)}
+                                    className="my-1 w-full rounded-none border-0 border-b border-white/12 py-1.5 !pr-1.5 last:mb-0 data-[state=checked]:border-b-sky-300/35 data-[state=checked]:bg-sky-400/12 data-[state=checked]:shadow-[inset_3px_0_0_rgba(56,189,248,.95)] [&>span:last-child]:min-w-0 [&>span:last-child]:w-full"
+                                >
+                                    <ModelLabel config={config} model={model} />
+                                </SelectItem>
+                            ))}
+                        </SelectGroup>
                     ))
                 ) : (
                     <SelectItem value="__empty__" disabled>
@@ -103,6 +117,111 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
 /** 已标记的模型排在最前，其余保持原有顺序（sort 稳定排序）。 */
 export function sortVideoModelsByMark(models: string[], config: AiConfig): string[] {
     return [...models].sort((left, right) => Number(Boolean(videoCapabilitiesOf(config, right)?.marked)) - Number(Boolean(videoCapabilitiesOf(config, left)?.marked)));
+}
+
+type ModelGroup = { key: string; alias: string; models: string[] };
+
+export function buildModelGroups(config: AiConfig, models: string[]): ModelGroup[] {
+    const aliases = new Map(providerChannelAliases(config, models));
+    const byProvider = new Map<string, string[]>();
+    models.forEach((model) => {
+        const key = modelChannelKey(config, model);
+        byProvider.set(key, [...(byProvider.get(key) || []), model]);
+    });
+    return Array.from(byProvider.entries()).map(([key, providerModels]) => {
+        const alias = aliases.get(key) || "?";
+        return { key, alias, models: sortVideoModelsByMark(providerModels, config) };
+    });
+}
+
+/**
+ * Aliases come from the backend provider key (aistartlab / hot-apis / modelhub /
+ * xkmjai ...), not from each route. A provider owns many routes, so grouping by
+ * route produced a badge per route and the user only ever saw their first few.
+ * Ordering is fixed so a provider keeps its letter for the whole session.
+ */
+function providerChannelAliases(config: AiConfig, models: string[]) {
+    let nextUnknown = PROVIDER_ORDER.length;
+    return providerKeys(config, models).map((key) => [key, providerChannelAlias(key) || channelAlias(nextUnknown++)] as const);
+}
+
+function providerKeys(config: AiConfig, models: string[]) {
+    const keys = new Set<string>();
+    [...models, ...config.channels.flatMap((channel) => channel.models.map((model) => encodeChannelModel(channel.id, model.name)))].forEach((model) => keys.add(modelChannelKey(config, model)));
+    return Array.from(keys).sort(compareChannelKeys);
+}
+
+/**
+ * The letter is the provider's fixed position in PROVIDER_ORDER, so modelhub is
+ * always C and xkmjai is always D even if the user only enables a subset.
+ */
+function providerChannelAlias(key: string) {
+    const index = PROVIDER_ORDER.indexOf(key.toLowerCase());
+    if (index < 0) return "";
+    return channelAlias(index);
+}
+
+function providerSortIndex(key: string) {
+    const index = PROVIDER_ORDER.indexOf(key.toLowerCase());
+    return index < 0 ? PROVIDER_ORDER.length : index;
+}
+
+const PROVIDER_ORDER = ["aistartlab", "hot-apis", "modelhub", "xkmjai", "boyesir"];
+
+function channelAlias(index: number) {
+    return index >= 0 && index < 26 ? String.fromCharCode(65 + index) : `C${index + 1}`;
+}
+
+export function channelAliasForModel(config: AiConfig, model: string) {
+    return channelAliases(config).get(modelChannelKey(config, model)) || "";
+}
+
+/**
+ * Aliases are assigned from the sorted set of real backend channel keys, never from
+ * the order the backend happened to return models in. Without this, two channels can
+ * swap their A/B labels whenever the remote catalog is reordered or a price changes
+ * and a model moves position in the list.
+ */
+function channelAliases(config: AiConfig) {
+    const aliases = new Map<string, string>();
+    let nextUnknown = PROVIDER_ORDER.length;
+    providerKeys(config, []).forEach((key) => {
+        aliases.set(key, providerChannelAlias(key) || channelAlias(nextUnknown++));
+    });
+    return aliases;
+}
+
+function compareChannelKeys(left: string, right: string) {
+    if (left === right) return 0;
+    if (left === "__other__") return 1;
+    if (right === "__other__") return -1;
+    const leftProvider = providerSortIndex(left);
+    const rightProvider = providerSortIndex(right);
+    if (leftProvider !== PROVIDER_ORDER.length || rightProvider !== PROVIDER_ORDER.length) {
+        if (leftProvider === PROVIDER_ORDER.length) return 1;
+        if (rightProvider === PROVIDER_ORDER.length) return -1;
+        return leftProvider - rightProvider;
+    }
+    const leftNumber = /^\d+$/.test(left) ? Number(left) : null;
+    const rightNumber = /^\d+$/.test(right) ? Number(right) : null;
+    if (leftNumber != null && rightNumber != null) return leftNumber - rightNumber;
+    if (leftNumber != null) return -1;
+    if (rightNumber != null) return 1;
+    return left < right ? -1 : 1;
+}
+
+function modelChannelKey(config: AiConfig, model: string) {
+    const video = videoCapabilitiesOf(config, model);
+    return video?.upstreamProvider?.trim() || video?.channel?.trim() || decodeChannelModel(model)?.channelId || "__other__";
+}
+
+function groupAliasColor(alias: string, theme: CanvasTheme) {
+    const colors: Record<string, string> = { A: "#38bdf8", B: "#a78bfa", C: "#34d399", D: "#fbbf24", E: "#fb7185" };
+    return colors[alias] || theme.node.muted;
+}
+
+function groupDividerClass() {
+    return "h-px flex-1 bg-slate-400/35 dark:bg-slate-400/25";
 }
 
 function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
@@ -142,7 +261,7 @@ function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
             }
         };
         const primaryRow = (
-            <span className="grid min-h-9 w-full min-w-0 grid-cols-[32px_minmax(0,1fr)_auto_auto] items-center gap-x-2.5" aria-label={name}>
+            <span className="grid min-h-9 w-full min-w-0 grid-cols-[32px_minmax(0,1fr)_auto_auto] items-center gap-x-2" aria-label={name}>
                 <ModelIcon config={config} model={model} large />
                 <span className="relative min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-medium leading-4">{name}</span>
@@ -203,8 +322,9 @@ function ModelIcon({ config, model, large = false }: { config: AiConfig; model: 
 function ModelDetail({ video, config, model }: { video: NonNullable<ReturnType<typeof videoCapabilitiesOf>>; config: AiConfig; model: string }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const name = displayedModelName(config, model);
+    const alias = channelAliasForModel(config, model);
     const suffix = video.displaySuffix?.trim();
-    const channelDescription = [video.routeLabel?.trim(), suffix].filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index).join(" · ") || "视频模型";
+    const channelDescription = [alias ? `渠道 ${alias}` : "", video.channel?.trim(), video.routeLabel?.trim(), suffix].filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index).join(" · ") || "视频模型";
     const durationLabel = formatVideoDurationRange(video.duration);
     const ratioLabel = video.aspectRatios.length ? video.aspectRatios.join("、") : "不限";
     const modeLabel = video.modes.length ? video.modes.map(videoModeLabel).join("、") : "未提供";

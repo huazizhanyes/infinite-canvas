@@ -1,7 +1,16 @@
-import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
+import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import type { CanvasVideoTask } from "@/services/api/canvas-video";
 
 const ACTIVE_TASK_STATUSES = new Set(["queued", "in_progress", "submission_unknown", "archiving"]);
+
+/** Draft video nodes created by storyboard assembly must never trigger task recovery queries. */
+export function shouldRecoverCanvasVideoTask(node: CanvasNodeData) {
+    if (node.type !== CanvasNodeType.Video || node.metadata?.content) return false;
+    if (node.metadata?.videoTaskId || node.metadata?.generationRequestId || node.metadata?.videoProvider) return true;
+    if (node.metadata?.assetStoryboardPreviewNode) return false;
+    // Compatibility for storyboard nodes created before the explicit preview marker existed.
+    return !(node.metadata?.assetStoryboardSourceId && node.metadata?.status === "idle" && !node.metadata?.videoPhase);
+}
 
 /** Merge an asynchronous media snapshot without allowing it to overwrite user edits or task state. */
 export function mergeHydratedCanvasNode(current: CanvasNodeData, base: CanvasNodeData, hydrated: CanvasNodeData): CanvasNodeData {

@@ -27,6 +27,23 @@ export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
 export type CanvasTextOperation = "continue" | "polish" | "expand" | "shorten" | "summarize" | "translate" | "custom";
+export type CanvasShotDurationMode = "short" | "long" | "random";
+export type CanvasShotTransitionType = "start" | "continuous" | "hard-cut" | "scene-change" | "time-jump" | "montage" | "flashback";
+export type CanvasShotKeyframeKind = "start" | "end" | "bridge" | "action" | "scene";
+
+export type AssetStoryboardDialogueLine = {
+    id: string;
+    speaker: string;
+    text: string;
+    type: "dialogue" | "voice-over";
+    durationSec: number;
+};
+
+export type AssetStoryboardActionBeat = {
+    id: string;
+    description: string;
+    durationSec: number;
+};
 
 export type ScriptAssetImageSnapshot = {
     sourceNodeId: string;
@@ -48,6 +65,9 @@ export type AssetStoryboardShot = {
     id: string;
     index: number;
     durationSec: number;
+    requiredDurationSec?: number;
+    durationMode?: CanvasShotDurationMode;
+    durationOptions?: number[];
     title: string;
     sourceExcerpt: string;
     storyPurpose: string;
@@ -59,11 +79,72 @@ export type AssetStoryboardShot = {
     cameraMovement: string;
     characters: string[];
     assetIds: string[];
+    sceneAssetId?: string;
+    dialogueLines?: AssetStoryboardDialogueLine[];
+    actionBeats?: AssetStoryboardActionBeat[];
     previousHandoff: string;
     startState: string;
     endState: string;
     continuity: string;
     negativeConstraints: string[];
+    transitionBefore?: CanvasShotTransitionType;
+    transitionToNext?: CanvasShotTransitionType;
+    needsKeyframe?: boolean;
+    keyframeDescription?: string;
+    finalPrompt?: string;
+    promptStatus: "idle" | "generating" | "success" | "error";
+    promptError?: string;
+    locked?: boolean;
+};
+
+export type AssetStoryboardShotSegment = {
+    id: string;
+    shotId: string;
+    index: number;
+    startSec: number;
+    endSec: number;
+    title: string;
+    visualDescription: string;
+    shotSize: string;
+    cameraMovement: string;
+    dialogue: string;
+    sound: string;
+    startState: string;
+    endState: string;
+    continuity: string;
+    assetIds: string[];
+    dialogueLines?: AssetStoryboardDialogueLine[];
+    actionBeats?: AssetStoryboardActionBeat[];
+};
+
+export type AssetStoryboardKeyframePlan = {
+    id: string;
+    kind: CanvasShotKeyframeKind;
+    sourceShotId?: string;
+    title: string;
+    prompt: string;
+    required: boolean;
+    status: "planned" | "generating" | "success" | "failed";
+    nodeId?: string;
+    error?: string;
+};
+
+export type AssetStoryboardVideoUnit = {
+    id: string;
+    index: number;
+    title: string;
+    durationSec: number;
+    durationMode: CanvasShotDurationMode;
+    shotIds: string[];
+    segments: AssetStoryboardShotSegment[];
+    assetIds: string[];
+    sceneAssetId?: string;
+    previousHandoff: string;
+    startState: string;
+    endState: string;
+    continuity: string;
+    negativeConstraints: string[];
+    keyframes?: AssetStoryboardKeyframePlan[];
     finalPrompt?: string;
     promptStatus: "idle" | "generating" | "success" | "error";
     promptError?: string;
@@ -75,12 +156,15 @@ export type AssetStoryboardState = {
     sourceNodeId: string;
     episodeId?: string;
     contentHash: string;
+    durationMode?: CanvasShotDurationMode;
+    videoModel?: string;
     status: "queued" | "analyzing" | "ready" | "error";
     errorDetails?: string;
     title: string;
     totalDurationSec: number;
     continuityBible: string;
     shots: AssetStoryboardShot[];
+    videoUnits?: AssetStoryboardVideoUnit[];
 };
 
 export type CanvasNodeMetadata = {
@@ -168,6 +252,9 @@ export type CanvasNodeMetadata = {
     characterCount?: number;
     groupId?: string;
     groupColor?: string;
+    templateId?: string;
+    templateNodeRole?: string;
+    templateEditable?: boolean;
     scriptSetId?: string;
     scriptSetNodeId?: string;
     scriptSetRecoveryPending?: boolean;
@@ -206,6 +293,16 @@ export type CanvasNodeMetadata = {
     assetStoryboardSourceContent?: string;
     assetStoryboardShotId?: string;
     assetStoryboardShotIndex?: number;
+    assetStoryboardVideoUnitId?: string;
+    assetStoryboardShotIds?: string[];
+    assetStoryboardKeyframeId?: string;
+    assetStoryboardKeyframeKind?: CanvasShotKeyframeKind;
+    assetStoryboardKeyframeUnitId?: string;
+    assetStoryboardKeyframeIds?: string[];
+    assetStoryboardDurationMode?: CanvasShotDurationMode;
+    assetStoryboardRequiredDurationSec?: number;
+    assetStoryboardVideoModel?: string;
+    assetStoryboardPreviewNode?: boolean;
     scriptAssetType?: "character" | "scene" | "prop";
     scriptAssetVisualDescription?: string;
     scriptAssetImagePrompt?: string;

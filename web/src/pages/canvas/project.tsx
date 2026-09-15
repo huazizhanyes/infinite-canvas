@@ -1,10 +1,10 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowUpRight, Bot, Group, Home, ImageIcon, Images, List, Menu, MousePointer2, Move, Music2, Plus, Redo2, ScanText, Trash2, Type, Undo2, Upload, Video, X } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUpRight, Bot, ChevronDown, Clapperboard, Group, Home, ImageIcon, Images, LayoutGrid, List, Menu, MousePointer2, Move, Music2, Plus, Redo2, ScanText, Sparkles, Trash2, Type, Undo2, Upload, Video, X } from "lucide-react";
 import { saveAs } from "file-saver";
 
-import { getCanvasImageTask, parseCanvasImageTaskPayload, requestEdit, requestGeneration, requestImageQuestion, waitForCanvasImageTask, type CanvasImageTask } from "@/services/api/image";
+import { getCanvasImageTask, parseCanvasImageTaskItems, requestEdit, requestGeneration, requestImageQuestion, waitForCanvasImageTask, type CanvasImageTask } from "@/services/api/image";
 import { cancelCanvasAudioTask, pollCanvasAudioTask, requestAudioGeneration, requestVoiceDesign, storeGeneratedAudio, type StoredGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { CanvasVideoApiError, createCanvasVideoTask, isCanvasVideoModel, listCanvasVideoTasks, retryCanvasVideoTask, waitForCanvasVideoTask, type CanvasVideoStoredResult, type CanvasVideoTask } from "@/services/api/canvas-video";
@@ -65,10 +65,11 @@ import { createCanvasGraphIndex, incomingConnections, outgoingConnections } from
 import { appendValidCanvasConnections, canvasConnectionDropPriority, isCompatibleCanvasConnectionFromHandle, normalizePersistedCanvasConnections, orientCanvasConnection, validateCanvasConnection } from "@/lib/canvas/canvas-connection-rules";
 import { arrangePastedCanvasNodes, prepareCanvasNodeForClipboard, prepareCanvasNodeForDuplicate, remapCanvasClipboardConnections, selectCanvasClipboardConnections } from "@/lib/canvas/canvas-clipboard";
 import { arrangeCanvasSelection, type CanvasArrangeMode } from "@/lib/canvas/canvas-layout";
+import { buildCanvasTemplate, type CanvasTemplateId } from "@/lib/canvas/canvas-templates";
 import { createCanvasSpatialIndex } from "@/lib/canvas/canvas-spatial-index";
 import { sameNodeGeometry } from "@/lib/canvas/canvas-geometry";
 import { createScriptAssetImageSnapshot } from "@/lib/canvas/script-asset-snapshot";
-import { chooseRecoverableCanvasVideoTask, mergeHydratedCanvasNode } from "@/lib/canvas/canvas-recovery";
+import { chooseRecoverableCanvasVideoTask, mergeHydratedCanvasNode, shouldRecoverCanvasVideoTask } from "@/lib/canvas/canvas-recovery";
 import { hasFailedMediaReference, hydrateCanvasNodes, imageMetadata, syncBatchPrimaryNode } from "@/lib/canvas/canvas-node-media";
 import { emitCanvasEvent, onCanvasEvent } from "@/lib/canvas/canvas-event-bus";
 import { getNodeDefinition, getNodePluginId, isBuiltinNodeType as isBuiltinType, listNodeDefinitions, useNodeRegistryVersion } from "@/lib/canvas/node-registry";
@@ -111,6 +112,8 @@ type PendingConnectionCreate = {
     anchorPosition?: Position;
     menuPosition?: Position;
 };
+
+type ConnectionCreateType = CanvasNodeType.Text | CanvasNodeType.Image | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.AssetStoryboard;
 
 type ConnectionDropTarget = {
     nodeId: string | null;
@@ -256,16 +259,17 @@ function ConnectionCreateMenu({
 }: {
     pending: PendingConnectionCreate;
     scale: number;
-    availableTypes: ReadonlySet<CanvasNodeType>;
-    onCreate: (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Video | CanvasNodeType.Audio) => void;
+    availableTypes: ReadonlySet<ConnectionCreateType>;
+    onCreate: (type: ConnectionCreateType) => void;
     onClose: () => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const menuPosition = pending.menuPosition || pending.position;
     const isBatch = pending.connections.length > 1;
+    const isAssetStoryboardOnly = availableTypes.size === 1 && availableTypes.has(CanvasNodeType.AssetStoryboard);
     return (
         <div
-            className={`absolute z-[120] origin-top-left rounded-[8px] border p-2 shadow-2xl backdrop-blur ${isBatch ? "w-[292px]" : "w-[420px]"}`}
+            className={`absolute z-[120] origin-top-left rounded-[8px] border p-2 shadow-2xl backdrop-blur ${isBatch || isAssetStoryboardOnly ? "w-[292px]" : "w-[420px]"}`}
             data-connection-create-menu
             data-canvas-no-zoom
             style={{ left: menuPosition.x, top: menuPosition.y, transform: `scale(${1 / Math.max(scale, 0.05)})`, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
@@ -274,13 +278,14 @@ function ConnectionCreateMenu({
         >
             <div className="mb-1.5 flex items-center justify-between px-1">
                 <span className="text-[11px] font-semibold" style={{ color: theme.node.text }}>
-                    {isBatch ? `引用选中的 ${pending.connections.length} 个节点` : "选择生成类型"}
+                    {isAssetStoryboardOnly ? "创建资产专属分镜" : isBatch ? `引用选中的 ${pending.connections.length} 个节点` : "选择生成类型"}
                 </span>
                 <button type="button" className="grid size-6 place-items-center rounded-md text-sm opacity-55 transition hover:bg-white/10 hover:opacity-100" onClick={onClose} aria-label="关闭">
                     ×
                 </button>
             </div>
-            <div className={`grid gap-1 ${isBatch ? "grid-cols-1" : "grid-cols-2"}`}>
+            <div className={`grid gap-1 ${isBatch || isAssetStoryboardOnly ? "grid-cols-1" : "grid-cols-2"}`}>
+                {availableTypes.has(CanvasNodeType.AssetStoryboard) ? <ConnectionCreateOption theme={theme} icon={<Clapperboard className="size-5" />} title="资产专属分镜" description="从本集资产组装分镜与视频单元" onClick={() => onCreate(CanvasNodeType.AssetStoryboard)} /> : null}
                 {availableTypes.has(CanvasNodeType.Text) ? <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title="文本生成" description="脚本、广告词、品牌文案" onClick={() => onCreate(CanvasNodeType.Text)} /> : null}
                 {availableTypes.has(CanvasNodeType.Image) ? <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title="图片生成" onClick={() => onCreate(CanvasNodeType.Image)} /> : null}
                 {availableTypes.has(CanvasNodeType.Video) ? <ConnectionCreateOption theme={theme} icon={<Video className="size-5" />} title="视频生成" onClick={() => onCreate(CanvasNodeType.Video)} /> : null}
@@ -940,16 +945,52 @@ function InfiniteCanvasPage() {
                     imageErrorMessage: undefined,
                 };
                 void persistNodeMetadata(node.id, startedPatch);
+                const partialUploads = new Map<number, UploadedImage>();
+                const partialPromises = new Map<number, Promise<void>>();
+                const latestItems = new Map<number, { dataUrl?: string; status?: string; error?: string }>();
+                const updateRecoveredImage = (index: number, uploadedImage: UploadedImage) => {
+                    const targetId = targetIds[index];
+                    if (!targetId) return;
+                    const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+                    const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
+                    setNodes((prev) => prev.map((item) => {
+                        if (item.id !== targetId && item.id !== node.id) return item;
+                        const center = { x: item.position.x + item.width / 2, y: item.position.y + item.height / 2 };
+                        return {
+                            ...item,
+                            type: CanvasNodeType.Image,
+                            position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
+                            width: imageSize.width,
+                            height: imageSize.height,
+                            metadata: { ...item.metadata, ...imageMetadata(uploadedImage), ...(item.id === node.id && !item.metadata?.primaryImageId ? { primaryImageId: targetId } : {}), imageTaskStatus: "success", imageTaskProgress: 100, imageTaskUpdatedAt: Date.now(), errorDetails: undefined, imageErrorMessage: undefined },
+                        };
+                    }));
+                };
+                const applyRecoveredItems = (task: CanvasImageTask) => {
+                    parseCanvasImageTaskItems(task).forEach((item) => {
+                        latestItems.set(item.index, item);
+                        if (!item.dataUrl || partialUploads.has(item.index) || partialPromises.has(item.index)) return;
+                        const promise = uploadImage(item.dataUrl).then((uploadedImage) => {
+                            partialUploads.set(item.index, uploadedImage);
+                            updateRecoveredImage(item.index, uploadedImage);
+                        }).catch(() => undefined).finally(() => partialPromises.delete(item.index));
+                        partialPromises.set(item.index, promise);
+                    });
+                };
                 void waitForCanvasImageTask(generationConfig, resolvedTaskId, controller.signal, (task) => {
                     setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, ...canvasImageTaskMetadata(task) } } : item));
+                    applyRecoveredItems(task);
                 })
                     .then(async (task) => {
-                        const images = parseCanvasImageTaskPayload(task);
+                        parseCanvasImageTaskItems(task).forEach((item) => latestItems.set(item.index, item));
+                        await Promise.all([...partialPromises.values()]);
                         const results: Array<{ targetId: string; uploadedImage?: UploadedImage; error?: string }> = await Promise.all(targetIds.map(async (targetId, index) => {
                             try {
-                                const image = images[index];
-                                if (!image) throw new Error("图片任务已完成但没有返回对应图片");
-                                const uploadedImage = await uploadImage(image.dataUrl);
+                                const partial = partialUploads.get(index);
+                                if (partial) return { targetId, uploadedImage: partial };
+                                const dataUrl = latestItems.get(index)?.dataUrl;
+                                if (!dataUrl) throw new Error("图片任务已完成但没有返回对应图片");
+                                const uploadedImage = await uploadImage(dataUrl);
                                 return { targetId, uploadedImage };
                             } catch (error) {
                                 return { targetId, error: error instanceof Error ? error.message : "图片保存失败" };
@@ -1028,8 +1069,8 @@ function InfiniteCanvasPage() {
     useEffect(() => {
         if (!projectLoaded) return;
         nodes.forEach((node) => {
+            if (!shouldRecoverCanvasVideoTask(node)) return;
             const taskId = node.metadata?.videoTaskId;
-            if (node.type !== CanvasNodeType.Video || node.metadata?.content) return;
             if (!taskId && resumedVideoNodeIdsRef.current.has(node.id)) return;
             if (generationRequestsRef.current.has(node.id)) return;
             if (!taskId) resumedVideoNodeIdsRef.current.add(node.id);
@@ -1347,9 +1388,17 @@ function InfiniteCanvasPage() {
     }, []);
 
     const createConnectedNode = useCallback(
-        (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
+        (type: ConnectionCreateType, pending: PendingConnectionCreate) => {
+            const sourceNode = pending.connections[0] ? nodesRef.current.find((node) => node.id === pending.connections[0].nodeId) : undefined;
             const metadata =
-                type === CanvasNodeType.Audio
+                type === CanvasNodeType.AssetStoryboard && sourceNode?.type === CanvasNodeType.AssetExtraction
+                    ? {
+                          assetStoryboardSourceId: sourceNode.id,
+                          assetStoryboardEpisodeId: sourceNode.metadata?.assetExtractionEpisodeId,
+                          assetStoryboardSourceContent: sourceNode.metadata?.content || "",
+                          status: "loading" as const,
+                      }
+                  : type === CanvasNodeType.Audio
                       ? {
                             sourceType: "tts" as const,
                             model: effectiveConfig.audioModel,
@@ -1361,7 +1410,11 @@ function InfiniteCanvasPage() {
                         }
                   : undefined;
             const createdNode = createCanvasNode(type, pending.position, metadata);
-            const newNode = type === CanvasNodeType.Audio ? { ...createdNode, title: "配音" } : createdNode;
+            const newNode = type === CanvasNodeType.AssetStoryboard
+                ? { ...createdNode, title: sourceNode?.metadata?.assetExtractionRecordName ? `${sourceNode.metadata.assetExtractionRecordName} · 资产专属分镜` : "资产专属分镜" }
+                : type === CanvasNodeType.Audio
+                  ? { ...createdNode, title: "配音" }
+                  : createdNode;
             const candidates = pending.connections.flatMap((current) => {
                 const connection = normalizeConnection(current.nodeId, newNode.id, [...nodesRef.current, newNode], current.handleType);
                 return connection ? [{ id: nanoid(), ...connection }] : [];
@@ -1769,6 +1822,20 @@ function InfiniteCanvasPage() {
         },
         [currentProjectTitle, projectId],
     );
+    const handleCreateTemplate = useCallback((templateId: CanvasTemplateId) => {
+        if (debugReadOnly) {
+            message.info("当前是只读调试副本，不能创建模板节点");
+            return;
+        }
+        const template = buildCanvasTemplate(templateId, getCanvasCenter(), effectiveConfig);
+        const ops: CanvasAgentOp[] = [
+            ...template.nodes.map((node) => ({ type: "add_node" as const, id: node.id, nodeType: node.type, title: node.title, position: node.position, width: node.width, height: node.height, metadata: node.metadata })),
+            ...template.connections.map((connection) => ({ type: "connect_nodes" as const, id: connection.id, fromNodeId: connection.fromNodeId, toNodeId: connection.toNodeId })),
+            { type: "select_nodes", ids: template.selectedNodeIds },
+        ];
+        applyAgentOps(ops);
+        message.success(template.nodes.length > 1 ? "已创建完整视频模板组" : "已创建图片模板节点");
+    }, [applyAgentOps, debugReadOnly, effectiveConfig, getCanvasCenter, message]);
     const undoAgentOps = useCallback(() => {
         if (!agentUndoSnapshot) return null;
         nodesRef.current = agentUndoSnapshot.nodes;
@@ -1795,7 +1862,7 @@ function InfiniteCanvasPage() {
     }, [agentSnapshot, applyAgentOps, agentUndoSnapshot, setAgentCanvasContext, undoAgentOps]);
 
 
-    const createImageTaskRequestOptions = useCallback((taskNodeId: string, clientRequestId: string) => ({
+    const createImageTaskRequestOptions = useCallback((taskNodeId: string, clientRequestId: string, onItems?: (task: CanvasImageTask) => void) => ({
         clientRequestId,
         onTaskCreated: (taskId: string, task: CanvasImageTask) => {
             void persistNodeMetadata(taskNodeId, {
@@ -1807,6 +1874,7 @@ function InfiniteCanvasPage() {
         },
         onTaskProgress: (task: CanvasImageTask) => {
             setNodes((prev) => prev.map((item) => item.id === taskNodeId ? { ...item, metadata: { ...item.metadata, ...canvasImageTaskMetadata(task) } } : item));
+            onItems?.(task);
         },
     }), [persistNodeMetadata]);
 
@@ -3826,44 +3894,64 @@ function InfiniteCanvasPage() {
                     if (count > 1) startGenerationRequest(rootId, nodeId, nodeId, controller);
                     let hasSuccess = false;
                     let hasFailure = false;
+                    const uploadedByIndex = new Map<number, UploadedImage>();
+                    const uploadingByIndex = new Map<number, Promise<void>>();
+                    const latestItems = new Map<number, { dataUrl?: string; status?: string; error?: string }>();
+                    const updateImageTarget = (index: number, uploaded: UploadedImage) => {
+                        const targetId = targetIds[index];
+                        if (!targetId) return;
+                        const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
+                        setNodes((prev) => {
+                            const root = prev.find((node) => node.id === rootId);
+                            return prev.map((node) => {
+                                if (node.id !== targetId && node.id !== rootId) return node;
+                                const center = { x: node.position.x + node.width / 2, y: node.position.y + node.height / 2 };
+                                if (node.id === rootId && (targetId === rootId || !root?.metadata?.primaryImageId))
+                                    return { ...node, position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 }, width: imageSize.width, height: imageSize.height, metadata: { ...node.metadata, ...imageMetadata(uploaded), primaryImageId: targetId, imageTaskStatus: "success", imageTaskProgress: 100, imageTaskUpdatedAt: Date.now(), imageErrorMessage: undefined } };
+                                if (node.id === targetId)
+                                    return { ...node, position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 }, width: imageSize.width, height: imageSize.height, metadata: { ...node.metadata, ...imageMetadata(uploaded), imageTaskStatus: "success", imageTaskProgress: 100, imageTaskUpdatedAt: Date.now(), imageErrorMessage: undefined } };
+                                return node;
+                            });
+                        });
+                    };
+                    const applyPartialItems = (task: CanvasImageTask) => {
+                        parseCanvasImageTaskItems(task).forEach((item) => {
+                            latestItems.set(item.index, item);
+                            if (!item.dataUrl || uploadedByIndex.has(item.index) || uploadingByIndex.has(item.index)) return;
+                            const promise = uploadImage(item.dataUrl)
+                                .then((uploaded) => {
+                                    uploadedByIndex.set(item.index, uploaded);
+                                    updateImageTarget(item.index, uploaded);
+                                    hasSuccess = true;
+                                })
+                                .catch((error) => {
+                                    const errorDetails = error instanceof Error ? error.message : "图片保存失败";
+                                    hasFailure = true;
+                                    const targetId = targetIds[item.index];
+                                    if (targetId) setNodes((prev) => prev.map((node) => node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails, imageTaskStatus: "failed", imageTaskUpdatedAt: Date.now(), imageErrorMessage: errorDetails } } : node));
+                                })
+                                .finally(() => uploadingByIndex.delete(item.index));
+                            uploadingByIndex.set(item.index, promise);
+                        });
+                    };
                     const imageRequestOptions = {
-                        ...createImageTaskRequestOptions(rootId, imageClientRequestId),
+                        ...createImageTaskRequestOptions(rootId, imageClientRequestId, applyPartialItems),
                         signal: controller.signal,
                     };
                     const generatedImages = referenceImages.length
                         ? await requestEdit(generationConfig, effectivePrompt, referenceImages, undefined, imageRequestOptions)
                         : await requestGeneration(generationConfig, effectivePrompt, imageRequestOptions);
+                    await Promise.all([...uploadingByIndex.values()]);
                     await Promise.all(
                         targetIds.map(async (targetId, index) => {
                             try {
-                                const image = generatedImages[index];
-                                if (!image) throw new Error("Image generation did not return the requested item");
-                                const uploaded = await uploadImage(image.dataUrl);
-                                const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                                setNodes((prev) => {
-                                    const root = prev.find((node) => node.id === rootId);
-                                    return prev.map((node) => {
-                                        if (node.id !== targetId && node.id !== rootId) return node;
-                                        const center = { x: node.position.x + node.width / 2, y: node.position.y + node.height / 2 };
-                                        if (node.id === rootId && (targetId === rootId || !root?.metadata?.primaryImageId))
-                                            return {
-                                                ...node,
-                                                position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
-                                                width: imageSize.width,
-                                                height: imageSize.height,
-                                                metadata: { ...node.metadata, ...imageMetadata(uploaded), primaryImageId: targetId, imageTaskStatus: "success", imageTaskProgress: 100, imageTaskUpdatedAt: Date.now(), imageErrorMessage: undefined },
-                                            };
-                                        if (node.id === targetId)
-                                            return {
-                                                ...node,
-                                                position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
-                                                width: imageSize.width,
-                                                height: imageSize.height,
-                                                metadata: { ...node.metadata, ...imageMetadata(uploaded), imageTaskStatus: "success", imageTaskProgress: 100, imageTaskUpdatedAt: Date.now(), imageErrorMessage: undefined },
-                                            };
-                                        return node;
-                                    });
-                                });
+                                if (uploadedByIndex.has(index)) return true;
+                                const item = latestItems.get(index);
+                                const dataUrl = item?.dataUrl || generatedImages[index]?.dataUrl;
+                                if (!dataUrl) throw new Error("Image generation did not return the requested item");
+                                const uploaded = await uploadImage(dataUrl);
+                                uploadedByIndex.set(index, uploaded);
+                                updateImageTarget(index, uploaded);
                                 hasSuccess = true;
                                 return true;
                             } catch (error) {
@@ -4893,6 +4981,46 @@ function InfiniteCanvasPage() {
                                 borderColor: theme.canvas.selectionStroke,
                             }}
                         >
+                            {!selectionBox && !debugReadOnly ? (
+                                <div
+                                    className="pointer-events-auto absolute left-1/2 z-20"
+                                    style={{
+                                        top: 0,
+                                        transform: `translate(-50%, calc(-100% - ${8 / Math.max(viewport.k, 0.05)}px)) scale(${1 / Math.max(viewport.k, 0.05)})`,
+                                        transformOrigin: "bottom center",
+                                    }}
+                                    onPointerDown={(event) => event.stopPropagation()}
+                                    onMouseDown={(event) => event.stopPropagation()}
+                                >
+                                    <Dropdown
+                                        trigger={["click"]}
+                                        placement="bottom"
+                                        menu={{
+                                            items: [
+                                                { key: "smart", label: "智能整理", icon: <Sparkles className="size-4" /> },
+                                                { key: "horizontal", label: "横向排列", icon: <ArrowRight className="size-4" /> },
+                                                { key: "vertical", label: "纵向排列", icon: <ArrowDown className="size-4" /> },
+                                                { key: "grid", label: "网格排列", icon: <LayoutGrid className="size-4" /> },
+                                            ],
+                                            onClick: ({ key }) => arrangeSelectedNodes(key as CanvasArrangeMode),
+                                        }}
+                                    >
+                                        <button
+                                            type="button"
+                                            data-canvas-no-zoom
+                                            data-canvas-multi-arrange
+                                            className="flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 text-xs font-medium shadow-lg backdrop-blur transition hover:opacity-85"
+                                            style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item }}
+                                            aria-label="整理选中节点"
+                                            title="整理选中节点"
+                                        >
+                                            <LayoutGrid className="size-3.5" />
+                                            整理
+                                            <ChevronDown className="size-3.5 opacity-60" />
+                                        </button>
+                                    </Dropdown>
+                                </div>
+                            ) : null}
                             <button
                                 type="button"
                                 data-canvas-multi-drag
@@ -5040,6 +5168,7 @@ function InfiniteCanvasPage() {
                     onAddText={() => createNode(CanvasNodeType.Text)}
                     onAddGroup={groupSelectedNodes}
                     onAddAssetExtraction={() => createNode(CanvasNodeType.AssetExtraction)}
+                    onCreateTemplate={handleCreateTemplate}
                     onAddExtensionNode={(type) => createNode(type)}
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
@@ -5697,14 +5826,15 @@ function normalizeConnection(firstNodeId: string, secondNodeId: string, nodes: C
     return orientCanvasConnection(first.id, second.id, firstHandleType);
 }
 
-function getCompatibleConnectionCreateTypes(pending: PendingConnectionCreate, nodes: CanvasNodeData[]) {
+function getCompatibleConnectionCreateTypes(pending: PendingConnectionCreate, nodes: CanvasNodeData[]): ReadonlySet<ConnectionCreateType> {
     const connectionStarts = pending.connections.flatMap((connection) => {
         const node = nodes.find((candidate) => candidate.id === connection.nodeId);
         return node ? [{ type: node.type, handleType: connection.handleType }] : [];
     });
     const candidateTypes = [CanvasNodeType.Text, CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Audio] as const;
-    if (connectionStarts.length !== pending.connections.length) return new Set<CanvasNodeType>();
-    return new Set<CanvasNodeType>(candidateTypes.filter((candidateType) => connectionStarts.every((start) => isCompatibleCanvasConnectionFromHandle(start.type, candidateType, start.handleType))));
+    if (connectionStarts.length !== pending.connections.length) return new Set<ConnectionCreateType>();
+    if (connectionStarts.length === 1 && connectionStarts[0].type === CanvasNodeType.AssetExtraction && connectionStarts[0].handleType === "source") return new Set<ConnectionCreateType>([CanvasNodeType.AssetStoryboard]);
+    return new Set<ConnectionCreateType>(candidateTypes.filter((candidateType) => connectionStarts.every((start) => isCompatibleCanvasConnectionFromHandle(start.type, candidateType, start.handleType))));
 }
 
 function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {

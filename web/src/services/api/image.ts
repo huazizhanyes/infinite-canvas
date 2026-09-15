@@ -294,6 +294,27 @@ export function parseCanvasImageTaskPayload(payload: CanvasImageTask) {
     return parseImagePayload(payload);
 }
 
+export type CanvasImageTaskItemResult = {
+    index: number;
+    dataUrl?: string;
+    status?: string;
+    error?: string;
+};
+
+export function parseCanvasImageTaskItems(payload: CanvasImageTask): CanvasImageTaskItemResult[] {
+    return (payload.data || []).map((item, position) => {
+        const rawIndex = Number(item.index);
+        const index = Number.isInteger(rawIndex) && rawIndex >= 0 ? rawIndex : position;
+        const dataUrl = resolveImageDataUrl(item);
+        return {
+            index,
+            ...(dataUrl ? { dataUrl } : {}),
+            ...(typeof item.status === "string" ? { status: item.status } : {}),
+            ...(typeof item.error === "string" && item.error ? { error: item.error } : {}),
+        };
+    });
+}
+
 async function resolveAsyncImagePayload(config: AiConfig, payload: CanvasImageTask, options?: RequestOptions) {
     if (!payload.task_id) return payload;
     options?.onTaskCreated?.(payload.task_id, payload);
