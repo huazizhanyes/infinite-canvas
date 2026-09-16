@@ -45,6 +45,7 @@ import { CanvasNode } from "@/components/canvas/canvas-node";
 import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import type { CanvasNodeGenerationOptions } from "@/components/canvas/canvas-node-prompt-panel";
 import { CanvasToolbar } from "@/components/canvas/canvas-toolbar";
+import { CanvasVideoMessage } from "@/components/canvas/canvas-video-message";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { CanvasSidePanel } from "@/components/canvas/canvas-side-panel";
 import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
@@ -4819,9 +4820,9 @@ function InfiniteCanvasPage() {
                     只读调试副本 · 不会写回用户项目，也不会提交生成任务
                 </div>
             ) : null}
-            <CanvasSidePanel nodes={nodes} selectedNodeIds={selectedNodeIds} onFocusNode={focusNode} onInsertAsset={handleAssetInsert} />
-            <section data-canvas-workspace className="relative min-w-0 flex-1 overflow-hidden">
-                <CanvasTopBar
+                <CanvasSidePanel nodes={nodes} selectedNodeIds={selectedNodeIds} onFocusNode={focusNode} onInsertAsset={handleAssetInsert} />
+                <section data-canvas-workspace className="relative min-w-0 flex-1 overflow-hidden">
+                    <CanvasTopBar
                     title={currentProjectTitle || "未命名画布"}
                     titleDraft={titleDraft}
                     isTitleEditing={titleEditing}
@@ -5168,7 +5169,6 @@ function InfiniteCanvasPage() {
                     onAddText={() => createNode(CanvasNodeType.Text)}
                     onAddGroup={groupSelectedNodes}
                     onAddAssetExtraction={() => createNode(CanvasNodeType.AssetExtraction)}
-                    onCreateTemplate={handleCreateTemplate}
                     onAddExtensionNode={(type) => createNode(type)}
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
@@ -5184,7 +5184,7 @@ function InfiniteCanvasPage() {
 
                 {isMiniMapOpen ? <Minimap nodes={nodes} viewport={viewport} viewportSize={size} onViewportChange={setViewport} /> : null}
 
-                <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)} onOpenAssets={() => setAssetPickerOpen(true)} />
+                <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)} onOpenAssets={() => setAssetPickerOpen(true)} onCreateTemplate={handleCreateTemplate} />
 
                 {contextMenu ? (
                     <CanvasNodeContextMenu
@@ -5389,6 +5389,7 @@ function CanvasTopBar({
                 </div>
 
                 <div className="pointer-events-auto flex items-center gap-1.5">
+                    <CanvasVideoMessage />
                     <UserStatusActions variant="canvas" onOpenShortcuts={() => setShortcutsOpen(true)} onOpenPlugins={onOpenPlugins} />
                     {SHOW_AGENT_UI ? (
                         <>
