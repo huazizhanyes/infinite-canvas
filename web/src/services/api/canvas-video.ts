@@ -1,5 +1,6 @@
 import axios from "axios";
 
+import { sanitizeVideoParameters } from "@/lib/video-parameters";
 import { getMediaBlob } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { buildApiUrl, modelOptionName, normalizeVideoDuration, resolveModelRequestConfig, videoCapabilitiesOf, type AiConfig } from "@/stores/use-config-store";
@@ -113,6 +114,9 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
     const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
     const capabilities = videoCapabilitiesOf(config, config.model || config.videoModel);
     if (!capabilities) throw new Error("视频模型能力配置已失效，请重新打开画布");
+    // 只发送当前模型声明过的扩展参数：模型切换、模板复制、本地缓存都可能残留上一个模型的参数，
+    // 服务端对「模型未声明扩展参数 + 非空 parameters」会直接返回 400。
+    const requestParameters = sanitizeVideoParameters(capabilities.parameters, config.videoParameters);
     const connection = useUserStore.getState().connection;
     if (!connection) throw new Error("请先登录后生成视频");
 
@@ -163,7 +167,7 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
             modelId: modelOptionName(config.model || config.videoModel), prompt: input.prompt,
             aspectRatio, quality, duration, mode, imageAssetIds, videoAssetIds, audioAssetIds,
             references,
-            parameters: config.videoParameters || {},
+            parameters: requestParameters,
         };
         const quote = await canvasBillingApi.quote(connection, quotePayload, signal);
         const response = await axios.post<CanvasVideoTask>(canvasVideoUrl(requestConfig, "/tasks"), {
@@ -180,7 +184,7 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
             videoAssetIds,
             audioAssetIds,
             references,
-            parameters: config.videoParameters || {},
+            parameters: requestParameters,
             pricingVersion,
             quoteToken: quote.quoteToken,
         }, { headers: canvasVideoHeaders(requestConfig) });

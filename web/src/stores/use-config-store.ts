@@ -4,6 +4,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { nanoid } from "nanoid";
 import { accountScopedKey } from "@/lib/canvas-account-scope";
 import { localForageStorage } from "@/lib/localforage-storage";
+import { videoParametersForModel } from "@/lib/video-parameters";
 
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -295,12 +296,21 @@ export const useConfigStore = create<ConfigStore>()(
             configTab: "preferences",
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
-                set((state) => ({
-                    config: {
+                set((state) => {
+                    const config = {
                         ...state.config,
                         [key]: value,
-                    },
-                })),
+                    };
+                    if (key !== "videoModel") return { config };
+                    // 切换视频模型时按新模型的参数定义重算扩展参数：否则上一个模型残留的参数
+                    // （例如 ModelHub 的 generate_audio）会被带到不支持它的模型上，服务端直接 400。
+                    return {
+                        config: {
+                            ...config,
+                            videoParameters: videoParametersForModel(videoCapabilitiesOf(config, String(value))?.parameters, state.config.videoParameters),
+                        },
+                    };
+                }),
             setVideoModelMarked: (modelValue, marked) =>
                 set((state) => ({
                     config: {

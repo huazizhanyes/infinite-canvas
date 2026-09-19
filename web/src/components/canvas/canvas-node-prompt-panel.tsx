@@ -19,6 +19,7 @@ import { canvasBillingApi, canvasCompactQuoteLabel, type CanvasBillingQuote } fr
 import { isCanvasVideoModel } from "@/services/api/canvas-video";
 import { CanvasQuoteDisplay } from "./canvas-quote-display";
 import { isNonInterruptibleVideoGeneration, videoModelSelectionPatch } from "@/lib/canvas/canvas-generation-policy";
+import { videoParametersForModel } from "@/lib/video-parameters";
 import { CanvasConnectionPreviewStrip } from "./canvas-connection-preview-strip";
 import { appendCanvasConnectionMention, removeCanvasConnectionMention, type CanvasConnectionPreview } from "@/lib/canvas/canvas-connection-previews";
 import { canvasPromptCharacterWarning, countCanvasPromptCharacters } from "@/lib/canvas/canvas-prompt-character-count";
@@ -225,10 +226,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 const nextDuration = nextCapabilities ? String(normalizeVideoDuration(config.videoSeconds, nextCapabilities.duration)) : undefined;
                                 const nextSize = nextCapabilities?.aspectRatios.length && !nextCapabilities.aspectRatios.includes(config.size) ? nextCapabilities.aspectRatios[0] : undefined;
                                 const nextMode = nextCapabilities?.modes.length && !nextCapabilities.modes.includes(config.videoMode) ? nextCapabilities.modes[0] : undefined;
+                                // 切换模型时必须按新模型的参数定义重算扩展参数，残留参数会让服务端直接 400。
+                                const nextParameters = videoParametersForModel(nextCapabilities?.parameters, config.videoParameters);
                                 onConfigChange(node.id, {
                                     ...videoModelSelectionPatch(model, nextQuality, nextDuration),
                                     ...(nextSize ? { size: nextSize } : {}),
                                     ...(nextMode ? { videoMode: nextMode } : {}),
+                                    videoParameters: nextParameters,
                                 });
                             }}
                             capability="video"

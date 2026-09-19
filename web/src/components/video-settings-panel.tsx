@@ -6,6 +6,7 @@ import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { openAiMembershipModal } from "@/components/layout/ai-membership-modal";
 import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
+import { videoParametersForModel } from "@/lib/video-parameters";
 import { MIN_VIDEO_DURATION_SECONDS, modelOptionName, normalizeVideoDuration, videoCapabilitiesOf, type AiConfig, type VideoModelCapabilities, type VideoParameterDefinition } from "@/stores/use-config-store";
 import type { CanvasBillingQuote } from "@/services/api/canvas-billing";
 
@@ -121,8 +122,9 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
     const originalPrice = Number(quote?.breakdown?.originalAmountMicros || 0) / 1_000_000;
     const savings = Number(quote?.breakdown?.savingsMicros || 0) / 1_000_000;
     const parameters = capabilities.parameters || [];
-    const parameterValues = { ...(config.videoParameters || {}) };
-    for (const parameter of parameters) if (parameterValues[parameter.key] === undefined && parameter.defaultValue !== undefined) parameterValues[parameter.key] = parameter.defaultValue;
+    // 只保留当前模型声明过的参数：本地缓存或上一个模型可能残留不属于该模型的 key，
+    // 一旦写回 config，提交时会被服务端判定为「当前模型未开放扩展参数」。
+    const parameterValues = videoParametersForModel(parameters, config.videoParameters);
     const updateParameter = (parameter: VideoParameterDefinition, value: unknown) => onConfigChange("videoParameters", JSON.stringify({ ...parameterValues, [parameter.key]: value }));
 
     return (
