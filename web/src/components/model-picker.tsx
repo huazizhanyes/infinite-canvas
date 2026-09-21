@@ -141,32 +141,48 @@ export function buildModelGroups(config: AiConfig, models: string[]): ModelGroup
  * Ordering is fixed so a provider keeps its letter for the whole session.
  */
 function providerChannelAliases(config: AiConfig, models: string[]) {
-    let nextUnknown = PROVIDER_ORDER.length;
-    return providerKeys(config, models).map((key) => [key, providerChannelAlias(key) || channelAlias(nextUnknown++)] as const);
+    return providerKeys(config, models).map((key) => [key, providerChannelAlias(config, key)] as const);
 }
 
 function providerKeys(config: AiConfig, models: string[]) {
     const keys = new Set<string>();
     [...models, ...config.channels.flatMap((channel) => channel.models.map((model) => encodeChannelModel(channel.id, model.name)))].forEach((model) => keys.add(modelChannelKey(config, model)));
-    return Array.from(keys).sort(compareChannelKeys);
+    return Array.from(keys).sort((left, right) => compareChannelKeys(config, left, right));
 }
 
 /**
- * The letter is the provider's fixed position in PROVIDER_ORDER, so modelhub is
- * always C and xkmjai is always D even if the user only enables a subset.
+ * Prefer the backend-configured alias. The fallback exists only for local/offline
+ * configurations created before channel_alias was added.
  */
-function providerChannelAlias(key: string) {
+function providerChannelAlias(config: AiConfig, key: string) {
+    const configured = configuredChannelAlias(config, key);
+    if (configured) return configured;
     const index = PROVIDER_ORDER.indexOf(key.toLowerCase());
-    if (index < 0) return "";
-    return channelAlias(index);
+    return index < 0 ? "?" : channelAlias(index);
 }
 
-function providerSortIndex(key: string) {
-    const index = PROVIDER_ORDER.indexOf(key.toLowerCase());
-    return index < 0 ? PROVIDER_ORDER.length : index;
+function configuredChannelAlias(config: AiConfig, key: string) {
+    const normalized = key.trim().toLowerCase();
+    for (const channel of config.channels) {
+        for (const model of channel.models) {
+            const video = model.videoCapabilities;
+            if (!video?.channelAlias) continue;
+            const provider = (video.upstreamProvider || video.channel || channel.id).trim().toLowerCase();
+            if (provider === normalized) return video.channelAlias.trim().toUpperCase();
+        }
+    }
+    return "";
 }
 
-const PROVIDER_ORDER = ["aistartlab", "hot-apis", "modelhub", "xkmjai", "boyesir"];
+function providerSortIndex(config: AiConfig, key: string) {
+    const alias = providerChannelAlias(config, key);
+    const rank = alias.charCodeAt(0) - 64;
+    if (rank >= 1 && rank <= 26) return rank;
+    const index = PROVIDER_ORDER.indexOf(key.toLowerCase());
+    return index < 0 ? PROVIDER_ORDER.length + 1 : index + 1;
+}
+
+const PROVIDER_ORDER = ["aistartlab", "hot-apis", "modelhub", "xkmjai", "boyesir", "paipu"];
 
 function channelAlias(index: number) {
     return index >= 0 && index < 26 ? String.fromCharCode(65 + index) : `C${index + 1}`;
@@ -184,22 +200,21 @@ export function channelAliasForModel(config: AiConfig, model: string) {
  */
 function channelAliases(config: AiConfig) {
     const aliases = new Map<string, string>();
-    let nextUnknown = PROVIDER_ORDER.length;
     providerKeys(config, []).forEach((key) => {
-        aliases.set(key, providerChannelAlias(key) || channelAlias(nextUnknown++));
+        aliases.set(key, providerChannelAlias(config, key));
     });
     return aliases;
 }
 
-function compareChannelKeys(left: string, right: string) {
+function compareChannelKeys(config: AiConfig, left: string, right: string) {
     if (left === right) return 0;
     if (left === "__other__") return 1;
     if (right === "__other__") return -1;
-    const leftProvider = providerSortIndex(left);
-    const rightProvider = providerSortIndex(right);
-    if (leftProvider !== PROVIDER_ORDER.length || rightProvider !== PROVIDER_ORDER.length) {
-        if (leftProvider === PROVIDER_ORDER.length) return 1;
-        if (rightProvider === PROVIDER_ORDER.length) return -1;
+    const leftProvider = providerSortIndex(config, left);
+    const rightProvider = providerSortIndex(config, right);
+    if (leftProvider !== PROVIDER_ORDER.length + 1 || rightProvider !== PROVIDER_ORDER.length + 1) {
+        if (leftProvider === PROVIDER_ORDER.length + 1) return 1;
+        if (rightProvider === PROVIDER_ORDER.length + 1) return -1;
         return leftProvider - rightProvider;
     }
     const leftNumber = /^\d+$/.test(left) ? Number(left) : null;

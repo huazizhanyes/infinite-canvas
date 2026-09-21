@@ -160,4 +160,15 @@ describe("video model provider aliases", () => {
         expect(channelAliasForModel(reordered, "sucai-canvas::modelhub-one")).toBe("C");
         expect(channelAliasForModel(reordered, "sucai-canvas::xkmjai-one")).toBe("D");
     });
+
+    it("uses the backend-configured channel alias", () => {
+        const configured = videoModel("paipu-one", "paipu");
+        const configuredWithAlias = { ...configured, videoCapabilities: { ...configured.videoCapabilities, channelAlias: "F" } };
+        const config = {
+            channelMode: "remote",
+            channels: [{ id: "sucai-canvas", name: "闪帧 AI 画布", baseUrl: "https://example.com", apiKey: "k", apiFormat: "openai", models: [configuredWithAlias] }],
+        } as unknown as AiConfig;
+
+        expect(channelAliasForModel(config, "sucai-canvas::paipu-one")).toBe("F");
+    });
 });

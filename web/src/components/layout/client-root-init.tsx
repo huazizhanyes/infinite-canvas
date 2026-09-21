@@ -92,6 +92,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 displayBaseName: item.display_base_name || item.display_name || item.id,
                 displaySuffix: item.display_suffix || null,
                 channel: item.channel,
+                channelAlias: item.channel_alias || item.channelAlias || "",
                 upstreamProvider: item.upstream_provider || item.upstreamProvider || "",
                 routeLabel: item.routeLabel || item.channel_title || item.channel,
                 upstreamModel: item.upstream_model,

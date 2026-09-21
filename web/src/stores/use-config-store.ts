@@ -48,6 +48,7 @@ export type VideoModelCapabilities = {
     displayBaseName?: string;
     displaySuffix?: string | null;
     channel: string;
+    channelAlias?: string;
     /** Backend provider key, e.g. aistartlab / hot-apis / modelhub / xkmjai. */
     upstreamProvider?: string;
     routeLabel?: string;
