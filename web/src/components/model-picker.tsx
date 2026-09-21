@@ -97,7 +97,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                                     value={model}
                                     hideIndicator={Boolean(videoCapabilitiesOf(config, model))}
                                     textValue={displayedModelName(config, model)}
-                                    className="my-1 w-full rounded-none border-0 border-b border-white/12 py-1.5 !pr-1.5 last:mb-0 data-[state=checked]:border-b-sky-300/35 data-[state=checked]:bg-sky-400/12 data-[state=checked]:shadow-[inset_3px_0_0_rgba(56,189,248,.95)] [&>span:last-child]:min-w-0 [&>span:last-child]:w-full"
+                                    className="relative my-1 w-full rounded-none border-0 border-b border-white/12 py-1.5 !pr-1.5 last:mb-0 data-[state=checked]:border-b-sky-300/35 data-[state=checked]:bg-sky-400/12 data-[state=checked]:shadow-[inset_3px_0_0_rgba(56,189,248,.95)] [&>span:last-child]:min-w-0 [&>span:last-child]:w-full"
                                 >
                                     <ModelLabel config={config} model={model} />
                                 </SelectItem>
@@ -262,6 +262,7 @@ function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
         };
         const primaryRow = (
             <span className="grid min-h-9 w-full min-w-0 grid-cols-[32px_minmax(0,1fr)_auto_auto] items-center gap-x-2" aria-label={name}>
+                {video.isRecommended ? <span className="absolute left-0 top-0 z-10 flex h-[22px] w-[26px] justify-start bg-amber-400 pl-1 pt-[3px] text-[10px] font-bold leading-none text-amber-950 [clip-path:polygon(0_0,100%_0,0_100%)]" aria-label="官方推荐">荐</span> : null}
                 <ModelIcon config={config} model={model} large />
                 <span className="relative min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-medium leading-4">{name}</span>

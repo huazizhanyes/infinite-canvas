@@ -30,6 +30,34 @@ describe("backend video model capabilities", () => {
         expect(videoCapabilitiesOf(config, encodeChannelModel(channel.id, "opaque-model-id"))).toEqual(videoCapabilities);
     });
 
+    it("sorts video qualities from low to high resolution", () => {
+        const videoCapabilities: VideoModelCapabilities = {
+            provider: "canvas-video",
+            displayName: "Seedance 2.0",
+            channel: "12",
+            upstreamModel: "opaque-model",
+            qualities: [
+                { quality: "4K", pricing: { type: "per_second" } },
+                { quality: "1080p", pricing: { type: "per_second" } },
+                { quality: "720p", pricing: { type: "per_second" } },
+                { quality: "480p", pricing: { type: "per_second" } },
+                { quality: "768p", pricing: { type: "per_second" } },
+                { quality: "2K", pricing: { type: "per_second" } },
+            ],
+            aspectRatios: ["16:9"],
+            duration: { options: [5] },
+            modes: ["text2video"],
+            inputImagesMax: 0,
+            inputVideosMax: 0,
+            inputAudiosMax: 0,
+        };
+        const models = normalizeChannelModels([{ name: "opaque-model-id", capability: "video", videoCapabilities }]);
+        const channel = createModelChannel({ id: "sucai", models });
+        const config = { ...defaultConfig, channels: [channel], models: [encodeChannelModel(channel.id, "opaque-model-id")] };
+
+        expect(videoCapabilitiesOf(config, encodeChannelModel(channel.id, "opaque-model-id"))?.qualities.map((item) => item.quality)).toEqual(["480p", "720p", "768p", "1080p", "2K", "4K"]);
+    });
+
     it("preserves the server-provided video model icon for the picker", () => {
         const value = encodeChannelModel("sucai", "seedance-2.0");
         const channel = createModelChannel({ id: "sucai", models: [{ name: "seedance-2.0", capability: "video", icon: "clapperboard", iconUrl: "https://cdn.example.com/seedance.svg" }] });

@@ -108,6 +108,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 faceFriendly: Boolean(item.faceFriendly || item.face_friendly || item.channel === "59" && item.upstream_model === "minimax-h3"),
                 displayNotice: item.displayNotice || item.display_notice || null,
                 marked: Boolean(item.marked),
+                isRecommended: Boolean(item.is_recommended || item.recommended),
                 freePromotion: item.free_promotion || null,
                 statsRecent3: item.statsRecent3 || null,
                 recent3: item.recent3 || null,

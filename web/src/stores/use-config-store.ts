@@ -65,6 +65,7 @@ export type VideoModelCapabilities = {
     faceFriendly?: boolean;
     displayNotice?: string | null;
     marked?: boolean;
+    isRecommended?: boolean;
     freePromotion?: { active: boolean; label: string; startsAt?: string | null; endsAt?: string | null } | null;
     statsRecent3?: {
         successRate: number | null;
@@ -259,8 +260,20 @@ export function modelCapabilityOf(config: AiConfig, value: string): ModelCapabil
     return findChannelModel(config, value)?.model.capability;
 }
 
+export function videoQualityRank(value: unknown) {
+    const match = String(value || "").trim().toLowerCase().match(/(\d+(?:\.\d+)?)\s*([kp])/);
+    if (!match) return Number.MAX_SAFE_INTEGER;
+    const amount = Number(match[1]);
+    return match[2] === "k" ? amount * 1000 : amount;
+}
+
+export function sortVideoQualitiesByResolution<T extends { quality: string }>(qualities: T[]) {
+    return [...qualities].sort((left, right) => videoQualityRank(left.quality) - videoQualityRank(right.quality));
+}
+
 export function videoCapabilitiesOf(config: AiConfig, value: string) {
-    return findChannelModel(config, value)?.model.videoCapabilities;
+    const capabilities = findChannelModel(config, value)?.model.videoCapabilities;
+    return capabilities ? { ...capabilities, qualities: sortVideoQualitiesByResolution(capabilities.qualities) } : undefined;
 }
 
 export function modelIconOf(config: AiConfig, value: string) {
