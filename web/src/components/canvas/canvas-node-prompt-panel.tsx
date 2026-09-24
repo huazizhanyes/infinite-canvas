@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { ArrowUp, AudioLines, Clapperboard, LoaderCircle, Sparkles, Square } from "lucide-react";
+import { ArrowUp, AudioLines, ChevronDown, Clapperboard, Image as ImageIcon, LoaderCircle, RectangleHorizontal, Sparkles, Square } from "lucide-react";
 import { Button, Dropdown, Segmented, Select, Tag, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
-import { defaultConfig, MIN_VIDEO_DURATION_SECONDS, modelMatchesCapability, modelOptionName, normalizeVideoDuration, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, videoCapabilitiesOf, type AiConfig } from "@/stores/use-config-store";
-import { canvasThemes } from "@/lib/canvas-theme";
+import { defaultConfig, imageAspectRatiosOf, imageQualityOptionsOf, imageQualityPricesOf, MIN_VIDEO_DURATION_SECONDS, resolveImageOutputTier, modelMatchesCapability, modelOptionName, normalizeVideoDuration, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, videoCapabilitiesOf, type AiConfig, type ImageOutputTier } from "@/stores/use-config-store";
+import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasResourceMentionTextarea, type CanvasMentionInsertRequest } from "./canvas-resource-mention-textarea";
@@ -23,6 +22,7 @@ import { videoParametersForModel } from "@/lib/video-parameters";
 import { CanvasConnectionPreviewStrip } from "./canvas-connection-preview-strip";
 import { appendCanvasConnectionMention, removeCanvasConnectionMention, type CanvasConnectionPreview } from "@/lib/canvas/canvas-connection-previews";
 import { canvasPromptCharacterWarning, countCanvasPromptCharacters } from "@/lib/canvas/canvas-prompt-character-count";
+import { imageAspectOptionDetails, imageSizeLabel, normalizeImageCount } from "@/lib/image-settings";
 import { resolvePersistedImage } from "@/services/image-storage";
 import { resolvePersistedMediaUrl } from "@/services/file-storage";
 
@@ -204,13 +204,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 {mode === "image" ? (
                     <>
                         <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" className="!h-9 !min-w-0 !max-w-[210px] flex-1 !rounded-lg !border-transparent !bg-transparent !px-2 !text-xs hover:!bg-white/5" onMissingConfig={() => openConfigDialog(true)} />
-                        <CanvasImageSettingsPopover
+                        <CanvasImageQuickControls
                             config={config}
-                            placement="topLeft"
-                            buttonClassName="!h-9 !max-w-[170px] !justify-start !rounded-lg !bg-transparent !px-2.5 !text-xs hover:!bg-white/5"
-                            onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
-                            onMissingConfig={() => openConfigDialog(true)}
+                            theme={theme}
                             onOpenChange={onImageSettingsOpenChange}
+                            onChange={(patch) => onConfigChange(node.id, patch)}
+                            onMissingConfig={() => openConfigDialog(true)}
                         />
                     </>
                 ) : mode === "video" ? (
@@ -426,7 +425,11 @@ function buildQuotePayload(config: AiConfig, mode: CanvasNodeGenerationMode, nod
     if (mode === "image") {
         const request = resolveModelRequestConfig(config, config.model);
         const referenceCount = (node.metadata?.content ? 1 : 0) + activeReferences.filter((reference) => reference.kind === "image").length;
-        return { feature: referenceCount ? "canvas.image.edit" : "canvas.image.generate", requestId, model: request.model, prompt: "", count: Number(config.count || 1), size: config.size, quality: config.quality, outputFormat: "png", referenceCount };
+        const nativeImageQuality = imageQualityOptionsOf(config, config.model).length > 0;
+        const selectedTier = resolveImageOutputTier(config, config.model);
+        const autoEnhanceTo4k = selectedTier === "4k" && !nativeImageQuality;
+        const outputTier = autoEnhanceTo4k ? "2k" : selectedTier;
+        return { feature: referenceCount ? "canvas.image.edit" : "canvas.image.generate", requestId, model: request.model, prompt: "", count: Number(config.count || 1), size: config.size, quality: config.quality, outputTier, autoEnhanceTo4k, outputFormat: "png", referenceCount };
     }
     if (mode === "audio") {
         const request = resolveModelRequestConfig(config, config.model);
@@ -476,6 +479,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         ...globalConfig,
         model,
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
+        imageOutputTier: node.metadata?.imageOutputTier || globalConfig.imageOutputTier || defaultConfig.imageOutputTier,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,
         videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,
         vquality: node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality,
@@ -497,6 +501,177 @@ function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: bool
     if (mode === "audio") return "输入需要配音的文本，或连接上游文本节点";
     if (mode === "image") return hasImageContent ? "描述你想要如何修改这张图片，@ 引用主体" : "描述你想要生成的图片，@ 引用主体";
     return hasTextContent ? "请输入你想要将本段文本修改成什么" : "请输入你想要生成的文本内容";
+}
+
+type CanvasImageQuickControlsProps = {
+    config: AiConfig;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    onOpenChange?: (open: boolean) => void;
+    onMissingConfig?: () => void;
+    onChange: (patch: Partial<CanvasNodeData["metadata"]>) => void;
+};
+
+function CanvasQuickAspectIcon({ option, color }: { option: (typeof imageAspectOptionDetails)[number]; color: string }) {
+    if (option.icon === "auto") return <span className="grid size-4 place-items-center text-[9px] opacity-70">A</span>;
+    const ratio = option.width / Math.max(1, option.height);
+    const boxWidth = ratio >= 1 ? 15 : Math.max(7, 15 * ratio);
+    const boxHeight = ratio >= 1 ? Math.max(7, 15 / ratio) : 15;
+    return (
+        <span className="grid size-4 place-items-center">
+            <span className="border" style={{ width: boxWidth, height: boxHeight, borderColor: color }} />
+        </span>
+    );
+}
+
+function CanvasImageTierMenu({
+    theme,
+    tiers,
+    activeTier,
+    prices,
+    native,
+    onSelect,
+}: {
+    theme: CanvasTheme;
+    tiers: ImageOutputTier[];
+    activeTier: ImageOutputTier;
+    prices: Partial<Record<ImageOutputTier, number>>;
+    native: boolean;
+    onSelect: (tier: ImageOutputTier) => void;
+}) {
+    const gold = "#ffdc4b";
+    return (
+        <div
+            className="w-[276px] rounded-2xl p-2.5"
+            style={{ background: theme.toolbar.panel, border: `1px solid ${theme.toolbar.border}`, boxShadow: "0 18px 42px rgba(0, 0, 0, .36)", color: theme.node.text }}
+        >
+            <div className="px-1 pb-1.5 text-[11px] font-bold tracking-[.04em]" style={{ color: theme.node.muted }}>输出清晰度</div>
+            <div className="flex flex-col gap-1.5">
+                {tiers.map((tier) => {
+                    const active = tier === activeTier;
+                    const price = Number(prices[tier] || 0) / 1_000_000;
+                    const description = native
+                        ? (price > 0 ? `¥${price.toFixed(2)}/张` : "原生输出")
+                        : (tier === "4k" ? "超分增强" : "标准输出");
+                    return (
+                        <button
+                            key={tier}
+                            type="button"
+                            onClick={() => onSelect(tier)}
+                            className={`canvas-tier-option flex h-[42px] w-full items-center gap-2.5 rounded-[10px] px-2.5 text-left transition-colors${active ? " is-active" : ""}`}
+                            style={{ color: active ? gold : theme.node.text, borderColor: active ? "rgba(255, 220, 75, .42)" : undefined, background: active ? "linear-gradient(135deg, rgba(255, 220, 75, .16), rgba(255, 220, 75, .06))" : undefined, boxShadow: active ? "inset 0 0 0 1px rgba(255, 220, 75, .06)" : undefined }}
+                        >
+                            <span className="min-w-[30px] text-[15px] font-black leading-none">{tier.toUpperCase()}</span>
+                            <span className="whitespace-nowrap text-[11px] font-semibold" style={{ color: active ? "#d8bc62" : theme.node.muted }}>{description}</span>
+                            {active ? <span className="ml-auto text-sm font-black" style={{ color: gold }}>✓</span> : null}
+                        </button>
+                    );
+                })}
+            </div>
+            {!native ? (
+                <p className="mt-1.5 whitespace-nowrap border-t px-1.5 pt-2 text-[11px] font-medium leading-[1.55]" style={{ borderColor: "rgba(148, 163, 184, .16)", color: theme.node.muted }}>
+                    4K 为超分增强，并非原生 4K，暂不支持透明图
+                </p>
+            ) : null}
+        </div>
+    );
+}
+
+function CanvasImageQuickControls({ config, theme, onOpenChange, onMissingConfig, onChange }: CanvasImageQuickControlsProps) {
+    const [tierMenuOpen, setTierMenuOpen] = useState(false);
+    const count = normalizeImageCount(config.count, 5);
+    const activeSize = config.size || "auto";
+    const nativeTiers = imageQualityOptionsOf(config, config.model);
+    const outputTiers: ImageOutputTier[] = nativeTiers.length ? nativeTiers : ["2k", "4k"];
+    // Exactly what will be sent to the backend, so the menu never lies about the tier.
+    const activeTier = resolveImageOutputTier(config, config.model);
+    const outputPrices = imageQualityPricesOf(config, config.model);
+    // AIStarsLab routes publish their own aspect ratios; never offer a ratio the model cannot do.
+    const allowedAspectRatios = imageAspectRatiosOf(config, config.model);
+    const aspectOptions = allowedAspectRatios.length
+        ? imageAspectOptionDetails.filter((item) => allowedAspectRatios.includes(item.value))
+        : imageAspectOptionDetails;
+    const aspectOptionList = aspectOptions.length ? aspectOptions : imageAspectOptionDetails;
+    const neutralStyle = { background: theme.node.fill, color: theme.node.text, borderColor: theme.toolbar.border };
+    const countStyle = { background: "rgba(205, 160, 0, .2)", color: "#f3c847", borderColor: "rgba(243, 200, 71, .2)" };
+
+    return (
+        <div className="flex min-w-0 items-center gap-1.5">
+            <Dropdown
+                trigger={["click"]}
+                placement="top"
+                onOpenChange={onOpenChange}
+                menu={{
+                    selectable: true,
+                    selectedKeys: [String(count)],
+                    items: Array.from({ length: 5 }, (_, index) => index + 1).map((value) => ({ key: String(value), label: `${value} 张` })),
+                    onClick: ({ key }) => onChange({ count: Number(key) || 1 }),
+                }}
+            >
+                <button type="button" className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold" style={countStyle}>
+                    <ImageIcon className="size-3.5" />
+                    <span>{count}张</span>
+                    <ChevronDown className="size-3 opacity-70" />
+                </button>
+            </Dropdown>
+
+            <Dropdown
+                trigger={["click"]}
+                placement="top"
+                onOpenChange={onOpenChange}
+                menu={{
+                    selectable: true,
+                    selectedKeys: [activeSize],
+                    items: aspectOptionList.map((item) => ({
+                        key: item.size,
+                        label: (
+                            <span className="flex items-center gap-2">
+                                <CanvasQuickAspectIcon option={item} color={theme.node.text} />
+                                <span>{item.label}</span>
+                            </span>
+                        ),
+                    })),
+                    onClick: ({ key }) => onChange({ size: String(key) }),
+                }}
+            >
+                <button type="button" className="inline-flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold" style={neutralStyle}>
+                    <RectangleHorizontal className="size-3.5" />
+                    <span>{imageSizeLabel(activeSize)}</span>
+                    <ChevronDown className="size-3 opacity-70" />
+                </button>
+            </Dropdown>
+
+            <Dropdown
+                trigger={["click"]}
+                placement="top"
+                open={tierMenuOpen}
+                onOpenChange={(open) => {
+                    setTierMenuOpen(open);
+                    if (open && !nativeTiers.length && !outputTiers.length) onMissingConfig?.();
+                    onOpenChange?.(open);
+                }}
+                popupRender={() => (
+                    <CanvasImageTierMenu
+                        theme={theme}
+                        tiers={outputTiers}
+                        activeTier={activeTier}
+                        prices={outputPrices}
+                        native={nativeTiers.length > 0}
+                        onSelect={(tier) => {
+                            onChange({ imageOutputTier: tier });
+                            setTierMenuOpen(false);
+                            onOpenChange?.(false);
+                        }}
+                    />
+                )}
+            >
+                <button type="button" className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold" style={neutralStyle}>
+                    <span>{activeTier.toUpperCase()}</span>
+                    {activeTier === "4k" && !nativeTiers.length ? <span className="rounded bg-amber-400/20 px-1 text-[9px] leading-4 text-amber-400">超分</span> : null}
+                    <ChevronDown className="size-3 opacity-70" />
+                </button>
+            </Dropdown>
+        </div>
+    );
 }
 
 function videoConfigPatch(key: keyof AiConfig, value: string) {

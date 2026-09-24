@@ -5,8 +5,10 @@ import { Bot, Boxes, BrainCircuit, CircleHelp, Clapperboard, Code2, Cpu, Image, 
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
-import { decodeChannelModel, encodeChannelModel, modelIconOf, modelOptionLabel, modelOptionName, selectableModelsByCapability, useConfigStore, videoCapabilitiesOf, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { decodeChannelModel, encodeChannelModel, imageBillingOf, modelCapabilityOf, modelIconOf, modelOptionLabel, modelOptionName, selectableModelsByCapability, useConfigStore, videoCapabilitiesOf, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useUserStore } from "@/stores/use-user-store";
+import { DEFAULT_VIDEO_ESTIMATE_MS } from "@/lib/video-generation-progress";
 import { markCanvasVideoModel, unmarkCanvasVideoModel } from "@/services/api/canvas-video";
 
 type ModelPickerProps = {
@@ -25,13 +27,23 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const pickerTheme = canvasThemes[useThemeStore((state) => state.theme)];
+    const assets = useUserStore((state) => state.assets);
+    const loadAssets = useUserStore((state) => state.loadAssets);
+    const imageQuotaText = assets ? Number(assets.assets.image.totalAvailable || 0).toLocaleString("zh-CN") : "--";
+    const walletText = assets ? (Number(assets.assets.wallet.availableMicros || 0) / 1_000_000).toFixed(2) : "--";
     const options = useMemo(() => {
         const base = Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model))));
         return sortVideoModelsByMark(base, config);
     }, [capability, config, value]);
     const groups = useMemo(() => buildModelGroups(config, options), [config, options]);
+    const showChannelGroups = capability === "video" || (!capability && options.some((model) => Boolean(videoCapabilitiesOf(config, model))));
+    const displayGroups = useMemo(
+        () => showChannelGroups ? groups : [{ key: "all", alias: "", models: options }],
+        [groups, options, showChannelGroups],
+    );
     const current = value || "";
-    const currentAlias = current ? channelAliasForModel(config, current) : "";
+    const showCurrentChannel = capability === "video" || (!capability && Boolean(videoCapabilitiesOf(config, current)));
+    const currentAlias = current && showCurrentChannel ? channelAliasForModel(config, current) : "";
     const currentLabel = current ? `${displayedModelName(config, current)}${currentAlias ? ` · ${currentAlias}` : ""}` : placeholder;
 
     useEffect(() => {
@@ -47,6 +59,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             open={open}
             value={current}
             onOpenChange={(nextOpen) => {
+                if (nextOpen && capability === "image") void loadAssets();
                 if (nextOpen && !options.length && config.channelMode === "local") onMissingConfig?.();
                 if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
                 setOpen(nextOpen);
@@ -72,7 +85,10 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             <SelectContent
                 data-canvas-no-zoom
                 hideScrollButtons
-                className="z-[1200] !max-h-[min(var(--radix-select-content-available-height),32rem)] w-[22rem] max-w-[calc(100vw-24px)] !overflow-hidden rounded-lg border border-border/70 bg-popover p-0.5 text-xs shadow-xl"
+                className={cn(
+                    "z-[1200] !max-h-[min(var(--radix-select-content-available-height),32rem)] max-w-[calc(100vw-24px)] !overflow-hidden rounded-lg border border-border/70 bg-popover p-0.5 text-xs shadow-xl",
+                    "w-[21rem]",
+                )}
                 viewportClassName="!h-auto !max-h-[min(var(--radix-select-content-available-height),29rem)] overscroll-contain"
                 position="popper"
                 align="start"
@@ -82,22 +98,27 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 onMouseDown={(event) => event.stopPropagation()}
             >
                 {options.length ? (
-                    groups.map((group) => (
+                    displayGroups.map((group) => (
                         <SelectGroup key={group.key} className="!scroll-my-0 p-0 [&+&]:mt-1">
-                            <SelectLabel className="sticky top-0 z-10 mb-0.5 flex h-9 items-center gap-2.5 bg-popover px-3 pt-1 text-[10px] font-normal tracking-wide">
-                                <span className={groupDividerClass()} />
-                                <span className="shrink-0 leading-none" style={{ color: pickerTheme.node.muted }}>
-                                    渠道<span className="font-semibold" style={{ color: groupAliasColor(group.alias, pickerTheme) }}>{group.alias}</span>
-                                </span>
-                                <span className={groupDividerClass()} />
-                            </SelectLabel>
+                            {showChannelGroups ? (
+                                <SelectLabel className="sticky top-0 z-10 mb-0.5 flex h-9 items-center gap-2.5 bg-popover px-3 pt-1 text-[10px] font-normal tracking-wide">
+                                    <span className={groupDividerClass()} />
+                                    <span className="shrink-0 leading-none" style={{ color: pickerTheme.node.muted }}>
+                                        渠道<span className="font-semibold" style={{ color: groupAliasColor(group.alias, pickerTheme) }}>{group.alias}</span>
+                                    </span>
+                                    <span className={groupDividerClass()} />
+                                </SelectLabel>
+                            ) : null}
                             {group.models.map((model) => (
                                 <SelectItem
                                     key={model}
                                     value={model}
-                                    hideIndicator={Boolean(videoCapabilitiesOf(config, model))}
+                                    hideIndicator={capability === "image" || Boolean(videoCapabilitiesOf(config, model))}
                                     textValue={displayedModelName(config, model)}
-                                    className="relative my-1 w-full rounded-none border-0 border-b border-white/12 py-1.5 !pr-1.5 last:mb-0 data-[state=checked]:border-b-sky-300/35 data-[state=checked]:bg-sky-400/12 data-[state=checked]:shadow-[inset_3px_0_0_rgba(56,189,248,.95)] [&>span:last-child]:min-w-0 [&>span:last-child]:w-full"
+                                    className={cn(
+                                        "relative my-1 w-full rounded-none border-0 border-b border-white/12 !pr-1.5 last:mb-0 data-[state=checked]:border-b-sky-300/35 data-[state=checked]:bg-sky-400/12 data-[state=checked]:shadow-[inset_3px_0_0_rgba(56,189,248,.95)] [&>span:last-child]:min-w-0 [&>span:last-child]:w-full",
+                                        capability === "image" ? "py-2.5" : "py-1.5",
+                                    )}
                                 >
                                     <ModelLabel config={config} model={model} />
                                 </SelectItem>
@@ -109,6 +130,20 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                         {emptyModelLabel(config, capability)}
                     </SelectItem>
                 )}
+                {capability === "image" && options.length ? (
+                    <div className="sticky bottom-0 mt-1 border-t border-border/70 bg-popover px-3 py-2.5 text-[11px] leading-5">
+                        <div className="flex items-baseline gap-1.5" style={{ color: pickerTheme.node.muted }}>
+                            <span>免费模型额度剩余：</span>
+                            <strong className="text-[14px] leading-none text-emerald-400">{imageQuotaText}</strong>
+                            <span>张</span>
+                        </div>
+                        <div className="mt-1 flex items-baseline gap-1.5" style={{ color: pickerTheme.node.muted }}>
+                            <span>付费模型余额：</span>
+                            <strong className="text-[14px] leading-none text-amber-400">{walletText}</strong>
+                            <span>元</span>
+                        </div>
+                    </div>
+                ) : null}
             </SelectContent>
         </Select>
     );
@@ -313,12 +348,39 @@ function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
             </Popover>
         );
     }
+    const name = displayedModelName(config, model);
+    const billing = imageBillingMeta(config, model);
     return (
-        <span className="flex min-w-0 items-center gap-2">
+        <span className="flex w-full min-w-0 items-center gap-2">
             <ModelIcon config={config} model={model} />
-            <span className="truncate">{modelOptionLabel(config, model)}</span>
+            {billing ? (
+                <span className="grid w-full min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4">
+                    <span className="min-w-0 truncate text-[13px] font-medium leading-4">{name}</span>
+                    <span
+                        className={cn(
+                            "shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold leading-3",
+                            billing.paid ? "bg-amber-400/15 text-amber-500" : "bg-emerald-400/15 text-emerald-500",
+                        )}
+                    >
+                        {billing.badge}
+                    </span>
+                </span>
+            ) : (
+                <span className="truncate">{name}</span>
+            )}
         </span>
     );
+}
+
+function imageBillingMeta(config: AiConfig, model: string) {
+    if (modelCapabilityOf(config, model) !== "image") return null;
+    const billing = imageBillingOf(config, model);
+    const paid = billing?.policy === "wallet_only";
+    const priceYuan = Number(billing?.unitPriceMicros || 0) / 1_000_000;
+    return {
+        paid,
+        badge: paid ? (priceYuan > 0 ? `¥${priceYuan.toFixed(2)}/张` : "付费") : "免费",
+    };
 }
 
 function ModelIcon({ config, model, large = false }: { config: AiConfig; model: string; large?: boolean }) {
@@ -387,9 +449,10 @@ function ModelHealthSummary({ video }: { video: NonNullable<ReturnType<typeof vi
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const stats = video.statsRecent3;
     const recent = video.recent3;
+    const hasSamples = Number(stats?.sampleCount || 0) > 0;
     const successRate = stats?.successRate;
-    const successPercent = successRate == null ? 0 : Math.max(0, Math.min(100, successRate));
-    const avgDuration = recent?.avgDurationSeconds;
+    const successPercent = !hasSamples ? 100 : successRate == null ? 0 : Math.max(0, Math.min(100, successRate));
+    const avgDuration = !hasSamples ? DEFAULT_VIDEO_ESTIMATE_MS / 1000 : recent?.avgDurationSeconds;
     const durationBaselineSeconds = 8 * 60;
     const durationPercent = avgDuration == null ? 0 : avgDuration <= durationBaselineSeconds ? 100 : Math.max(8, Math.min(100, durationBaselineSeconds / avgDuration * 100));
     const durationColor = avgDuration == null || avgDuration <= durationBaselineSeconds ? "bg-emerald-400" : avgDuration <= 12 * 60 ? "bg-amber-400" : "bg-red-400";
@@ -417,7 +480,9 @@ function ModelHealthSummary({ video }: { video: NonNullable<ReturnType<typeof vi
                 valueClassName={successPercent < 60 ? "text-red-300" : "text-emerald-300"}
                 percent={successPercent}
                 barClassName={successPercent < 60 ? "bg-red-400" : "bg-emerald-400"}
-                title={`成功率：${Math.round(successPercent)}% · 最近${stats?.sampleCount || 0}条任务：${stats?.successCount || 0}次成功，${stats?.failedCount || 0}次失败`}
+                title={hasSamples
+                    ? `成功率：${Math.round(successPercent)}% · 最近${stats?.sampleCount || 0}条任务：${stats?.successCount || 0}次成功，${stats?.failedCount || 0}次失败`
+                    : "成功率：100% · 暂无历史任务，展示默认值"}
                 theme={theme}
             />
             <ModelHealthMetric
@@ -426,7 +491,9 @@ function ModelHealthSummary({ video }: { video: NonNullable<ReturnType<typeof vi
                 valueClassName={durationValueColor}
                 percent={durationPercent}
                 barClassName={durationColor}
-                title={avgDuration == null ? "平均耗时：最近3条任务中没有成功样本" : `平均耗时：${formatDuration(avgDuration)} · 最近3条任务中的${recent?.sampleCount || 0}次成功样本`}
+                title={!hasSamples
+                    ? `平均耗时：${formatDuration(avgDuration)} · 暂无历史任务，展示默认值`
+                    : avgDuration == null ? "平均耗时：最近3条任务中没有成功样本" : `平均耗时：${formatDuration(avgDuration)} · 最近3条任务中的${recent?.sampleCount || 0}次成功样本`}
                 theme={theme}
             />
         </span>

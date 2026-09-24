@@ -66,13 +66,10 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         window.history.replaceState(null, "", `${window.location.pathname}${searchParams.size ? `?${searchParams}` : ""}${window.location.hash}`);
 
         const token = localStorage.getItem(SUCAI_TOKEN_KEY) || "";
-        if (!token) {
-            setSucaiState("ready");
-            return;
-        }
 
         const requestModels = async (path: string, optional = false) => {
-            const response = await fetch(`${SUCAI_API_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+            const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+            const response = await fetch(`${SUCAI_API_BASE}${path}`, { headers });
             const payload = await response.json().catch(() => ({}));
             if (!response.ok) {
                 if (optional) return [];
@@ -115,32 +112,52 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 recent3: item.recent3 || null,
             }),
         });
+        const applyVideoModels = (videoModels: any[], initializeSettings = false) => {
+            if (!videoModels.length) return;
+            const current = useConfigStore.getState().config;
+            const mappedVideoModels = videoModels.map(mapVideoModel);
+            const existingChannel = current.channels.find((channel) => channel.id === SUCAI_CHANNEL_ID);
+            const nextVideoChannel = createModelChannel({
+                ...(existingChannel || {}),
+                id: SUCAI_CHANNEL_ID,
+                name: existingChannel?.name || "闪帧 AI 画布",
+                baseUrl: existingChannel?.baseUrl || SUCAI_API_BASE,
+                apiKey: existingChannel?.apiKey || token,
+                apiFormat: existingChannel?.apiFormat || "openai",
+                models: [...(existingChannel?.models || []).filter((item) => item.capability !== "video"), ...mappedVideoModels],
+            });
+            const channels = existingChannel
+                ? current.channels.map((channel) => channel.id === SUCAI_CHANNEL_ID ? nextVideoChannel : channel)
+                : [...current.channels, nextVideoChannel];
+            const selectedExists = channels.some((channel) => channel.models.some((item) => encodeChannelModel(channel.id, item.name) === current.videoModel));
+            const nextDefault = videoModels.find((item: { default_option?: boolean }) => item.default_option) || videoModels[0];
+            updateConfig("channels", channels);
+            updateConfig("models", modelOptionsFromChannels(channels));
+            if (!selectedExists || initializeSettings) {
+                const selected = mappedVideoModels.find((item) => encodeChannelModel(SUCAI_CHANNEL_ID, item.name) === current.videoModel)
+                    || mappedVideoModels.find((item) => item.name === nextDefault?.id)
+                    || mappedVideoModels[0];
+                const videoModelValue = selected?.name ? encodeChannelModel(SUCAI_CHANNEL_ID, selected.name) : "";
+                if (!videoModelValue) return;
+                updateConfig("videoModel", videoModelValue);
+                const capabilities = selected.videoCapabilities;
+                updateConfig("videoMode", capabilities?.modes[0] || "text2video");
+                updateConfig("size", capabilities?.aspectRatios[0] || "16:9");
+                updateConfig("vquality", capabilities?.qualities[0]?.quality || "720p");
+                updateConfig("videoSeconds", String(normalizeVideoDuration(undefined, capabilities?.duration)));
+                updateConfig("videoParameters", Object.fromEntries((capabilities?.parameters || []).map((parameter: any) => [parameter.key, parameter.defaultValue] as [string, unknown]).filter(([, value]: [string, unknown]) => value !== undefined)));
+            }
+        };
+        const fetchVideoModels = (initializeSettings = false) => requestModels("/v1/video/models", true)
+            .then((videoModels) => applyVideoModels(videoModels, initializeSettings))
+            .catch(() => undefined);
         const refreshVideoPricing = () => {
-            void requestModels("/v1/video/models", true).then((videoModels) => {
-                if (!videoModels.length) return;
-                const current = useConfigStore.getState().config;
-                const channels = current.channels.map((channel) => channel.id === SUCAI_CHANNEL_ID
-                    ? createModelChannel({ ...channel, models: [...channel.models.filter((item) => item.capability !== "video"), ...videoModels.map(mapVideoModel)] })
-                    : channel);
-                const selectedExists = channels.some((channel) => channel.models.some((item) => encodeChannelModel(channel.id, item.name) === current.videoModel));
-                const nextDefault = videoModels.find((item: { default_option?: boolean }) => item.default_option) || videoModels[0];
-                updateConfig("channels", channels);
-                updateConfig("models", modelOptionsFromChannels(channels));
-                if (!selectedExists) updateConfig("videoModel", nextDefault?.id ? encodeChannelModel(SUCAI_CHANNEL_ID, nextDefault.id) : "");
-            }).catch(() => undefined);
+            void fetchVideoModels(false);
         };
         let refreshTimer: number | undefined;
         const refreshVideoStats = () => {
             if (document.visibilityState === "hidden") return;
-            void requestModels("/v1/video/models", true).then((videoModels) => {
-                if (!videoModels.length) return;
-                const current = useConfigStore.getState().config;
-                const channels = current.channels.map((channel) => channel.id === SUCAI_CHANNEL_ID
-                    ? createModelChannel({ ...channel, models: [...channel.models.filter((item) => item.capability !== "video"), ...videoModels.map(mapVideoModel)] })
-                    : channel);
-                updateConfig("channels", channels);
-                updateConfig("models", modelOptionsFromChannels(channels));
-            }).catch(() => undefined);
+            void fetchVideoModels(false);
         };
         const startStatsRefresh = () => {
             if (refreshTimer === undefined) refreshTimer = window.setInterval(refreshVideoStats, 60_000);
@@ -155,37 +172,64 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         };
         window.addEventListener("canvas-video-pricing-changed", refreshVideoPricing);
         document.addEventListener("visibilitychange", handleVisibilityChange);
+        const cleanup = () => {
+            window.removeEventListener("canvas-video-pricing-changed", refreshVideoPricing);
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
+            stopStatsRefresh();
+        };
 
-        void Promise.all([requestModels("/v1/models"), requestModels("/v1/video/models", true).catch(() => [])])
-            .then(async ([models, videoModels]) => {
+        if (!token) {
+            setSucaiState("ready");
+            startStatsRefresh();
+            void fetchVideoModels(true);
+            return cleanup;
+        }
+
+        const initialVideoModels = requestModels("/v1/video/models", true).catch(() => []);
+        void requestModels("/v1/models")
+            .then(async (models) => {
                 await transitionCanvasAccount(token);
-                const imageModel = models.find((item: { capability?: string }) => item.capability === "image") || models[0];
+                const imageModel = models.find((item: { capability?: string }) => item.capability === "image");
                 const textModels = models.filter((item: { capability?: string }) => item.capability === "text");
                 const audioModels = models.filter((item: { capability?: string }) => item.capability === "audio");
                 const textModel = textModels.find((item: { is_default?: boolean }) => item.is_default) || textModels[0];
                 const audioModel = audioModels.find((item: { is_default?: boolean }) => item.is_default) || audioModels[0];
-                const mappedVideoModels = videoModels.map(mapVideoModel);
-                const videoModel = videoModels.find((item: { default_option?: boolean }) => item.default_option) || videoModels[0];
-                const selectedVideoModel = mappedVideoModels.find((item: { name: string }) => item.name === videoModel?.id);
-                const selectedVideoCapabilities = selectedVideoModel?.videoCapabilities;
-                if (!imageModel?.id) throw new Error("管理员尚未配置画布生图模型");
                 const channel = createModelChannel({
                     id: SUCAI_CHANNEL_ID,
                     name: "闪帧 AI 画布",
                     baseUrl: SUCAI_API_BASE,
                     apiKey: token,
                     apiFormat: "openai",
-                    models: [
-                        ...models
-                            .filter((item: { id?: string; capability?: string }) => item.id && ["image", "text", "audio"].includes(item.capability || ""))
-                            .map((item: { id: string; display_name?: string; capability: "image" | "text" | "audio"; icon?: string; icon_url?: string }) => ({ name: item.id, displayName: item.display_name || item.id, capability: item.capability, icon: item.icon, iconUrl: item.icon_url })),
-                        ...mappedVideoModels,
-                    ],
+                    models: models
+                        .filter((item: { id?: string; capability?: string }) => item.id && ["image", "text", "audio"].includes(item.capability || ""))
+                        .map((item: { id: string; display_name?: string; capability: "image" | "text" | "audio"; icon?: string; icon_url?: string; billing_policy?: "quota_then_wallet" | "wallet_only"; billing_policy_label?: string; unit_price_micros?: string | number; native_quality?: boolean; quality_options?: Array<{ tier?: string; price_micros?: string | number }>; aspect_ratios?: Array<string | number> }) => ({
+                            name: item.id,
+                            displayName: item.display_name || item.id,
+                            capability: item.capability,
+                            icon: item.icon,
+                            iconUrl: item.icon_url,
+                            billingPolicy: item.billing_policy,
+                            billingPolicyLabel: item.billing_policy_label,
+                            unitPriceMicros: Number(item.unit_price_micros || 0),
+                            nativeQuality: item.native_quality === true,
+                            qualityOptions: Array.isArray(item.quality_options)
+                                ? item.quality_options.map(option => String(option.tier || "").toLowerCase()).filter((tier): tier is "1k" | "2k" | "4k" => ["1k", "2k", "4k"].includes(tier))
+                                : undefined,
+                            qualityPrices: Array.isArray(item.quality_options)
+                                ? Object.fromEntries(item.quality_options.map(option => [String(option.tier || "").toLowerCase(), Number(option.price_micros || 0)]))
+                                : undefined,
+                            imageAspectRatios: Array.isArray(item.aspect_ratios)
+                                ? item.aspect_ratios.map(ratio => String(ratio || "").trim()).filter(Boolean)
+                                : undefined,
+                        })),
                 });
-                const imageModelValue = encodeChannelModel(channel.id, imageModel.id);
+                const imageModelValue = imageModel?.id ? encodeChannelModel(channel.id, imageModel.id) : "";
+                const configuredImageTiers = Array.isArray((imageModel as any)?.qualityOptions) ? (imageModel as any).qualityOptions as Array<"1k" | "2k" | "4k"> : [];
+                const imageOutputTiers: Array<"1k" | "2k" | "4k"> = configuredImageTiers.length ? configuredImageTiers : ["1k", "2k", "4k"];
+                const selectedImageTier = useConfigStore.getState().config.imageOutputTier;
+                const imageOutputTier: "1k" | "2k" | "4k" = imageOutputTiers.includes(selectedImageTier) ? selectedImageTier : imageOutputTiers.includes("2k") ? "2k" : imageOutputTiers[0];
                 const textModelValue = textModel?.id ? encodeChannelModel(channel.id, textModel.id) : "";
                 const audioModelValue = audioModel?.id ? encodeChannelModel(channel.id, audioModel.id) : "";
-                const videoModelValue = videoModel?.id ? encodeChannelModel(channel.id, videoModel.id) : "";
                 updateConfig("channels", [channel]);
                 updateConfig("models", modelOptionsFromChannels([channel]));
                 updateConfig("baseUrl", channel.baseUrl);
@@ -193,15 +237,8 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 updateConfig("apiFormat", "openai");
                 updateConfig("model", imageModelValue);
                 updateConfig("imageModel", imageModelValue);
+                updateConfig("imageOutputTier", imageOutputTier);
                 if (textModelValue) updateConfig("textModel", textModelValue);
-                if (videoModelValue) {
-                    updateConfig("videoModel", videoModelValue);
-                    updateConfig("videoMode", selectedVideoCapabilities?.modes[0] || visibleCanvasVideoModes(videoModel.modes)[0] || "text2video");
-                    updateConfig("size", selectedVideoCapabilities?.aspectRatios[0] || videoModel.aspect_ratios?.[0] || "16:9");
-                    updateConfig("vquality", selectedVideoCapabilities?.qualities[0]?.quality || videoModel.qualities?.[0]?.quality || "720p");
-                    updateConfig("videoSeconds", String(normalizeVideoDuration(undefined, selectedVideoCapabilities?.duration || videoModel.duration)));
-                    updateConfig("videoParameters", Object.fromEntries((videoModel.parameters || []).map((parameter: any) => [parameter.key, parameter.defaultValue] as [string, unknown]).filter(([, value]: [string, unknown]) => value !== undefined)));
-                } else updateConfig("videoModel", "");
                 if (audioModelValue) {
                     updateConfig("audioModel", audioModelValue);
                     updateConfig("audioFormat", "wav");
@@ -214,18 +251,14 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     console.warn("[SucaiCanvasSync] initialization failed", error);
                 });
                 setSucaiState("ready");
-                refreshVideoStats();
                 startStatsRefresh();
+                void initialVideoModels.then((videoModels) => applyVideoModels(videoModels, true));
             })
             .catch((error) => {
                 setSucaiError(error instanceof Error ? error.message : "画布初始化失败");
                 setSucaiState("error");
             });
-        return () => {
-            window.removeEventListener("canvas-video-pricing-changed", refreshVideoPricing);
-            document.removeEventListener("visibilitychange", handleVisibilityChange);
-            stopStatsRefresh();
-        };
+        return cleanup;
     }, [setConfigDialogOpen, updateConfig]);
 
     useEffect(() => {

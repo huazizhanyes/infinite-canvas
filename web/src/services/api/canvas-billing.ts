@@ -73,6 +73,31 @@ export type CanvasVideoLedgerRow = {
     error?: { code?: string; message?: string } | null;
 };
 
+export type CanvasImageLedgerRow = {
+    reservationId: string;
+    taskId: string;
+    model: string;
+    modelDisplayName?: string | null;
+    outputTier?: string | null;
+    size?: string | null;
+    count: number;
+    status?: string | null;
+    billingState: string;
+    chargedMicros: string;
+    reservedMicros: string;
+    createdAt?: string | null;
+    settledAt?: string | null;
+    finishedAt?: string | null;
+};
+
+export type CanvasImageLedger = {
+    total: number;
+    page: number;
+    limit: number;
+    summary: { availableMicros: string; reservedMicros: string; totalSpentMicros: string };
+    list: CanvasImageLedgerRow[];
+};
+
 export type CanvasVideoLedger = {
     total: number;
     page: number;
@@ -140,6 +165,10 @@ export const canvasBillingApi = {
     },
     async quote(connection: UserAssetConnection, payload: Record<string, unknown>, signal?: AbortSignal) {
         const { data } = await axios.post<CanvasBillingQuote>(`${base(connection)}/billing/quote`, payload, { headers: headers(connection), signal });
+        return data;
+    },
+    async imageLedger(connection: UserAssetConnection, params: { page?: number; limit?: number } = {}) {
+        const { data } = await axios.get<CanvasImageLedger>(`${base(connection)}/billing/image-ledger`, { headers: headers(connection), params });
         return data;
     },
     async summary(connection: UserAssetConnection) {

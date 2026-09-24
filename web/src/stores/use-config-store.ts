@@ -8,6 +8,7 @@ import { videoParametersForModel } from "@/lib/video-parameters";
 
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text" | "audio";
+export type ImageOutputTier = "1k" | "2k" | "4k";
 export const MIN_VIDEO_DURATION_SECONDS = 5;
 const TEMPORARILY_HIDDEN_VIDEO_MODES = new Set(["frames2video", "first-frame-to-video"]);
 
@@ -131,6 +132,14 @@ export type ChannelModel = {
     icon?: string;
     iconUrl?: string;
     script?: string;
+    billingPolicy?: "quota_then_wallet" | "wallet_only";
+    billingPolicyLabel?: string;
+    unitPriceMicros?: number;
+    nativeQuality?: boolean;
+    qualityOptions?: ImageOutputTier[];
+    qualityPrices?: Partial<Record<ImageOutputTier, number>>;
+    /** Aspect ratios published by the upstream model; empty means no restriction is known. */
+    imageAspectRatios?: string[];
     videoCapabilities?: VideoModelCapabilities;
 };
 
@@ -151,6 +160,7 @@ export type AiConfig = {
     channels: ModelChannel[];
     model: string;
     imageModel: string;
+    imageOutputTier: ImageOutputTier;
     videoModel: string;
     textModel: string;
     audioModel: string;
@@ -201,6 +211,7 @@ export const defaultConfig: AiConfig = {
     ],
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
+    imageOutputTier: "2k",
     videoModel: "",
     textModel: "default::gpt-5.5",
     audioModel: "default::gpt-4o-mini-tts",
@@ -219,7 +230,7 @@ export const defaultConfig: AiConfig = {
     quality: "auto",
     size: "1:1",
     count: "1",
-    canvasImageCount: "3",
+    canvasImageCount: "1",
     videoParameters: {},
 };
 
@@ -259,6 +270,46 @@ function findChannelModel(config: AiConfig, value: string): { channel: ModelChan
 
 export function modelCapabilityOf(config: AiConfig, value: string): ModelCapability | undefined {
     return findChannelModel(config, value)?.model.capability;
+}
+
+export function imageQualityOptionsOf(config: AiConfig, value: string): ImageOutputTier[] {
+    const model = findChannelModel(config, value)?.model;
+    if (!model || model.capability !== "image" || !model.nativeQuality) return [];
+    if (model.billingPolicy !== "wallet_only") return [];
+    const options: ImageOutputTier[] = Array.isArray(model.qualityOptions) && model.qualityOptions.length ? model.qualityOptions : ["1k", "2k", "4k"];
+    return options;
+}
+
+/** Aspect ratios published by the model (AIStarsLab routes). Empty means no restriction is known. */
+export function imageAspectRatiosOf(config: AiConfig, value: string): string[] {
+    const ratios = findChannelModel(config, value)?.model.imageAspectRatios;
+    return Array.isArray(ratios) ? ratios : [];
+}
+
+/**
+ * The output tier that will actually be sent for this model. It mirrors what the
+ * tier menu displays so the UI, the quote and the charge can never disagree: an
+ * unsupported or missing stored value resolves to the first tier of the model.
+ */
+export function resolveImageOutputTier(config: AiConfig, value: string): ImageOutputTier {
+    const tiers = imageQualityOptionsOf(config, value);
+    const available: ImageOutputTier[] = tiers.length ? tiers : ["2k", "4k"];
+    const stored = String(config.imageOutputTier || "").trim().toLowerCase() as ImageOutputTier;
+    return available.includes(stored) ? stored : available[0];
+}
+
+export function imageQualityPricesOf(config: AiConfig, value: string): Partial<Record<ImageOutputTier, number>> {
+    return findChannelModel(config, value)?.model.qualityPrices || {};
+}
+
+export function imageBillingOf(config: AiConfig, value: string) {
+    const model = findChannelModel(config, value)?.model;
+    if (!model || model.capability !== "image") return null;
+    return {
+        policy: model.billingPolicy || "quota_then_wallet" as const,
+        label: model.billingPolicyLabel || "",
+        unitPriceMicros: Number(model.unitPriceMicros || 0),
+    };
 }
 
 export function videoQualityRank(value: unknown) {
@@ -315,6 +366,13 @@ export const useConfigStore = create<ConfigStore>()(
                         ...state.config,
                         [key]: value,
                     };
+                    if (key === "imageModel") {
+                        const tiers = imageQualityOptionsOf(config, String(value));
+                        if (tiers.length && !tiers.includes(config.imageOutputTier)) {
+                            config.imageOutputTier = tiers.includes("2k") ? "2k" : tiers[0];
+                        }
+                        return { config };
+                    }
                     if (key !== "videoModel") return { config };
                     // 切换视频模型时按新模型的参数定义重算扩展参数：否则上一个模型残留的参数
                     // （例如 ModelHub 的 generate_audio）会被带到不支持它的模型上，服务端直接 400。
@@ -346,6 +404,13 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
+            version: 2,
+            migrate: (persisted: any, version: number) => {
+                if ((version || 0) < 2 && persisted?.config?.canvasImageCount === "3") {
+                    return { ...persisted, config: { ...persisted.config, canvasImageCount: "1" } };
+                }
+                return persisted;
+            },
             storage: createJSONStorage(() => ({
                 getItem: (name) => localForageStorage.getItem(accountScopedKey(name)),
                 setItem: (name, value) => localForageStorage.setItem(accountScopedKey(name), value),
@@ -368,6 +433,7 @@ export const useConfigStore = create<ConfigStore>()(
                         channels,
                         models,
                         imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
+                        imageOutputTier: normalizeImageOutputTier(config.imageOutputTier),
                         videoModel: normalizeModelOptionValue(config.videoModel, channels),
                         textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
                         audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
@@ -413,8 +479,15 @@ export function normalizeChannelModels(models: Array<string | ChannelModel> | un
         const icon = typeof item === "string" ? undefined : item.icon?.trim() || undefined;
         const iconUrl = typeof item === "string" ? undefined : item.iconUrl?.trim() || undefined;
         const script = typeof item === "string" ? undefined : item.script?.trim() || undefined;
+        const billingPolicy = typeof item === "string" ? undefined : item.billingPolicy;
+        const billingPolicyLabel = typeof item === "string" ? undefined : item.billingPolicyLabel?.trim() || undefined;
+        const unitPriceMicros = typeof item === "string" ? undefined : Number(item.unitPriceMicros || 0);
+        const nativeQuality = typeof item === "string" ? undefined : item.nativeQuality === true;
+        const qualityOptions = typeof item === "string" ? undefined : Array.isArray(item.qualityOptions) ? item.qualityOptions.filter(value => ["1k", "2k", "4k"].includes(value)) : undefined;
+        const qualityPrices = typeof item === "string" ? undefined : item.qualityPrices;
+        const imageAspectRatios = typeof item === "string" ? undefined : Array.isArray(item.imageAspectRatios) ? item.imageAspectRatios.map(value => String(value || "").trim()).filter(Boolean) : undefined;
         const videoCapabilities = typeof item === "string" ? undefined : item.videoCapabilities;
-        result.push({ name, displayName, capability, icon, iconUrl, script, videoCapabilities });
+        result.push({ name, displayName, capability, icon, iconUrl, script, billingPolicy, billingPolicyLabel, unitPriceMicros, nativeQuality, qualityOptions, qualityPrices, imageAspectRatios, videoCapabilities });
     }
     return result;
 }
@@ -523,6 +596,11 @@ function normalizeChannels(config: AiConfig) {
 
 export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
     return apiFormat === "gemini" ? GEMINI_BASE_URL : OPENAI_BASE_URL;
+}
+
+export function normalizeImageOutputTier(value: unknown, fallback: ImageOutputTier = "2k"): ImageOutputTier {
+    const normalized = String(value || "").trim().toLowerCase();
+    return normalized === "1k" || normalized === "2k" || normalized === "4k" ? normalized : fallback;
 }
 
 function normalizeApiFormat(apiFormat: unknown): ApiCallFormat {

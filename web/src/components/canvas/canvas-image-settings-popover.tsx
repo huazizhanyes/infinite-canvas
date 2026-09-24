@@ -7,7 +7,7 @@ import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { imageQualityLabel, imageSizeLabel } from "@/lib/image-settings";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
-import type { AiConfig } from "@/stores/use-config-store";
+import { imageQualityOptionsOf, type AiConfig } from "@/stores/use-config-store";
 
 type CanvasImageSettingsPopoverProps = {
     config: AiConfig;
@@ -27,6 +27,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
     const [open, setOpen] = useState(false);
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
     const quality = config.quality || "auto";
+    const nativeImageTiers = imageQualityOptionsOf(config, config.imageModel || config.model);
     const count = Math.max(1, Math.min(5, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
     const updateOpen = (nextOpen: boolean) => {
@@ -71,7 +72,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
                     onClick={() => updateOpen(!open)}
                 >
                     <span className="truncate">
-                        {imageQualityLabel(quality)} · {imageSizeLabel(activeSize)} · {count} 张
+                        {nativeImageTiers.length ? `${config.imageOutputTier.toUpperCase()} · ` : ""}{imageQualityLabel(quality)} · {imageSizeLabel(activeSize)} · {count} 张
                     </span>
                 </Button>
             </span>

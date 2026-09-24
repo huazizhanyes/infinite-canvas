@@ -1,6 +1,7 @@
 import axios, { type AxiosResponse } from "axios";
 
-import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { imageAspectOptionDetails } from "@/lib/image-settings";
+import { buildApiUrl, imageAspectRatiosOf, imageQualityOptionsOf, modelMatchesCapability, resolveImageOutputTier, resolveModelRequestConfig, resolveModelScript, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -752,17 +753,51 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
     return images;
 }
 
+/**
+ * Resolve which model a canvas image request must bill.
+ *
+ * A canvas image node stores its own pick on `config.model`; the standalone
+ * image page mirrors the picked model onto both `model` and `imageModel`.
+ * Prefer `model` whenever it is an image model so a node-level pick is never
+ * silently replaced by the global default image model (which would bill and
+ * record a different model than the user selected).
+ */
+/**
+ * AIStarsLab image routes only accept the aspect ratios the model publishes, so
+ * send that ratio directly. Legacy routes keep receiving a pixel size.
+ */
+function resolveImageRequestSize(config: AiConfig, imageModelValue: string, quality: string | undefined) {
+    const ratios = imageAspectRatiosOf(config, imageModelValue);
+    if (ratios.length) {
+        const preset = imageAspectOptionDetails.find((item) => item.size === config.size || item.value === config.size);
+        const ratio = preset && ratios.includes(preset.value) ? preset.value : null;
+        if (ratio) return ratio;
+    }
+    return resolveRequestSize(quality, config.size);
+}
+
+export function resolveImageModelValue(config: AiConfig) {
+    return modelMatchesCapability(config, config.model, "image") ? config.model : config.imageModel || config.model;
+}
+
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.imageModel || config.model);
+    const imageModelValue = resolveImageModelValue(config);
+    const requestConfig = resolveModelRequestConfig(config, imageModelValue);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const connection = useUserStore.getState().connection;
     const usesCanvasBilling = !!connection && requestConfig.baseUrl.replace(/\/+$/, "") === connection.canvasBaseUrl.replace(/\/+$/, "");
+    const nativeImageQuality = imageQualityOptionsOf(config, imageModelValue).length > 0;
+    // Use the tier the menu displays (never the raw/stale stored value) so the quote
+    // and the upstream request always match what the user selected.
+    const selectedOutputTier = resolveImageOutputTier(config, imageModelValue);
+    const autoEnhanceTo4k = selectedOutputTier === "4k" && !nativeImageQuality;
+    const requestOutputTier = autoEnhanceTo4k ? "2k" : selectedOutputTier;
     // The official canvas channel must use the server billing/task route even
     // when an old persisted model entry still contains a custom script.
-    const script = usesCanvasBilling ? "" : resolveModelScript(config, config.imageModel || config.model);
+    const script = usesCanvasBilling ? "" : resolveModelScript(config, imageModelValue);
     if (script) {
         const quality = normalizeQuality(config.quality);
-        const requestSize = resolveRequestSize(quality, config.size);
+        const requestSize = resolveImageRequestSize(config, imageModelValue, quality);
         try {
             const result = await runModelPlugin({
                 capability: "image",
@@ -786,13 +821,14 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         }
     }
     const quality = normalizeQuality(config.quality);
-    const requestSize = resolveRequestSize(quality, config.size);
+    const requestSize = resolveImageRequestSize(config, imageModelValue, quality);
     try {
         const requestId = options?.clientRequestId || nanoid();
         const quote = usesCanvasBilling ? await canvasBillingApi.quote(connection, {
             feature: "canvas.image.generate", requestId, model: requestConfig.model,
             prompt: withSystemPrompt(requestConfig, prompt), count: n, ...(quality ? { quality } : {}),
-            ...(requestSize ? { size: requestSize } : {}), outputFormat: IMAGE_OUTPUT_FORMAT,
+            ...(requestSize ? { size: requestSize } : {}), outputTier: requestOutputTier,
+            autoEnhanceTo4k, outputFormat: IMAGE_OUTPUT_FORMAT,
         }, options?.signal) : null;
         const response = await axios.post<CanvasImageTask>(
             aiApiUrl(requestConfig, "/images/generations"),
@@ -802,6 +838,8 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 n,
                 ...(quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
+                outputTier: requestOutputTier,
+                autoEnhanceTo4k,
                 response_format: "b64_json",
                 output_format: IMAGE_OUTPUT_FORMAT,
                 ...(quote ? { requestId, quoteToken: quote.quoteToken } : {}),
@@ -820,16 +858,23 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.imageModel || config.model);
+    const imageModelValue = resolveImageModelValue(config);
+    const requestConfig = resolveModelRequestConfig(config, imageModelValue);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
     const connection = useUserStore.getState().connection;
     const usesCanvasBilling = !!connection && requestConfig.baseUrl.replace(/\/+$/, "") === connection.canvasBaseUrl.replace(/\/+$/, "");
+    const nativeImageQuality = imageQualityOptionsOf(config, imageModelValue).length > 0;
+    // Use the tier the menu displays (never the raw/stale stored value) so the quote
+    // and the upstream request always match what the user selected.
+    const selectedOutputTier = resolveImageOutputTier(config, imageModelValue);
+    const autoEnhanceTo4k = selectedOutputTier === "4k" && !nativeImageQuality;
+    const requestOutputTier = autoEnhanceTo4k ? "2k" : selectedOutputTier;
     // Do not let a stale custom script bypass the official canvas edit API.
-    const script = usesCanvasBilling ? "" : resolveModelScript(config, config.imageModel || config.model);
+    const script = usesCanvasBilling ? "" : resolveModelScript(config, imageModelValue);
     if (script) {
         const quality = normalizeQuality(config.quality);
-        const requestSize = resolveRequestSize(quality, config.size);
+        const requestSize = resolveImageRequestSize(config, imageModelValue, quality);
         const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
         try {
             const result = await runModelPlugin({
@@ -855,7 +900,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         }
     }
     const quality = normalizeQuality(config.quality);
-    const requestSize = resolveRequestSize(quality, config.size);
+    const requestSize = resolveImageRequestSize(config, imageModelValue, quality);
     const formData = new FormData();
     formData.set("model", requestConfig.model);
     formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
@@ -863,6 +908,8 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     formData.set("count", String(n));
     formData.set("response_format", "b64_json");
     formData.set("outputFormat", IMAGE_OUTPUT_FORMAT);
+    formData.set("outputTier", requestOutputTier);
+    formData.set("autoEnhanceTo4k", String(autoEnhanceTo4k));
     if (quality) {
         formData.set("quality", quality);
     }
@@ -887,7 +934,8 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
             quotePayload = {
                 feature: "canvas.image.edit", requestId, model: requestConfig.model,
                 prompt: withSystemPrompt(requestConfig, requestPrompt), count: n, ...(quality ? { quality } : {}),
-                ...(requestSize ? { size: requestSize } : {}), outputFormat: IMAGE_OUTPUT_FORMAT, referenceCount,
+                ...(requestSize ? { size: requestSize } : {}), outputTier: requestOutputTier,
+                autoEnhanceTo4k, outputFormat: IMAGE_OUTPUT_FORMAT, referenceCount,
             };
             const quote = await canvasBillingApi.quote(connection, quotePayload, options?.signal);
             formData.set("requestId", requestId);

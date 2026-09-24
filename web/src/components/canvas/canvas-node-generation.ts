@@ -66,9 +66,16 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     const mentionedCanvasReferences = mentionedCanvasResourceReferences(prompt, mentionReferences);
     const mentionedCanvasIds = new Set(mentionedCanvasReferences.map((reference) => reference.nodeId));
     const connectedInputs = buildNodeGenerationInputs(nodeId, nodes, connections).map((input) => ({ ...input, label: labelByNodeId.get(input.nodeId) }));
+    const connectedNodeById = new Map(nodes.map((node) => [node.id, node]));
+    // Video and image nodes only take connected media that the prompt explicitly
+    // references with @; a mere line must not turn a text prompt into an image
+    // edit. Asset nodes (script assets) stay implicit so those flows keep working.
+    const connectedImageNeedsMention = (input: NodeGenerationInput) => connectedNodeById.get(input.nodeId)?.type !== CanvasNodeType.Image || mentionedCanvasIds.has(input.nodeId);
     const selectedConnectedInputs = targetNode?.type === CanvasNodeType.Video
         ? connectedInputs.filter((input) => (input.type !== "image" && input.type !== "video") || mentionedCanvasIds.has(input.nodeId))
-        : connectedInputs;
+        : targetNode?.type === CanvasNodeType.Image
+            ? connectedInputs.filter((input) => input.type !== "image" || connectedImageNeedsMention(input))
+            : connectedInputs;
     const inputs = [
         ...selectedConnectedInputs,
         ...buildMentionGenerationInputs(prompt, mentionReferences),

@@ -279,3 +279,26 @@ describe("buildNodeGenerationContext asset mentions", () => {
         expect(restored.submissionPrompt).toBe("@图片1 快速追着 @图片2 回头");
     });
 });
+
+describe("image node connected references", () => {
+    const image: CanvasNodeData = { ...target, id: "image", title: "图片", metadata: { content: "blob:image", mimeType: "image/png" } };
+    const connections = [{ id: "line", fromNodeId: image.id, toNodeId: target.id }];
+
+    it("stays text-to-image when a connected image is not mentioned", () => {
+        const context = buildNodeGenerationContext(target.id, [target, image], connections, "一个人站在车站");
+        expect(context.referenceImages).toEqual([]);
+    });
+
+    it("becomes an image edit once the connected image is mentioned", () => {
+        const references = buildNodeMentionReferences(target, [target, image], connections);
+        const context = buildNodeGenerationContext(target.id, [target, image], connections, "@图片1 让他微笑", references);
+        expect(context.referenceImages.map((item) => item.id)).toEqual([image.id]);
+    });
+
+    it("keeps passing connected script asset images without a mention", () => {
+        const assetNode: CanvasNodeData = { ...target, id: "script-asset-1", type: CanvasNodeType.ScriptAsset, title: "林夏", metadata: { content: "blob:asset-image", mimeType: "image/png", scriptAssetId: "asset-1" } };
+        const assetConnections = [{ id: "line", fromNodeId: assetNode.id, toNodeId: target.id }];
+        const context = buildNodeGenerationContext(target.id, [target, assetNode], assetConnections, "让人物走进车站");
+        expect(context.referenceImages.map((item) => item.id)).toEqual([assetNode.id]);
+    });
+});

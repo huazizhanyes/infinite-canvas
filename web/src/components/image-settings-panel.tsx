@@ -3,13 +3,13 @@ import { ConfigProvider, Switch } from "antd";
 
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { imageAspectOptionDetails, imageQualityOptionDetails, normalizeImageCount } from "@/lib/image-settings";
-import type { AiConfig } from "@/stores/use-config-store";
+import { imageQualityOptionsOf, imageQualityPricesOf, type AiConfig, type ImageOutputTier } from "@/stores/use-config-store";
 
 const DIMENSION_STEP = 16;
 
 type ImageSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "quality" | "size" | "count", value: string) => void;
+    onConfigChange: (key: "quality" | "size" | "count" | "imageOutputTier", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
@@ -19,6 +19,9 @@ type ImageSettingsPanelProps = {
 export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 5 }: ImageSettingsPanelProps) {
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const quality = config.quality || "auto";
+    const imageOutputTiers = imageQualityOptionsOf(config, config.imageModel || config.model);
+    const imageOutputPrices = imageQualityPricesOf(config, config.imageModel || config.model);
+    const imageOutputTier = config.imageOutputTier || "2k";
     const normalizedMaxCount = Math.max(1, Math.floor(maxCount));
     const count = normalizeImageCount(config.count, normalizedMaxCount);
     const activeSize = config.size || "auto";
@@ -47,6 +50,19 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 }}
             >
                 {showTitle ? <div className="text-sm font-semibold">图像设置</div> : null}
+                {imageOutputTiers.length ? (
+                    <div className="space-y-2">
+                        <SettingTitle color={theme.node.muted}>清晰度</SettingTitle>
+                        <div className="grid grid-cols-3 gap-1.5">
+                            {imageOutputTiers.map((tier: ImageOutputTier) => (
+                                <OptionPill key={tier} selected={imageOutputTier === tier} theme={theme} onClick={() => onConfigChange("imageOutputTier", tier)}>
+                                    <span className="block">{tier.toUpperCase()}</span>
+                                    <span className="block text-[10px] opacity-60">{Number(imageOutputPrices[tier] || 0) > 0 ? `¥${(Number(imageOutputPrices[tier] || 0) / 1_000_000).toFixed(2)}` : "原生"}</span>
+                                </OptionPill>
+                            ))}
+                        </div>
+                    </div>
+                ) : null}
                 <div className="space-y-2">
                     <SettingTitle color={theme.node.muted}>质量</SettingTitle>
                     <div className="grid grid-cols-4 gap-1.5">
