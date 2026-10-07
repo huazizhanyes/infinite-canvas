@@ -2,7 +2,7 @@ import { type ReactNode, useState } from "react";
 import { ConfigProvider, Switch } from "antd";
 
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { imageAspectOptionDetails, imageQualityOptionDetails, normalizeImageCount } from "@/lib/image-settings";
+import { imageAspectOptionDetails, imageAspectOptionList, imageQualityOptionDetails, normalizeImageCount, resolveImageAspectOption } from "@/lib/image-settings";
 import { imageQualityOptionsOf, imageQualityPricesOf, type AiConfig, type ImageOutputTier } from "@/stores/use-config-store";
 
 const DIMENSION_STEP = 16;
@@ -25,8 +25,9 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const normalizedMaxCount = Math.max(1, Math.floor(maxCount));
     const count = normalizeImageCount(config.count, normalizedMaxCount);
     const activeSize = config.size || "auto";
-    const selectedAspect = imageAspectOptionDetails.find((item) => item.size === activeSize || item.value === activeSize);
-    const dimensions = readSizeDimensions(activeSize, selectedAspect || imageAspectOptionDetails[0]);
+    // 从视频继承来的比例（例如 21:9）图片做不到，展示上回落到可用选项，避免“没有任何比例被选中”。
+    const selectedAspect = resolveImageAspectOption(activeSize);
+    const dimensions = readSizeDimensions(activeSize, selectedAspect || imageAspectOptionList()[0]);
     const selectAspect = (value: string) => {
         const option = imageAspectOptionDetails.find((item) => item.value === value);
         onConfigChange("size", option?.size || "auto");
@@ -94,7 +95,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 <div className="space-y-2">
                     <SettingTitle color={theme.node.muted}>宽高比</SettingTitle>
                     <div className="grid grid-cols-4 gap-1.5">
-                        {imageAspectOptionDetails.map((item) => (
+                        {imageAspectOptionList().map((item) => (
                             <button
                                 key={item.value}
                                 type="button"

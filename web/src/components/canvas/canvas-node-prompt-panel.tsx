@@ -6,6 +6,7 @@ import { Button, Dropdown, Segmented, Select, Tag, Tooltip } from "antd";
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, imageAspectRatiosOf, imageQualityOptionsOf, imageQualityPricesOf, MIN_VIDEO_DURATION_SECONDS, resolveImageOutputTier, modelMatchesCapability, modelOptionName, normalizeVideoDuration, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, videoCapabilitiesOf, type AiConfig, type ImageOutputTier } from "@/stores/use-config-store";
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
+import { defaultAspectRatio } from "@/lib/aspect-ratio";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
@@ -22,7 +23,8 @@ import { videoParametersForModel } from "@/lib/video-parameters";
 import { CanvasConnectionPreviewStrip } from "./canvas-connection-preview-strip";
 import { appendCanvasConnectionMention, removeCanvasConnectionMention, type CanvasConnectionPreview } from "@/lib/canvas/canvas-connection-previews";
 import { canvasPromptCharacterWarning, countCanvasPromptCharacters } from "@/lib/canvas/canvas-prompt-character-count";
-import { imageAspectOptionDetails, imageSizeLabel, normalizeImageCount } from "@/lib/image-settings";
+import { imageAspectOptionDetails, imageAspectOptionList, imageSizeLabel, normalizeImageCount, resolveImageAspectOption } from "@/lib/image-settings";
+import { defaultVideoSize } from "@/lib/seedance-video";
 import { resolvePersistedImage } from "@/services/image-storage";
 import { resolvePersistedMediaUrl } from "@/services/file-storage";
 
@@ -203,7 +205,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 {mode !== "audio" ? <CanvasPromptLibrary onSelect={updatePrompt} /> : null}
                 {mode === "image" ? (
                     <>
-                        <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" className="!h-9 !min-w-0 !max-w-[210px] flex-1 !rounded-lg !border-transparent !bg-transparent !px-2 !text-xs hover:!bg-white/5" onMissingConfig={() => openConfigDialog(true)} />
+                        <ModelPicker config={config} value={config.model} onChange={(model) => { const size = resolveImageAspectOption("", imageAspectRatiosOf(config, model))?.size; onConfigChange(node.id, { model, ...(size ? { size } : {}) }); }} capability="image" className="!h-9 !min-w-0 !max-w-[210px] flex-1 !rounded-lg !border-transparent !bg-transparent !px-2 !text-xs hover:!bg-white/5" onMissingConfig={() => openConfigDialog(true)} />
                         <CanvasImageQuickControls
                             config={config}
                             theme={theme}
@@ -223,13 +225,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                     ? nextCapabilities.qualities[0].quality
                                     : undefined;
                                 const nextDuration = nextCapabilities ? String(normalizeVideoDuration(config.videoSeconds, nextCapabilities.duration)) : undefined;
-                                const nextSize = nextCapabilities?.aspectRatios.length && !nextCapabilities.aspectRatios.includes(config.size) ? nextCapabilities.aspectRatios[0] : undefined;
+                                // 切换模型一律回到 16:9（模型不支持时用它的第一项），不沿用上一个模型的比例。
+                                const nextSize = defaultVideoSize(config, model);
                                 const nextMode = nextCapabilities?.modes.length && !nextCapabilities.modes.includes(config.videoMode) ? nextCapabilities.modes[0] : undefined;
                                 // 切换模型时必须按新模型的参数定义重算扩展参数，残留参数会让服务端直接 400。
                                 const nextParameters = videoParametersForModel(nextCapabilities?.parameters, config.videoParameters);
                                 onConfigChange(node.id, {
-                                    ...videoModelSelectionPatch(model, nextQuality, nextDuration),
-                                    ...(nextSize ? { size: nextSize } : {}),
+                                    ...videoModelSelectionPatch(model, nextQuality, nextDuration, nextSize),
                                     ...(nextMode ? { videoMode: nextMode } : {}),
                                     videoParameters: nextParameters,
                                 });
@@ -438,7 +440,7 @@ function buildQuotePayload(config: AiConfig, mode: CanvasNodeGenerationMode, nod
     }
     const capabilities = videoCapabilitiesOf(config, config.model);
     const quality = capabilities?.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities?.qualities[0]?.quality || config.vquality;
-    const aspectRatio = capabilities?.aspectRatios.includes(config.size) ? config.size : capabilities?.aspectRatios[0] || config.size;
+    const aspectRatio = capabilities?.aspectRatios.includes(config.size) ? config.size : capabilities?.aspectRatios.length ? defaultAspectRatio(capabilities.aspectRatios) : config.size;
     const modes = capabilities?.modes || [];
     const videoMode = modes.includes(config.videoMode) ? config.videoMode : modes[0] || config.videoMode;
     const durationMax = Number(capabilities?.duration.max);
@@ -579,7 +581,6 @@ function CanvasImageTierMenu({
 function CanvasImageQuickControls({ config, theme, onOpenChange, onMissingConfig, onChange }: CanvasImageQuickControlsProps) {
     const [tierMenuOpen, setTierMenuOpen] = useState(false);
     const count = normalizeImageCount(config.count, 5);
-    const activeSize = config.size || "auto";
     const nativeTiers = imageQualityOptionsOf(config, config.model);
     const outputTiers: ImageOutputTier[] = nativeTiers.length ? nativeTiers : ["2k", "4k"];
     // Exactly what will be sent to the backend, so the menu never lies about the tier.
@@ -587,13 +588,17 @@ function CanvasImageQuickControls({ config, theme, onOpenChange, onMissingConfig
     const outputPrices = imageQualityPricesOf(config, config.model);
     // AIStarsLab routes publish their own aspect ratios; never offer a ratio the model cannot do.
     const allowedAspectRatios = imageAspectRatiosOf(config, config.model);
-    const aspectOptions = allowedAspectRatios.length
-        ? imageAspectOptionDetails.filter((item) => allowedAspectRatios.includes(item.value))
-        : imageAspectOptionDetails;
-    const aspectOptionList = aspectOptions.length ? aspectOptions : imageAspectOptionDetails;
+    const aspectOptions = imageAspectOptionList(allowedAspectRatios);
+    // 存下来的尺寸可能来自视频（例如 21:9）：图片选项里没有就回落到 16:9，自定义像素尺寸保持原样。
+    const activeOption = resolveImageAspectOption(config.size, allowedAspectRatios);
+    const activeSize = activeOption?.size || config.size || "auto";
     const neutralStyle = { background: theme.node.fill, color: theme.node.text, borderColor: theme.toolbar.border };
     const countStyle = { background: "rgba(205, 160, 0, .2)", color: "#f3c847", borderColor: "rgba(243, 200, 71, .2)" };
 
+    // 存下来的尺寸可能是从视频继承的（例如图片做不了的 21:9），落回可用的 16:9 并写回，避免按钮和实际出图不一致。
+    useEffect(() => {
+        if (config.size && config.size !== activeSize) onChange({ size: activeSize });
+    }, [config.size, activeSize]);
     return (
         <div className="flex min-w-0 items-center gap-1.5">
             <Dropdown
@@ -621,7 +626,7 @@ function CanvasImageQuickControls({ config, theme, onOpenChange, onMissingConfig
                 menu={{
                     selectable: true,
                     selectedKeys: [activeSize],
-                    items: aspectOptionList.map((item) => ({
+                    items: aspectOptions.map((item) => ({
                         key: item.size,
                         label: (
                             <span className="flex items-center gap-2">
@@ -635,7 +640,7 @@ function CanvasImageQuickControls({ config, theme, onOpenChange, onMissingConfig
             >
                 <button type="button" className="inline-flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold" style={neutralStyle}>
                     <RectangleHorizontal className="size-3.5" />
-                    <span>{imageSizeLabel(activeSize)}</span>
+                    <span>{activeOption?.label || imageSizeLabel(activeSize)}</span>
                     <ChevronDown className="size-3 opacity-70" />
                 </button>
             </Dropdown>

@@ -228,7 +228,8 @@ export const defaultConfig: AiConfig = {
     systemPrompt: "",
     models: ["default::gpt-image-2", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
     quality: "auto",
-    size: "1:1",
+    // 图片默认构图 16:9；视频在初始化/切换模型时按模型支持的比例覆盖成 "16:9"。
+    size: "1824x1024",
     count: "1",
     canvasImageCount: "1",
     videoParameters: {},

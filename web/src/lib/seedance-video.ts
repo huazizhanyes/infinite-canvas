@@ -1,4 +1,5 @@
-import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { modelOptionName, resolveModelRequestConfig, videoCapabilitiesOf, type AiConfig } from "@/stores/use-config-store";
+import { defaultAspectRatio } from "@/lib/aspect-ratio";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { normalizeReferenceMentions } from "@/lib/reference-mentions";
@@ -11,6 +12,19 @@ export const SEEDANCE_REFERENCE_LIMITS = {
     videoMaxBytes: 50 * 1024 * 1024,
     audioMaxBytes: 15 * 1024 * 1024,
 };
+
+/**
+ * 参考视频是否已对当前模型关闭。
+ *
+ * 上游按「生成时长 + 参考视频时长」计费，但售价还没按参考时长加价，带参考视频会亏钱，
+ * 所以服务端把这些模型的 inputVideosMax 置为 0。这里跟着能力走，不写死渠道，
+ * 等以后补齐计费、服务端放开就能自动恢复。
+ */
+export function referenceVideoDisabled(videoCapabilities?: { inputVideosMax?: number } | null) {
+    return videoCapabilities?.inputVideosMax === 0;
+}
+
+export const REFERENCE_VIDEO_DISABLED_MESSAGE = "该模型暂不支持参考视频，可先用文字或参考图生成";
 
 export const seedanceResolutionOptions = [
     { value: "480p", label: "480p" },
@@ -92,6 +106,14 @@ export function normalizeResolutionToken(value: string) {
 export function normalizeSeedanceDuration(value: string) {
     const seconds = Math.floor(Number(value) || 5);
     return Math.max(5, Math.min(15, seconds));
+}
+
+/** 切换视频模型后的默认画幅：16:9 优先，模型不支持 16:9 时用它的第一项。 */
+export function defaultVideoSize(config: AiConfig, model: string) {
+    const ratios = videoCapabilitiesOf(config, model)?.aspectRatios || [];
+    if (ratios.length) return defaultAspectRatio(ratios);
+    if (isSeedanceVideoModel(modelOptionName(model))) return defaultAspectRatio(seedanceRatioOptions.map((item) => item.value));
+    return "1280x720";
 }
 
 export function normalizeSeedanceRatio(value: string) {

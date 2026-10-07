@@ -2,11 +2,12 @@ import type { NavigateFunction } from "react-router-dom";
 
 import { fetchPrompts } from "@/services/api/prompts";
 import { uploadImage } from "@/services/image-storage";
-import { imageAspectOptions, imageQualityOptions } from "@/lib/image-settings";
+import { imageAspectOptions, imageQualityOptions, resolveImageAspectOption } from "@/lib/image-settings";
 import { videoResolutionOptions, videoSecondOptions, videoSizeOptions } from "@/components/video-settings-panel";
+import { defaultVideoSize } from "@/lib/seedance-video";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useAssetStore } from "@/stores/use-asset-store";
-import { modelOptionLabel, modelOptionName, normalizeModelOptionValue, normalizeVideoDuration, selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
+import { imageAspectRatiosOf, modelOptionLabel, modelOptionName, normalizeModelOptionValue, normalizeVideoDuration, selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 
 // 在网页端执行 Agent 的「站点级」工具（画布列表、工作台生成、提示词搜索、资产增删查等）。
@@ -93,6 +94,9 @@ function runImageWorkbench(input: SiteToolInput, navigate: NavigateFunction) {
     if (typeof input.model === "string" && input.model.trim()) {
         const value = normalizeModelOptionValue(input.model, configStore.config.channels) || input.model;
         configStore.updateConfig("imageModel", value);
+        // 换模型回到 16:9（模型不支持时用它的第一项）
+        const size = resolveImageAspectOption("", imageAspectRatiosOf(configStore.config, value))?.size;
+        if (size) configStore.updateConfig("size", size);
         applied.model = value;
     }
     if (typeof input.quality === "string" && input.quality.trim()) {
@@ -141,6 +145,8 @@ function runVideoWorkbench(input: SiteToolInput, navigate: NavigateFunction) {
     if (typeof input.model === "string" && input.model.trim()) {
         const value = normalizeModelOptionValue(input.model, configStore.config.channels) || input.model;
         configStore.updateConfig("videoModel", value);
+        // 换模型回到 16:9（模型不支持时用它的第一项）
+        configStore.updateConfig("size", defaultVideoSize(configStore.config, value));
         applied.model = value;
     }
     if (typeof input.size === "string" && input.size.trim()) {

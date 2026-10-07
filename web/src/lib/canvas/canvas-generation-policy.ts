@@ -4,6 +4,6 @@ export function isNonInterruptibleVideoGeneration(nodeType: CanvasNodeData["type
     return isRunning && nodeType === CanvasNodeType.Video;
 }
 
-export function videoModelSelectionPatch(model: string, quality?: string, seconds = "5") {
-    return { model, seconds, ...(quality ? { vquality: quality } : {}) };
+export function videoModelSelectionPatch(model: string, quality?: string, seconds = "5", size?: string) {
+    return { model, seconds, ...(quality ? { vquality: quality } : {}), ...(size ? { size } : {}) };
 }

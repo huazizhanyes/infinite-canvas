@@ -1,3 +1,5 @@
+import { sortAspectRatios } from "./aspect-ratio";
+
 export type ImageAspectOption = {
     value: string;
     label: string;
@@ -27,6 +29,21 @@ export const imageAspectOptionDetails: ImageAspectOption[] = [
 
 export const imageQualityOptions = imageQualityOptionDetails.map((item) => ({ value: item.value, label: item.label }));
 export const imageAspectOptions = imageAspectOptionDetails.map((item) => ({ value: item.size, label: item.label }));
+
+/** 可用宽高比列表：模型发布比例时只保留它支持的，并让 16:9 排第一位。 */
+export function imageAspectOptionList(ratios: string[] = []): ImageAspectOption[] {
+    const allowed = ratios.length ? imageAspectOptionDetails.filter((item) => ratios.includes(item.value)) : imageAspectOptionDetails;
+    return sortAspectRatios(allowed.length ? allowed : imageAspectOptionDetails, (item) => item.value);
+}
+
+/** 当前尺寸对应的可用选项。存下来的比例不可用时回落到 16:9（列表第一项）；
+ *  高级设置里填的自定义像素尺寸返回 undefined，保持“没有比例被选中”的原样，不被改动。 */
+export function resolveImageAspectOption(size: string, ratios: string[] = []): ImageAspectOption | undefined {
+    const list = imageAspectOptionList(ratios);
+    const matched = list.find((item) => item.size === size || item.value === size);
+    if (matched) return matched;
+    return /^\d+x\d+$/.test(String(size || "")) ? undefined : list[0];
+}
 
 export function normalizeImageCount(value: unknown, maxCount = 5) {
     const normalizedMaxCount = Math.max(1, Math.floor(maxCount));

@@ -9,7 +9,8 @@ import { cancelCanvasAudioTask, pollCanvasAudioTask, requestAudioGeneration, req
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { CanvasVideoApiError, createCanvasVideoTask, isCanvasVideoModel, listCanvasVideoTasks, retryCanvasVideoTask, waitForCanvasVideoTask, type CanvasVideoStoredResult, type CanvasVideoTask } from "@/services/api/canvas-video";
 import { SHOW_AGENT_UI, SUCAI_INTEGRATION } from "@/constant/env";
-import { defaultConfig, modelOptionName, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { defaultConfig, modelOptionName, type AiConfig, useConfigStore, useEffectiveConfig, videoCapabilitiesOf } from "@/stores/use-config-store";
+import { REFERENCE_VIDEO_DISABLED_MESSAGE, referenceVideoDisabled } from "@/lib/seedance-video";
 import { getImageBlob, imageToDataUrl, resolveImageUrl, resolvePersistedImage, resolvePersistedImageUrl, storeImageLocally, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { deleteStoredMedia, getMediaBlob, resolvePersistedMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { resolveCanvasMediaUrl, uploadCanvasMedia } from "@/services/canvas-media";
@@ -3746,6 +3747,12 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
                 return;
             }
+            if (mode === "video" && generationContext.referenceVideos.length && referenceVideoDisabled(videoCapabilitiesOf(generationConfig, generationConfig.model))) {
+                message.error(REFERENCE_VIDEO_DISABLED_MESSAGE);
+                finishGenerationRequest(nodeId, runController);
+                setRunningNodeId(null);
+                return;
+            }
             if (mode === "video" && generationContext.ignoredReferenceLabels.length) {
                 message.error(`以下引用已失效，请删除或重新连接：${generationContext.ignoredReferenceLabels.join("、")}`);
                 finishGenerationRequest(nodeId, runController);
@@ -4290,6 +4297,10 @@ function InfiniteCanvasPage() {
             if (referenceAudioError) {
                 message.error(referenceAudioError);
                 setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, regenerationError: referenceAudioError } } : item));
+                return;
+            }
+            if (node.type === CanvasNodeType.Video && context?.referenceVideos.length && referenceVideoDisabled(videoCapabilitiesOf(generationConfig, generationConfig.model))) {
+                message.error(REFERENCE_VIDEO_DISABLED_MESSAGE);
                 return;
             }
             if (!prompt) {

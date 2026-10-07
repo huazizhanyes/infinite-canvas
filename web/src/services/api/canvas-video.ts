@@ -1,5 +1,6 @@
 import axios from "axios";
 
+import { defaultAspectRatio } from "@/lib/aspect-ratio";
 import { sanitizeVideoParameters } from "@/lib/video-parameters";
 import { getMediaBlob } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
@@ -155,7 +156,7 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
                 forcedLegacyUpload: forceLegacyUpload,
             });
         }
-        const aspectRatio = capabilities.aspectRatios.includes(config.size) ? config.size : capabilities.aspectRatios[0];
+        const aspectRatio = capabilities.aspectRatios.includes(config.size) ? config.size : defaultAspectRatio(capabilities.aspectRatios);
         const quality = capabilities.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities.qualities[0]?.quality;
         const duration = normalizeVideoDuration(config.videoSeconds, capabilities.duration);
         const selectedQuality = capabilities.qualities.find((item) => item.quality === quality) || capabilities.qualities[0];

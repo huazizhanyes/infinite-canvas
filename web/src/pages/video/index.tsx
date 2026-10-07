@@ -14,7 +14,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { createVideoProgressBaseline, DEFAULT_VIDEO_ESTIMATE_MS, type VideoProgressBaseline } from "@/lib/video-generation-progress";
 import { useVideoGenerationProgress } from "@/hooks/use-video-generation-progress";
-import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
+import { boolConfig, defaultVideoSize, isSeedanceVideoConfig, normalizeSeedanceRatio, REFERENCE_VIDEO_DISABLED_MESSAGE, referenceVideoDisabled, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolvePersistedImage, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveCanvasMediaUrl } from "@/services/canvas-media";
@@ -22,7 +22,7 @@ import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo
 import { createCanvasVideoTask, isCanvasVideoModel, waitForCanvasVideoTask, type CanvasVideoTask } from "@/services/api/canvas-video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
-import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { modelOptionLabel, useConfigStore, useEffectiveConfig, videoCapabilitiesOf, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -115,6 +115,12 @@ export default function VideoPage() {
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
+    const referenceVideoOff = referenceVideoDisabled(videoCapabilitiesOf(effectiveConfig, model));
+
+    // 切到不支持参考视频的模型时，清掉已选的参考视频，避免提交时才被服务端拒绝。
+    useEffect(() => {
+        if (referenceVideoOff) setVideoReferences([]);
+    }, [referenceVideoOff]);
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -128,14 +134,18 @@ export default function VideoPage() {
 
     const addReferences = async (files?: FileList | null) => {
         const selectedFiles = Array.from(files || []);
-        const unsupported = selectedFiles.filter((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/") && !isSupportedAudioFile(file));
+        // 参考视频已关闭的模型：直接忽略视频文件并说明原因，不让用户白等上传。
+        const rejectedVideoFiles = referenceVideoOff ? selectedFiles.filter((file) => file.type.startsWith("video/")) : [];
+        if (rejectedVideoFiles.length) message.warning(REFERENCE_VIDEO_DISABLED_MESSAGE);
+        const usableFiles = referenceVideoOff ? selectedFiles.filter((file) => !file.type.startsWith("video/")) : selectedFiles;
+        const unsupported = usableFiles.filter((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/") && !isSupportedAudioFile(file));
         if (unsupported.length) message.warning("已忽略不支持的参考资产，请使用图片、mp4/mov 视频或 mp3/wav 音频");
-        const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.images - references.length);
-        const videoFiles = selectedFiles.filter((file) => file.type.startsWith("video/") && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.videos - videoReferences.length);
-        const audioFiles = selectedFiles.filter((file) => isSupportedAudioFile(file) && file.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.audios - audioReferences.length);
-        if (selectedFiles.some((file) => file.type.startsWith("image/") && file.size > SEEDANCE_REFERENCE_LIMITS.imageMaxBytes)) message.warning("已忽略超过 30MB 的参考图");
-        if (selectedFiles.some((file) => file.type.startsWith("video/") && file.size > SEEDANCE_REFERENCE_LIMITS.videoMaxBytes)) message.warning("已忽略超过 50MB 的参考视频");
-        if (selectedFiles.some((file) => isSupportedAudioFile(file) && file.size > SEEDANCE_REFERENCE_LIMITS.audioMaxBytes)) message.warning("已忽略超过 15MB 的参考音频");
+        const imageFiles = usableFiles.filter((file) => file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.images - references.length);
+        const videoFiles = usableFiles.filter((file) => file.type.startsWith("video/") && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.videos - videoReferences.length);
+        const audioFiles = usableFiles.filter((file) => isSupportedAudioFile(file) && file.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.audios - audioReferences.length);
+        if (usableFiles.some((file) => file.type.startsWith("image/") && file.size > SEEDANCE_REFERENCE_LIMITS.imageMaxBytes)) message.warning("已忽略超过 30MB 的参考图");
+        if (usableFiles.some((file) => file.type.startsWith("video/") && file.size > SEEDANCE_REFERENCE_LIMITS.videoMaxBytes)) message.warning("已忽略超过 50MB 的参考视频");
+        if (usableFiles.some((file) => isSupportedAudioFile(file) && file.size > SEEDANCE_REFERENCE_LIMITS.audioMaxBytes)) message.warning("已忽略超过 15MB 的参考音频");
         const nextReferences = await Promise.all(
             imageFiles.map(async (file) => {
                 const image = await uploadImage(file);
@@ -251,6 +261,10 @@ export default function VideoPage() {
             openConfigDialog(true);
             return null;
         }
+        if (referenceVideoOff && videoReferences.length) {
+            message.error(REFERENCE_VIDEO_DISABLED_MESSAGE);
+            return null;
+        }
         const videoReferenceError = seedanceVideoReferenceError(videoReferences);
         if (videoReferenceError) {
             message.error(`${videoReferenceError}。${seedanceVideoReferenceHint}`);
@@ -286,7 +300,11 @@ export default function VideoPage() {
         } else if (payload.kind === "image") {
             setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "image/png", dataUrl: payload.dataUrl, storageKey: payload.storageKey, mediaId: payload.mediaId }].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
         } else if (payload.kind === "video") {
-            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: "video/mp4", url: payload.url, storageKey: payload.storageKey, mediaId: payload.mediaId, width: payload.width, height: payload.height }].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
+            if (referenceVideoOff) {
+                message.warning(REFERENCE_VIDEO_DISABLED_MESSAGE);
+            } else {
+                setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: "video/mp4", url: payload.url, storageKey: payload.storageKey, mediaId: payload.mediaId, width: payload.width, height: payload.height }].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
+            }
         }
         setAssetPickerOpen(false);
     };
@@ -477,6 +495,12 @@ export default function VideoPage() {
                                 </div>
                             </div>
 
+                            {referenceVideoOff ? (
+                                <div className="min-w-0">
+                                    <span className="text-base font-semibold">参考视频</span>
+                                    <div className="mt-2 rounded-lg border border-dashed border-stone-300 p-3 text-sm text-stone-500 dark:border-stone-700">{REFERENCE_VIDEO_DISABLED_MESSAGE}</div>
+                                </div>
+                            ) : (
                             <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">参考视频</span>
@@ -498,6 +522,7 @@ export default function VideoPage() {
                                     {!videoReferences.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考视频，最多 3 个</div> : null}
                                 </div>
                             </div>
+                            )}
 
                             <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
@@ -599,7 +624,7 @@ function GenerationSettings({ config, model, hasReferenceVideo, updateConfig, op
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">模型</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ModelPicker config={config} value={model} onChange={(value) => { updateConfig("videoModel", value); updateConfig("size", defaultVideoSize(config, value)); }} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
                 <VideoSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} hasReferenceVideo={hasReferenceVideo} showTitle={false} className="space-y-4" />

@@ -4,6 +4,7 @@ import { Gem } from "lucide-react";
 
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { openAiMembershipModal } from "@/components/layout/ai-membership-modal";
+import { defaultAspectRatio, sortAspectRatios } from "@/lib/aspect-ratio";
 import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { videoParametersForModel } from "@/lib/video-parameters";
@@ -109,7 +110,8 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, hasReference
 
 function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme, hasReferenceVideo, showTitle, className, quote }: VideoSettingsPanelProps & { capabilities: VideoModelCapabilities }) {
     const quality = capabilities.qualities.some((item) => item.quality === config.vquality) ? config.vquality : capabilities.qualities[0]?.quality || "";
-    const ratio = capabilities.aspectRatios.includes(config.size) ? config.size : capabilities.aspectRatios[0] || "";
+    const aspectRatios = sortAspectRatios(capabilities.aspectRatios, (value) => value);
+    const ratio = capabilities.aspectRatios.includes(config.size) ? config.size : defaultAspectRatio(capabilities.aspectRatios);
     const durationMax = Number(capabilities.duration.max);
     const durationOptions = [...(capabilities.duration.options || [])].filter((value) => value >= MIN_VIDEO_DURATION_SECONDS && (!Number.isFinite(durationMax) || value <= durationMax)).sort((left, right) => left - right);
     const duration = normalizeVideoDuration(config.videoSeconds, { ...capabilities.duration, options: durationOptions });
@@ -132,8 +134,8 @@ function BackendVideoSettingsPanel({ config, capabilities, onConfigChange, theme
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="flex min-h-8 items-center justify-between gap-3"><span className="text-lg font-semibold leading-6">{capabilities.displayName}</span>{capabilities.faceFriendly ? <span className="rounded-md bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold leading-4 text-emerald-500" title={capabilities.displayNotice || undefined}>不卡人脸</span> : null}</div> : null}
                 <SettingGroup title="画幅比例" color={theme.node.muted}>
-                    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(5, Math.max(1, capabilities.aspectRatios.length))}, minmax(0, 1fr))` }}>
-                        {capabilities.aspectRatios.map((value) => {
+                    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(5, Math.max(1, aspectRatios.length))}, minmax(0, 1fr))` }}>
+                        {aspectRatios.map((value) => {
                             const preview = ratioPreview(value);
                             return (
                                 <button key={value} type="button" className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border px-1 text-sm transition hover:opacity-90" style={{ borderColor: ratio === value ? theme.node.activeStroke : theme.node.stroke, background: ratio === value ? theme.toolbar.activeBg : "transparent", color: ratio === value ? theme.toolbar.activeText : theme.node.text, boxShadow: ratio === value ? `inset 0 0 0 1px ${theme.node.activeStroke}` : "none" }} onMouseDown={(event) => event.stopPropagation()} onClick={() => onConfigChange("size", value)}>

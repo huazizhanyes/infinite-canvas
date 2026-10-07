@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { App, Button, Result, Spin } from "antd";
 
 import { adaptVideoCapabilitiesForModel, createModelChannel, encodeChannelModel, modelOptionsFromChannels, normalizeVideoDuration, useConfigStore, rehydrateConfigForAccount, visibleCanvasVideoModes } from "@/stores/use-config-store";
+import { defaultAspectRatio } from "@/lib/aspect-ratio";
+import { REFERENCE_VIDEO_DISABLED_MESSAGE } from "@/lib/seedance-video";
 import { initializeSucaiCanvasSync } from "@/services/sucai-canvas-sync";
 import { stopSucaiCanvasSync } from "@/services/sucai-canvas-sync";
 import { initializeCanvasAssetSync, stopCanvasAssetSync } from "@/services/canvas-asset-sync";
@@ -104,7 +106,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 parameters: Array.isArray(item.parameters || item.parameter_schema) ? (item.parameters || item.parameter_schema) : [],
                 modeRules: Array.isArray(item.modeRules || item.mode_rules) ? (item.modeRules || item.mode_rules) : [],
                 faceFriendly: Boolean(item.faceFriendly || item.face_friendly || item.channel === "59" && item.upstream_model === "minimax-h3"),
-                displayNotice: item.displayNotice || item.display_notice || null,
+                displayNotice: item.displayNotice || item.display_notice || (Number(item.input_videos_max || 0) === 0 ? REFERENCE_VIDEO_DISABLED_MESSAGE : null),
                 marked: Boolean(item.marked),
                 isRecommended: Boolean(item.is_recommended || item.recommended),
                 freePromotion: item.free_promotion || null,
@@ -142,7 +144,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 updateConfig("videoModel", videoModelValue);
                 const capabilities = selected.videoCapabilities;
                 updateConfig("videoMode", capabilities?.modes[0] || "text2video");
-                updateConfig("size", capabilities?.aspectRatios[0] || "16:9");
+                updateConfig("size", defaultAspectRatio(capabilities?.aspectRatios || []));
                 updateConfig("vquality", capabilities?.qualities[0]?.quality || "720p");
                 updateConfig("videoSeconds", String(normalizeVideoDuration(undefined, capabilities?.duration)));
                 updateConfig("videoParameters", Object.fromEntries((capabilities?.parameters || []).map((parameter: any) => [parameter.key, parameter.defaultValue] as [string, unknown]).filter(([, value]: [string, unknown]) => value !== undefined)));
