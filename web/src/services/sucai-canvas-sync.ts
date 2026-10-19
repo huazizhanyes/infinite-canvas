@@ -1,5 +1,6 @@
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { accountScopedKey, getCanvasAccountScope, getCanvasSessionEpoch } from "@/lib/canvas-account-scope";
 import { localForageStorage } from "@/lib/localforage-storage";
 import { serializeCanvasProjectForCloud } from "@/lib/canvas/canvas-cloud-serialization";
@@ -24,6 +25,12 @@ type SyncConfig = {
 
 const SAVE_DEBOUNCE = 3000;
 const RETRY_DELAY = 10000;
+/**
+ * 短剧「同步到画布」写完项目后写的 localStorage 信号（同源，跨标签页）。
+ * 画布标签页收到 storage 事件后立即重新拉取远端，避免一直显示旧内容、
+ * 甚至用旧内容把刚同步进来的节点覆盖回去。
+ */
+const CANVAS_PROJECT_UPDATED_KEY = "canvas:project-updated";
 
 let initialized = false;
 let config: SyncConfig | null = null;
@@ -35,6 +42,7 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let reloadTimer: ReturnType<typeof setTimeout> | null = null;
 let flushPromise: Promise<boolean> | null = null;
 let applyingRemoteState = false;
+let externalUpdateListening = false;
 
 export async function initializeSucaiCanvasSync(nextConfig: SyncConfig) {
     if (initialized && config?.token === nextConfig.token && config?.userId === nextConfig.userId) return;
@@ -93,11 +101,33 @@ export async function initializeSucaiCanvasSync(nextConfig: SyncConfig) {
 
     if (pendingProjects.size) scheduleFlush(SAVE_DEBOUNCE);
     scheduleRemoteReload();
+    window.addEventListener("storage", handleExternalProjectUpdate);
+    externalUpdateListening = true;
+}
+
+/** 其它标签页（短剧同步）写完项目后：拉一次远端，并告诉画布页面"你正在看的这张画布被外部更新了" */
+function handleExternalProjectUpdate(event: StorageEvent) {
+    if (event.key !== CANVAS_PROJECT_UPDATED_KEY || !event.newValue) return;
+    let projectId = "";
+    try {
+        projectId = String((JSON.parse(event.newValue) as { id?: string })?.id || "");
+    } catch {
+        return;
+    }
+    void reloadRemoteProjects();
+    if (projectId) useCanvasUiStore.getState().setExternalUpdate(projectId);
+}
+
+function removeExternalUpdateListener() {
+    if (!externalUpdateListening) return;
+    externalUpdateListening = false;
+    window.removeEventListener("storage", handleExternalProjectUpdate);
 }
 
 export async function stopSucaiCanvasSync() {
     const saved = await flushSucaiCanvasSync();
     await persistOutbox();
+    removeExternalUpdateListener();
     unsubscribe?.();
     unsubscribe = null;
     initialized = false;

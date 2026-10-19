@@ -54,6 +54,7 @@ import { useAgentStore } from "@/stores/use-agent-store";
 import { flushCanvasPersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { getCanvasClipboard, useCanvasClipboardStore, type CanvasClipboardPayload } from "@/stores/canvas/use-canvas-clipboard-store";
 import { useCanvasHostTaskStore } from "@/stores/canvas/use-canvas-host-task-store";
+import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { isNonInterruptibleVideoGeneration } from "@/lib/canvas/canvas-generation-policy";
 import { buildCanvasConnectionPreviews, removeCanvasConnectionMention } from "@/lib/canvas/canvas-connection-previews";
 import { useUserStore } from "@/stores/use-user-store";
@@ -783,6 +784,29 @@ function InfiniteCanvasPage() {
         if (!SHOW_AGENT_UI || !projectLoaded || !["new", "recent", "choose"].includes(searchParams.get("mode") || "")) return;
         if (!searchParams.has("agentUrl")) openAgentPanel();
     }, [openAgentPanel, projectLoaded, searchParams]);
+
+    /**
+     * 短剧「同步到画布」在另一个标签页写完之后，会通过 localStorage 信号通知这里。
+     * 当前正在看的就是那张画布时，给一个"刷新查看"的确认——节点是挂载时读入内存的，
+     * 不刷新看不到新内容（而且带着旧节点的内存态继续编辑，会把同步结果覆盖回去）。
+     */
+    const externalUpdateAt = useCanvasUiStore((state) => state.externalUpdateAt);
+    const externalUpdateProjectId = useCanvasUiStore((state) => state.externalUpdateProjectId);
+    const setExternalUpdate = useCanvasUiStore((state) => state.setExternalUpdate);
+    const handledExternalUpdateRef = useRef(0);
+    useEffect(() => {
+        if (!projectLoaded || !externalUpdateAt || externalUpdateProjectId !== projectId) return;
+        if (handledExternalUpdateRef.current >= externalUpdateAt) return;
+        handledExternalUpdateRef.current = externalUpdateAt;
+        setExternalUpdate(null);
+        modal.confirm({
+            title: "短剧已更新这张画布",
+            content: "短剧那边刚把分镜、资产和提示词同步过来了。刷新页面即可看到最新内容；不刷新继续在旧内容上编辑，可能会把这次同步覆盖掉。",
+            okText: "刷新查看",
+            cancelText: "稍后",
+            onOk: () => window.location.reload(),
+        });
+    }, [externalUpdateAt, externalUpdateProjectId, projectId, projectLoaded, modal, setExternalUpdate]);
 
     useEffect(() => {
         if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current) return;
@@ -2058,6 +2082,8 @@ function InfiniteCanvasPage() {
             }
             if (!ids.size) return;
             const scriptNodes = nodesRef.current.filter((node) => ids.has(node.id) && node.type === CanvasNodeType.AssetExtraction);
+            // 短剧「同步到画布」生成的节点：删除前给一次提示，避免误以为是连动删除
+            const dramaNodes = nodesRef.current.filter((node) => ids.has(node.id) && (node.metadata as Record<string, any> | undefined)?.dramaSource);
             const performDelete = () => {
             const allIds = new Set(ids);
             const scriptSetIds = new Set(scriptNodes.map((node) => node.metadata?.scriptSetId).filter(Boolean));
@@ -2095,6 +2121,17 @@ function InfiniteCanvasPage() {
             cleanupCanvasFiles({ projectId, nodes: nodesRef.current.filter((node) => !allIds.has(node.id)), chatSessions });
             };
             if (!scriptNodes.length) {
+                if (dramaNodes.length) {
+                    Modal.confirm({
+                        title: "删除短剧同步的节点？",
+                        content: `选中的 ${dramaNodes.length} 个节点由短剧「同步到画布」生成。删除只影响本画布：短剧里的剧本、分镜和素材都不会变。`,
+                        okText: "删除",
+                        okButtonProps: { danger: true },
+                        cancelText: "取消",
+                        onOk: () => performDelete(),
+                    });
+                    return;
+                }
                 performDelete();
                 return;
             }

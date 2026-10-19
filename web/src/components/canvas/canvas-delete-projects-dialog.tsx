@@ -33,6 +33,7 @@ export function CanvasDeleteProjectsDialog() {
             }
         >
             <p className="text-sm text-stone-500">将删除 {ids.length} 个画布，里面的节点和连线也会一起移除。</p>
+            <p className="mt-2 text-sm text-stone-500">由短剧「同步到画布」生成的画布，删除只影响画布本身：短剧项目、分镜和素材文件都不受影响。</p>
         </Modal>
     );
 }

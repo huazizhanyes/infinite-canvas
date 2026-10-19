@@ -14,6 +14,7 @@ import { rehydrateCanvasStoreForAccount, clearCanvasStoreMemory } from "@/stores
 import { rehydrateAssetStoreForAccount, clearAssetStoreMemory } from "@/stores/use-asset-store";
 import { rehydrateCanvasHostTaskStoreForAccount, clearCanvasHostTaskStoreMemory } from "@/stores/canvas/use-canvas-host-task-store";
 import { clearCanvasClipboardMemory } from "@/stores/canvas/use-canvas-clipboard-store";
+import { startCanvasTabPresence } from "@/lib/canvas-tab-presence";
 
 const SUCAI_MODE_KEY = "infinite-canvas:sucai-mode";
 const SUCAI_TOKEN_KEY = "sucai_token";
@@ -319,6 +320,15 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             console.warn("[CanvasAssetSync] initialization failed", error);
         });
     }
+
+    /**
+     * 画布标签页心跳：短剧「同步到画布」会先确认画布没开着再写入，
+     * 避免画布把内存里的旧节点写回云端、覆盖刚同步进来的内容。
+     */
+    useEffect(() => {
+        if (!isSucaiModeRequested()) return;
+        return startCanvasTabPresence();
+    }, []);
 
     useEffect(() => {
         if (handledConfigParams.current) return;
