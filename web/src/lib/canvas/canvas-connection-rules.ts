@@ -112,6 +112,7 @@ function knownAcceptedKinds(type: CanvasNodeData["type"]): string[] | null {
     if (type === CanvasNodeType.Video) return ["text", "image", "video", "audio"];
     if (type === CanvasNodeType.Audio) return ["text", "audio"];
     if (type === CanvasNodeType.AssetExtraction) return ["text"];
+    if (type === CanvasNodeType.ClipStoryboard) return ["image", "audio"];
     return null;
 }
 

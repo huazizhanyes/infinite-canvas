@@ -34,6 +34,7 @@ const NODE_TYPE_ICON: Record<string, typeof Square> = {
     [CanvasNodeType.Group]: Square,
     [CanvasNodeType.AssetExtraction]: ScanText,
     [CanvasNodeType.ScriptAsset]: Boxes,
+    [CanvasNodeType.ClipStoryboard]: ListTree,
 };
 
 const STATUS_COLOR: Record<string, string> = {

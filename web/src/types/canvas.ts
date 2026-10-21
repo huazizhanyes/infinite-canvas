@@ -18,6 +18,7 @@ export enum CanvasNodeType {
     AssetExtraction = "asset-extraction",
     ScriptAsset = "script-asset",
     AssetStoryboard = "asset-storyboard",
+    ClipStoryboard = "clip-storyboard",
 }
 
 // 节点类型放开为字符串,内置类型用 CanvasNodeType,插件类型为 "<pluginId>:<name>"
@@ -304,6 +305,11 @@ export type CanvasNodeMetadata = {
     assetStoryboardRequiredDurationSec?: number;
     assetStoryboardVideoModel?: string;
     assetStoryboardPreviewNode?: boolean;
+    clipStoryboardScript?: string;
+    clipStoryboardSourceId?: string;
+    clipStoryboardClipCode?: string;
+    clipStoryboardClipTitle?: string;
+    clipStoryboardClipIndex?: number;
     scriptAssetType?: "character" | "scene" | "prop";
     scriptAssetVisualDescription?: string;
     scriptAssetImagePrompt?: string;

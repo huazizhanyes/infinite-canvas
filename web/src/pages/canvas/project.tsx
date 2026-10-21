@@ -1,7 +1,7 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowDown, ArrowRight, ArrowUpRight, Bot, ChevronDown, Clapperboard, Group, Home, ImageIcon, Images, LayoutGrid, List, Menu, MousePointer2, Move, Music2, Plus, Redo2, ScanText, Sparkles, Trash2, Type, Undo2, Upload, Video, X } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUpRight, Bot, ChevronDown, Clapperboard, Group, Home, ImageIcon, Images, LayoutGrid, List, ListTree, Menu, MousePointer2, Move, Music2, Plus, Redo2, ScanText, Sparkles, Trash2, Type, Undo2, Upload, Video, X } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { getCanvasImageTask, parseCanvasImageTaskItems, requestEdit, requestGeneration, requestImageQuestion, waitForCanvasImageTask, type CanvasImageTask } from "@/services/api/image";
@@ -116,7 +116,7 @@ type PendingConnectionCreate = {
     menuPosition?: Position;
 };
 
-type ConnectionCreateType = CanvasNodeType.Text | CanvasNodeType.Image | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.AssetStoryboard;
+type ConnectionCreateType = CanvasNodeType.Text | CanvasNodeType.Image | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.AssetStoryboard | CanvasNodeType.ClipStoryboard;
 
 type ConnectionDropTarget = {
     nodeId: string | null;
@@ -289,6 +289,7 @@ function ConnectionCreateMenu({
             </div>
             <div className={`grid gap-1 ${isBatch || isAssetStoryboardOnly ? "grid-cols-1" : "grid-cols-2"}`}>
                 {availableTypes.has(CanvasNodeType.AssetStoryboard) ? <ConnectionCreateOption theme={theme} icon={<Clapperboard className="size-5" />} title="资产专属分镜" description="从本集资产组装分镜与视频单元" onClick={() => onCreate(CanvasNodeType.AssetStoryboard)} /> : null}
+                {availableTypes.has(CanvasNodeType.ClipStoryboard) ? <ConnectionCreateOption theme={theme} icon={<ListTree className="size-5" />} title="分镜拆解" description="粘贴 Clip 分镜脚本，批量生成视频节点" onClick={() => onCreate(CanvasNodeType.ClipStoryboard)} /> : null}
                 {availableTypes.has(CanvasNodeType.Text) ? <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title="文本生成" description="脚本、广告词、品牌文案" onClick={() => onCreate(CanvasNodeType.Text)} /> : null}
                 {availableTypes.has(CanvasNodeType.Image) ? <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title="图片生成" onClick={() => onCreate(CanvasNodeType.Image)} /> : null}
                 {availableTypes.has(CanvasNodeType.Video) ? <ConnectionCreateOption theme={theme} icon={<Video className="size-5" />} title="视频生成" onClick={() => onCreate(CanvasNodeType.Video)} /> : null}
@@ -1522,7 +1523,8 @@ function InfiniteCanvasPage() {
             const viewRight = (size.width - currentViewport.x) / scale;
             const viewBottom = (size.height - currentViewport.y) / scale;
             const menuWidth = 292 / scale;
-            const menuHeight = 236 / scale;
+            const menuTypes = getCompatibleConnectionCreateTypes({ connections: sourceNodes.map((node) => ({ nodeId: node.id, handleType: "source" as const })), position: { x: 0, y: 0 } }, nodesRef.current);
+            const menuHeight = (56 + Math.max(1, menuTypes.size) * 48) / scale;
             const edgePadding = 12 / scale;
             let menuX = anchorPosition.x + 30 / scale;
             if (menuX + menuWidth > viewRight - edgePadding) menuX = anchorPosition.x - menuWidth - 30 / scale;
@@ -5883,7 +5885,12 @@ function getCompatibleConnectionCreateTypes(pending: PendingConnectionCreate, no
     const candidateTypes = [CanvasNodeType.Text, CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Audio] as const;
     if (connectionStarts.length !== pending.connections.length) return new Set<ConnectionCreateType>();
     if (connectionStarts.length === 1 && connectionStarts[0].type === CanvasNodeType.AssetExtraction && connectionStarts[0].handleType === "source") return new Set<ConnectionCreateType>([CanvasNodeType.AssetStoryboard]);
-    return new Set<ConnectionCreateType>(candidateTypes.filter((candidateType) => connectionStarts.every((start) => isCompatibleCanvasConnectionFromHandle(start.type, candidateType, start.handleType))));
+    const types = new Set<ConnectionCreateType>(candidateTypes.filter((candidateType) => connectionStarts.every((start) => isCompatibleCanvasConnectionFromHandle(start.type, candidateType, start.handleType))));
+    // 分镜拆解只在「多选图片」或「图片 + 音频」时出现，且至少要有 1 张图片。
+    if (connectionStarts.length >= 2 && connectionStarts.some((start) => start.type === CanvasNodeType.Image) && connectionStarts.every((start) => start.type === CanvasNodeType.Image || start.type === CanvasNodeType.Audio)) {
+        types.add(CanvasNodeType.ClipStoryboard);
+    }
+    return types;
 }
 
 function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {

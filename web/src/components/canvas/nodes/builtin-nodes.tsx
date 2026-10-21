@@ -7,6 +7,7 @@ import type { CanvasNodeDefinition, CanvasNodeResource } from "@/types/canvas-pl
 import { CanvasAssetExtractionNode } from "@/components/canvas/asset-extraction/canvas-asset-extraction-node";
 import { CanvasScriptAssetNode } from "@/components/canvas/asset-extraction/canvas-script-asset-node";
 import { CanvasAssetStoryboardNode } from "@/components/canvas/asset-extraction/canvas-asset-storyboard-node";
+import { CanvasClipStoryboardNode } from "@/components/canvas/canvas-clip-storyboard-node";
 
 // 内置节点的可扩展元数据(尺寸/初始 metadata 复用 NODE_SPECS)。
 // 渲染仍由 canvas-node 内部渲染器负责,故不提供 Content。
@@ -29,6 +30,7 @@ const BUILTIN_DEFINITIONS: CanvasNodeDefinition[] = [
     { type: CanvasNodeType.AssetExtraction, title: "资产提取", icon: <ScanText className={iconClass} />, minimapColor: "#0ea5e9", hidePanel: true, Content: CanvasAssetExtractionNode },
     { type: CanvasNodeType.ScriptAsset, title: "资产", icon: <Boxes className={iconClass} />, minimapColor: "#10b981", hidePanel: true, showInCreateMenu: false, Content: CanvasScriptAssetNode, resource: (node: CanvasNodeData) => node.metadata?.content ? { kind: "image" as const, url: node.metadata.content } : null },
     { type: CanvasNodeType.AssetStoryboard, title: "分镜脚本", icon: <Clapperboard className={iconClass} />, minimapColor: "#06b6d4", hidePanel: true, showInCreateMenu: false, Content: CanvasAssetStoryboardNode },
+    { type: CanvasNodeType.ClipStoryboard, title: "分镜拆解", icon: <Clapperboard className={iconClass} />, minimapColor: "#14b8a6", hidePanel: true, showInCreateMenu: false, Content: CanvasClipStoryboardNode },
 ].map((def) => {
     const spec = NODE_SPECS[def.type];
     return { ...def, title: spec.title, defaultSize: { width: spec.width, height: spec.height }, defaultMetadata: spec.metadata };

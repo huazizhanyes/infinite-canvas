@@ -13,6 +13,7 @@ export const NODE_DEFAULT_SIZE = {
     [CanvasNodeType.AssetExtraction]: { width: 680, height: 560, title: "资产提取" },
     [CanvasNodeType.ScriptAsset]: { width: 560, height: 320, title: "资产" },
     [CanvasNodeType.AssetStoryboard]: { width: 300, height: 180, title: "分镜脚本" },
+    [CanvasNodeType.ClipStoryboard]: { width: 480, height: 460, title: "分镜拆解" },
 } satisfies Record<CanvasNodeType, { width: number; height: number; title: string }>;
 
 export const NODE_SPECS = {
@@ -24,6 +25,7 @@ export const NODE_SPECS = {
     [CanvasNodeType.AssetExtraction]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.AssetExtraction], metadata: { status: "idle", content: "", assetExtractionRecordName: "未命名", assetExtractionStatus: "idle", assetExtractionMode: "exhaustive", assetExtractionVisualStyle: "3D漫风格", assetExtractionAspectRatio: "16:9", assetExtractionImageQuality: "standard" } },
     [CanvasNodeType.ScriptAsset]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.ScriptAsset], metadata: { status: "idle", scriptAssetImageStatus: "idle" } },
     [CanvasNodeType.AssetStoryboard]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.AssetStoryboard], metadata: { status: "idle" } },
+    [CanvasNodeType.ClipStoryboard]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.ClipStoryboard], metadata: { status: "idle", clipStoryboardScript: "" } },
 } satisfies Record<CanvasNodeType, CanvasNodeSpec>;
 
 export function getNodeSpec(type: string) {
