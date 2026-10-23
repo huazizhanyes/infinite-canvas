@@ -439,13 +439,19 @@ function canvasVideoHeaders(config: AiConfig) {
     return { Authorization: `Bearer ${config.apiKey}` };
 }
 
-function readCanvasVideoError(error: unknown, fallback: string) {
+/** Nest 未捕获异常的默认 5xx 文案：属于系统噪音，不能直接当节点错误展示、更不能落盘。 */
+const GENERIC_SERVER_MESSAGE = /^(internal server error|server error|service unavailable|bad gateway|gateway time-?out)\.?$/i;
+
+export function readCanvasVideoError(error: unknown, fallback: string) {
     if (axios.isCancel(error) || (error instanceof Error && error.name === "CanceledError")) return "请求已取消";
     if (axios.isAxiosError(error)) {
         const payload = error.response?.data as any;
         const message = payload?.message || payload?.error?.message || payload?.msg;
         if (Array.isArray(message)) return message.join("；");
-        if (message) return String(message);
+        const status = Number(error.response?.status || 0);
+        const text = typeof message === "string" ? message.trim() : "";
+        if (text && !(status >= 500 && GENERIC_SERVER_MESSAGE.test(text))) return text;
+        if (status >= 500) return "视频服务暂时不可用，请稍后重试";
     }
     return error instanceof Error && error.message ? error.message : fallback;
 }

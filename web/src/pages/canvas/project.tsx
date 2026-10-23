@@ -66,13 +66,13 @@ import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } fro
 import { buildCanvasResourceReferences, buildNodeMentionReferences, cloneIncomingCanvasConnections, mergeCanvasReferenceOrder, migrateCanvasResourceMentions, normalizeCanvasResourceMentions, remapCanvasResourceMentionNodeIds, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { createCanvasGraphIndex, incomingConnections, outgoingConnections } from "@/lib/canvas/canvas-graph-index";
 import { appendValidCanvasConnections, canvasConnectionDropPriority, isCompatibleCanvasConnectionFromHandle, normalizePersistedCanvasConnections, orientCanvasConnection, validateCanvasConnection } from "@/lib/canvas/canvas-connection-rules";
-import { arrangePastedCanvasNodes, prepareCanvasNodeForClipboard, prepareCanvasNodeForDuplicate, remapCanvasClipboardConnections, selectCanvasClipboardConnections } from "@/lib/canvas/canvas-clipboard";
+import { arrangePastedCanvasNodes, createCanvasNodeCopies, prepareCanvasNodeForClipboard, prepareCanvasNodeForDuplicate, remapCanvasClipboardConnections, selectCanvasClipboardConnections } from "@/lib/canvas/canvas-clipboard";
 import { arrangeCanvasSelection, type CanvasArrangeMode } from "@/lib/canvas/canvas-layout";
 import { buildCanvasTemplate, type CanvasTemplateId } from "@/lib/canvas/canvas-templates";
 import { createCanvasSpatialIndex } from "@/lib/canvas/canvas-spatial-index";
 import { sameNodeGeometry } from "@/lib/canvas/canvas-geometry";
 import { createScriptAssetImageSnapshot } from "@/lib/canvas/script-asset-snapshot";
-import { chooseRecoverableCanvasVideoTask, mergeHydratedCanvasNode, shouldRecoverCanvasVideoTask } from "@/lib/canvas/canvas-recovery";
+import { chooseRecoverableCanvasVideoTask, mergeHydratedCanvasNode, shouldHealDeliveredCanvasVideoNode, shouldRecoverCanvasVideoTask } from "@/lib/canvas/canvas-recovery";
 import { hasFailedMediaReference, hydrateCanvasNodes, imageMetadata, syncBatchPrimaryNode } from "@/lib/canvas/canvas-node-media";
 import { emitCanvasEvent, onCanvasEvent } from "@/lib/canvas/canvas-event-bus";
 import { getNodeDefinition, getNodePluginId, isBuiltinNodeType as isBuiltinType, listNodeDefinitions, useNodeRegistryVersion } from "@/lib/canvas/node-registry";
@@ -157,6 +157,17 @@ type NodeDragState = {
     nodeById: Map<string, CanvasNodeData>;
     nodeElements: Map<string, HTMLElement>;
     connectionElements: Array<{ connection: CanvasConnection; paths: SVGPathElement[] }>;
+};
+
+/** Alt 按下后先等待位移超过阈值，再真正生成并拖动副本。 */
+type PendingAltDrag = {
+    sourceIds: Set<string>;
+    primaryId: string | null;
+    startX: number;
+    startY: number;
+    shiftKey: boolean;
+    ctrlKey: boolean;
+    metaKey: boolean;
 };
 
 const VIDEO_NODE_MAX_WIDTH = 420;
@@ -441,6 +452,7 @@ function InfiniteCanvasPage() {
         nodeElements: new Map(),
         connectionElements: [],
     });
+    const pendingAltDragRef = useRef<PendingAltDrag | null>(null);
 
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
@@ -1096,6 +1108,11 @@ function InfiniteCanvasPage() {
     useEffect(() => {
         if (!projectLoaded) return;
         nodes.forEach((node) => {
+            // 成片已经在节点里、只是状态被一次失败请求写成了 error：直接自愈，别再走任务恢复。
+            if (shouldHealDeliveredCanvasVideoNode(node)) {
+                setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : item));
+                return;
+            }
             if (!shouldRecoverCanvasVideoTask(node)) return;
             const taskId = node.metadata?.videoTaskId;
             if (!taskId && resumedVideoNodeIdsRef.current.has(node.id)) return;
@@ -2483,9 +2500,7 @@ function InfiniteCanvasPage() {
         return { nextSelected, soloId };
     }, []);
 
-    const beginNodeDrag = useCallback((event: ReactPointerEvent, nodeIds: Iterable<string>) => {
-        if (event.button !== 0) return;
-        event.stopPropagation();
+    const startNodeDrag = useCallback((startX: number, startY: number, nodeIds: Iterable<string>) => {
         setContextMenu(null);
         setSelectedConnectionId(null);
 
@@ -2504,7 +2519,7 @@ function InfiniteCanvasPage() {
                 });
             }
         });
-        if (!dragIds.size) return;
+        if (!dragIds.size) return false;
 
         const initialSelectedNodes = [...dragIds].flatMap((id) => {
             const node = currentNodeById.get(id);
@@ -2525,8 +2540,8 @@ function InfiniteCanvasPage() {
         dragRef.current = {
             isDraggingNode: true,
             hasMoved: false,
-            startX: event.clientX,
-            startY: event.clientY,
+            startX,
+            startY,
             previewDx: 0,
             previewDy: 0,
             initialSelectedNodes,
@@ -2540,18 +2555,90 @@ function InfiniteCanvasPage() {
         nodeDraggingRef.current = true;
         containerRef.current?.setAttribute("data-canvas-node-dragging", "true");
         containerRef.current?.parentElement?.setAttribute("data-canvas-node-dragging", "true");
+        return true;
     }, []);
 
+    const beginNodeDrag = useCallback((event: ReactPointerEvent, nodeIds: Iterable<string>) => {
+        if (event.button !== 0) return;
+        event.stopPropagation();
+        startNodeDrag(event.clientX, event.clientY, nodeIds);
+    }, [startNodeDrag]);
+
+    // Alt 拖拽副本：位移超过阈值后立刻插入副本并只拖动副本，原节点留在原位。
+    const startAltDragCopy = useCallback((pending: PendingAltDrag, clientX: number, clientY: number, dx: number, dy: number) => {
+        const sourceNodes = nodesRef.current.filter((node) => pending.sourceIds.has(node.id));
+        if (!sourceNodes.length) return;
+        const copies = createCanvasNodeCopies(sourceNodes, { x: dx, y: dy });
+        const nextNodes = [...nodesRef.current, ...copies];
+        nodesRef.current = nextNodes;
+        setNodes(nextNodes);
+        replaceSelectedNodeIds(new Set(copies.map((node) => node.id)));
+        setToolbarNodeId(null);
+        if (!startNodeDrag(clientX, clientY, copies.map((node) => node.id))) return;
+        dragRef.current.hasMoved = true;
+    }, [replaceSelectedNodeIds, startNodeDrag]);
+
+    const syncNodeDragElements = useCallback((drag: NodeDragState) => {
+        const container = containerRef.current;
+        if (!container) return;
+        drag.movedIds.forEach((id) => {
+            const current = drag.nodeElements.get(id);
+            if (current?.isConnected) return;
+            const element = container.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
+            if (element) drag.nodeElements.set(id, element);
+        });
+    }, []);
+
+    // 副本是在拖拽中途才插入的，DOM 要等这次提交后存在；提交后补齐元素并立刻恢复到当前拖拽位置。
+    useLayoutEffect(() => {
+        const drag = dragRef.current;
+        if (!drag.isDraggingNode) return;
+        syncNodeDragElements(drag);
+        applyNodeDragPreview(drag, drag.previewDx, drag.previewDy);
+    });
+
     const handleNodePointerDown = useCallback((event: ReactPointerEvent, nodeId: string) => {
+        // Alt 拖拽：先等位移超过阈值，再拖出当前选区（未选中时只拖当前节点）的无连线副本。
+        if (event.button === 0 && event.altKey) {
+            if (!debugReadOnly) {
+                event.preventDefault();
+                event.stopPropagation();
+                const selected = selectedNodeIdsRef.current;
+                pendingAltDragRef.current = {
+                    sourceIds: selected.has(nodeId) ? new Set(selected) : new Set([nodeId]),
+                    primaryId: nodeId,
+                    startX: event.clientX,
+                    startY: event.clientY,
+                    shiftKey: event.shiftKey,
+                    ctrlKey: event.ctrlKey,
+                    metaKey: event.metaKey,
+                };
+                return;
+            }
+            message.info("当前是只读调试副本，不能复制节点");
+        }
         const { nextSelected } = selectNodeByEvent(event, nodeId);
         if (!nextSelected.size) return;
         beginNodeDrag(event, nextSelected);
-    }, [beginNodeDrag, selectNodeByEvent]);
+    }, [beginNodeDrag, debugReadOnly, message, selectNodeByEvent]);
 
     const handleSelectionDragStart = useCallback((event: ReactPointerEvent) => {
         if (selectedNodeIdsRef.current.size < 2) return;
+        if (event.button === 0 && event.altKey && !debugReadOnly) {
+            event.preventDefault();
+            pendingAltDragRef.current = {
+                sourceIds: new Set(selectedNodeIdsRef.current),
+                primaryId: null,
+                startX: event.clientX,
+                startY: event.clientY,
+                shiftKey: event.shiftKey,
+                ctrlKey: event.ctrlKey,
+                metaKey: event.metaKey,
+            };
+            return;
+        }
         beginNodeDrag(event, selectedNodeIdsRef.current);
-    }, [beginNodeDrag]);
+    }, [beginNodeDrag, debugReadOnly]);
 
     const finishNodeDrag = useCallback((clientX?: number, clientY?: number) => {
         if (rafRef.current) {
@@ -2594,22 +2681,28 @@ function InfiniteCanvasPage() {
             applyNodeDragPreview(dragRef.current, 0, 0);
         }
 
-        dragRef.current.isDraggingNode = false;
-        dragRef.current.hasMoved = false;
-        dragRef.current.initialSelectedNodes = [];
-        dragRef.current.initialById.clear();
-        dragRef.current.movedIds.clear();
-        dragRef.current.nodeById.clear();
-        dragRef.current.nodeElements.forEach((element) => {
-            element.style.willChange = "";
-        });
-        dragRef.current.nodeElements.clear();
-        dragRef.current.connectionElements = [];
+        resetNodeDragFields(dragRef.current);
     }, []);
 
     const handleGlobalPointerMove = useCallback(
         (event: PointerEvent) => {
             const currentViewport = viewportRef.current;
+
+            // Alt 按下后先等位移超过阈值，再插入副本并交给普通拖拽接管。
+            const pendingAltDrag = pendingAltDragRef.current;
+            if (pendingAltDrag && event.buttons !== 0) {
+                if (Math.abs(event.clientX - pendingAltDrag.startX) > NODE_CLICK_DRAG_THRESHOLD_PX || Math.abs(event.clientY - pendingAltDrag.startY) > NODE_CLICK_DRAG_THRESHOLD_PX) {
+                    pendingAltDragRef.current = null;
+                    startAltDragCopy(
+                        pendingAltDrag,
+                        event.clientX,
+                        event.clientY,
+                        (event.clientX - pendingAltDrag.startX) / currentViewport.k,
+                        (event.clientY - pendingAltDrag.startY) / currentViewport.k,
+                    );
+                }
+                return;
+            }
 
             if (dragRef.current.isDraggingNode) {
                 const dx = (event.clientX - dragRef.current.startX) / currentViewport.k;
@@ -2621,6 +2714,7 @@ function InfiniteCanvasPage() {
                 if (rafRef.current) cancelAnimationFrame(rafRef.current);
                 rafRef.current = requestAnimationFrame(() => {
                     const currentDrag = dragRef.current;
+                    syncNodeDragElements(currentDrag);
                     applyNodeDragPreview(currentDrag, currentDrag.previewDx, currentDrag.previewDy);
                     const nextDropTargetId = findGroupDropTargetDuringDrag(currentDrag, nodesRef.current)?.id || null;
                     setDropTargetGroupId((current) => (current === nextDropTargetId ? current : nextDropTargetId));
@@ -2662,11 +2756,16 @@ function InfiniteCanvasPage() {
             setConnectionTargetNodeId((current) => current === dropTarget.nodeId ? current : dropTarget.nodeId);
             setMouseWorld((current) => current.x === nextWorld.x && current.y === nextWorld.y ? current : nextWorld);
         },
-        [getConnectionDropTarget, replaceSelectedNodeIds, screenToCanvas],
+        [getConnectionDropTarget, replaceSelectedNodeIds, screenToCanvas, startAltDragCopy, syncNodeDragElements],
     );
 
     const handleGlobalPointerUp = useCallback(
         (event: PointerEvent) => {
+            // Alt 没有位移时保留原本的点击选中语义，不生成副本。
+            const pendingAltDrag = pendingAltDragRef.current;
+            pendingAltDragRef.current = null;
+            if (pendingAltDrag?.primaryId) selectNodeByEvent(pendingAltDrag, pendingAltDrag.primaryId);
+
             finishNodeDrag(event.clientX, event.clientY);
 
             selectionBoxRef.current = null;
@@ -2710,11 +2809,12 @@ function InfiniteCanvasPage() {
                 }
             }
         },
-        [connectMultipleNodes, connectNodes, finishNodeDrag, getConnectionDropTarget, screenToCanvas, setConnecting, showConnectionFeedback],
+        [connectMultipleNodes, connectNodes, finishNodeDrag, getConnectionDropTarget, screenToCanvas, selectNodeByEvent, setConnecting, showConnectionFeedback],
     );
 
     useEffect(() => {
         const cancelNodeDrag = () => {
+            pendingAltDragRef.current = null;
             finishNodeDrag();
             if (!batchConnectingRef.current) return;
             batchConnectingRef.current = null;
@@ -5464,6 +5564,7 @@ function CanvasTopBar({
                     <Shortcut keys={["缩放滑杆"]} value="精确调整缩放" />
                     <Shortcut keys={["Ctrl / Cmd", "拖动"]} value="框选多个节点" />
                     <Shortcut keys={["Shift / Ctrl / Cmd", "点击"]} value="追加选择节点" />
+                    <Shortcut keys={["Alt", "拖动节点/选区"]} value="拖出一组不带连线的副本" />
                     <Shortcut keys={["Ctrl / Cmd", "A"]} value="全选节点" />
                     <Shortcut keys={["Ctrl / Cmd", "C / V"]} value="复制 / 粘贴节点，或粘贴剪切板文本/图片" />
                     <Shortcut keys={["Ctrl / Cmd", "Z"]} value="撤销" />
@@ -5811,6 +5912,20 @@ function applyNodeDragPreview(drag: NodeDragState, dx: number, dy: number) {
         const path = connectionPath(previewFrom, previewTo);
         paths.forEach((element) => element.setAttribute("d", path));
     });
+}
+
+function resetNodeDragFields(drag: NodeDragState) {
+    drag.isDraggingNode = false;
+    drag.hasMoved = false;
+    drag.initialSelectedNodes = [];
+    drag.initialById.clear();
+    drag.movedIds.clear();
+    drag.nodeById.clear();
+    drag.nodeElements.forEach((element) => {
+        element.style.willChange = "";
+    });
+    drag.nodeElements.clear();
+    drag.connectionElements = [];
 }
 
 function connectionPath(from: CanvasNodeData, to: CanvasNodeData) {

@@ -12,6 +12,17 @@ export function shouldRecoverCanvasVideoTask(node: CanvasNodeData) {
     return !(node.metadata?.assetStoryboardSourceId && node.metadata?.status === "idle" && !node.metadata?.videoPhase);
 }
 
+/**
+ * 历史脏数据自愈：视频已经写进 content，却因为一次失败请求（500/超时/多端并发保存）
+ * 把节点标成 error。有内容的节点不该再显示错误态 —— 打开画布时就地改回成功。
+ * 幂等：写完 status 变 success，不会再命中。
+ */
+export function shouldHealDeliveredCanvasVideoNode(node: CanvasNodeData) {
+    return node.type === CanvasNodeType.Video
+        && node.metadata?.status === "error"
+        && Boolean(node.metadata?.content);
+}
+
 /** Merge an asynchronous media snapshot without allowing it to overwrite user edits or task state. */
 export function mergeHydratedCanvasNode(current: CanvasNodeData, base: CanvasNodeData, hydrated: CanvasNodeData): CanvasNodeData {
     if (current.id !== base.id || hydrated.id !== base.id) return current;

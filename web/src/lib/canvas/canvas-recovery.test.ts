@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseRecoverableCanvasVideoTask, mergeHydratedCanvasNode, shouldRecoverCanvasVideoTask } from "./canvas-recovery";
+import { chooseRecoverableCanvasVideoTask, mergeHydratedCanvasNode, shouldHealDeliveredCanvasVideoNode, shouldRecoverCanvasVideoTask } from "./canvas-recovery";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const node = (metadata: CanvasNodeData["metadata"]): CanvasNodeData => ({ id: "image-1", type: CanvasNodeType.Image, title: "参考图", position: { x: 0, y: 0 }, width: 100, height: 100, metadata });
@@ -46,5 +46,15 @@ describe("canvas recovery invariants", () => {
         expect(shouldRecoverCanvasVideoTask(videoNode({ status: "loading", generationRequestId: "request-1" }))).toBe(true);
         expect(shouldRecoverCanvasVideoTask(videoNode({ status: "idle", videoTaskId: "task-1" }))).toBe(true);
         expect(shouldRecoverCanvasVideoTask(videoNode({ status: "idle" }))).toBe(true);
+    });
+
+    it("heals a delivered video that a failed request marked as error", () => {
+        expect(shouldHealDeliveredCanvasVideoNode(videoNode({
+            status: "error", errorDetails: "Internal server error", videoTaskId: "task-1", content: "https://cdn/video.mp4",
+        }))).toBe(true);
+        // 没有内容时错误态必须保留，等待用户重试。
+        expect(shouldHealDeliveredCanvasVideoNode(videoNode({ status: "error", errorDetails: "生成失败" }))).toBe(false);
+        expect(shouldHealDeliveredCanvasVideoNode(videoNode({ status: "success", content: "https://cdn/video.mp4" }))).toBe(false);
+        expect(shouldHealDeliveredCanvasVideoNode(node({ status: "error", content: "blob:image" }))).toBe(false);
     });
 });

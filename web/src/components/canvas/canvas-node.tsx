@@ -665,7 +665,9 @@ function NodeContent(props: NodeContentRendererProps) {
         }
     }
     if (props.node.metadata?.status === "loading" && props.node.type !== CanvasNodeType.Video) return <LoadingContent node={props.node} theme={props.theme} />;
-    if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onRetryOriginal={props.onRetryOriginal} />;
+    // 已经拿到结果（content 存在）的节点永远优先展示结果：一次失败的请求（500/超时/换设备并发）
+    // 可能把 status 写成 error，但成片本身是好的，错误态只应在没有内容时占位。
+    if (props.node.metadata?.status === "error" && !props.node.metadata?.content) return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onRetryOriginal={props.onRetryOriginal} />;
 
     const Renderer = nodeContentRenderers[props.node.type as keyof typeof nodeContentRenderers];
     if (Renderer) return <Renderer {...props} />;

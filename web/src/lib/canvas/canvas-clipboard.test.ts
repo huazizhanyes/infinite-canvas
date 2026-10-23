@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { arrangePastedCanvasNodes, prepareCanvasNodeForClipboard, prepareCanvasNodeForDuplicate, remapCanvasClipboardConnections, selectCanvasClipboardConnections } from "./canvas-clipboard";
+import { arrangePastedCanvasNodes, createCanvasNodeCopies, prepareCanvasNodeForClipboard, prepareCanvasNodeForDuplicate, remapCanvasClipboardConnections, selectCanvasClipboardConnections } from "./canvas-clipboard";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const connections = [
@@ -138,6 +138,62 @@ describe("prepareCanvasNodeForDuplicate", () => {
         });
 
         expect(image.metadata).toMatchObject({ content: "https://old.example/image.png", status: "success", mediaId: "image-media" });
+    });
+});
+
+describe("createCanvasNodeCopies", () => {
+    const imageNode: CanvasNodeData = {
+        id: "image-a",
+        type: CanvasNodeType.Image,
+        title: "图片",
+        position: { x: 10, y: 20 },
+        width: 100,
+        height: 80,
+        metadata: { content: "https://old.example/image.png", status: "success", groupId: "group-1", batchRootId: "batch-1" },
+    };
+
+    it("offsets every copy and drops group/batch links that point outside the copied set", () => {
+        const copies = createCanvasNodeCopies([imageNode], { x: 30, y: 40 });
+
+        expect(copies).toHaveLength(1);
+        expect(copies[0].id).not.toBe(imageNode.id);
+        expect(copies[0].title).toBe("图片 Copy");
+        expect(copies[0].position).toEqual({ x: 40, y: 60 });
+        expect(copies[0].metadata).toMatchObject({ content: "https://old.example/image.png", status: "success" });
+        expect(copies[0].metadata?.groupId).toBeUndefined();
+        expect(copies[0].metadata?.batchRootId).toBeUndefined();
+    });
+
+    it("remaps group and batch links that stay inside the copied set", () => {
+        const copies = createCanvasNodeCopies([
+            { id: "group-1", type: CanvasNodeType.Group, title: "组", position: { x: 0, y: 0 }, width: 400, height: 400 },
+            { id: "batch-1", type: CanvasNodeType.Image, title: "批次", position: { x: 0, y: 0 }, width: 100, height: 80, metadata: { isBatchRoot: true, batchChildIds: ["image-a"], primaryImageId: "image-a" } },
+            imageNode,
+        ], { x: 200, y: 0 });
+
+        const [groupCopy, batchCopy, childCopy] = copies;
+        expect(childCopy.metadata?.groupId).toBe(groupCopy.id);
+        expect(childCopy.metadata?.batchRootId).toBe(batchCopy.id);
+        expect(batchCopy.metadata?.batchChildIds).toEqual([childCopy.id]);
+        expect(batchCopy.metadata?.primaryImageId).toBe(childCopy.id);
+    });
+
+    it("keeps the duplicate button semantics for videos instead of copying the video result", () => {
+        const copies = createCanvasNodeCopies([{
+            id: "video-a",
+            type: CanvasNodeType.Video,
+            title: "视频",
+            position: { x: 0, y: 0 },
+            width: 320,
+            height: 240,
+            metadata: { prompt: "人物向前走", model: "video-model", status: "success", content: "https://old.example/video.mp4", videoResultUrl: "https://old.example/video.mp4", videoTaskId: "task-1", mediaId: "old-media" },
+        }], { x: 10, y: 10 });
+
+        expect(copies[0].metadata).toMatchObject({ prompt: "人物向前走", model: "video-model", status: "idle" });
+        expect(copies[0].metadata?.content).toBeUndefined();
+        expect(copies[0].metadata?.videoResultUrl).toBeUndefined();
+        expect(copies[0].metadata?.videoTaskId).toBeUndefined();
+        expect(copies[0].metadata?.mediaId).toBeUndefined();
     });
 });
 

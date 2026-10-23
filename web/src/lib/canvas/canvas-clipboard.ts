@@ -126,6 +126,40 @@ export function prepareCanvasNodeForDuplicate(node: CanvasNodeData): CanvasNodeD
     };
 }
 
+/** Copies for the canvas Alt-drag gesture: no connections, and group/batch links only point at copied nodes. */
+export function createCanvasNodeCopies(nodes: CanvasNodeData[], offset: Position): CanvasNodeData[] {
+    const idMap = new Map<string, string>();
+    const copies = nodes.map((node, index) => {
+        const id = `${node.type}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
+        idMap.set(node.id, id);
+        const duplicate = prepareCanvasNodeForDuplicate(node);
+        return {
+            ...duplicate,
+            id,
+            title: duplicate.title.endsWith(" Copy") ? duplicate.title : `${duplicate.title} Copy`,
+            position: { x: node.position.x + offset.x, y: node.position.y + offset.y },
+        };
+    });
+
+    return copies.map((copy) => {
+        if (!copy.metadata) return copy;
+        const batchChildIds = copy.metadata.batchChildIds?.flatMap((childId) => {
+            const copiedChildId = idMap.get(childId);
+            return copiedChildId ? [copiedChildId] : [];
+        });
+        return {
+            ...copy,
+            metadata: {
+                ...copy.metadata,
+                groupId: copy.metadata.groupId ? idMap.get(copy.metadata.groupId) : undefined,
+                batchRootId: copy.metadata.batchRootId ? idMap.get(copy.metadata.batchRootId) : undefined,
+                batchChildIds: batchChildIds?.length ? batchChildIds : undefined,
+                primaryImageId: copy.metadata.primaryImageId ? idMap.get(copy.metadata.primaryImageId) : undefined,
+            },
+        };
+    });
+}
+
 export function selectCanvasClipboardConnections(connections: CanvasConnection[], selectedNodeIds: ReadonlySet<string>) {
     return connections.filter((connection) => selectedNodeIds.has(connection.fromNodeId) || selectedNodeIds.has(connection.toNodeId));
 }
