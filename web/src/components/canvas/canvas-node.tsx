@@ -667,7 +667,7 @@ function NodeContent(props: NodeContentRendererProps) {
     if (props.node.metadata?.status === "loading" && props.node.type !== CanvasNodeType.Video) return <LoadingContent node={props.node} theme={props.theme} />;
     // 已经拿到结果（content 存在）的节点永远优先展示结果：一次失败的请求（500/超时/换设备并发）
     // 可能把 status 写成 error，但成片本身是好的，错误态只应在没有内容时占位。
-    if (props.node.metadata?.status === "error" && !props.node.metadata?.content) return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onRetryOriginal={props.onRetryOriginal} />;
+    if (props.node.metadata?.status === "error" && !props.node.metadata?.content) return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type as keyof typeof nodeContentRenderers];
     if (Renderer) return <Renderer {...props} />;
@@ -745,21 +745,18 @@ function friendlyVideoError(details: string | undefined) {
     return details;
 }
 
-function ErrorContent({ node, theme, onRetry, onRetryOriginal }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry" | "onRetryOriginal">) {
-    const canRetryOriginal = node.type === CanvasNodeType.Video && node.metadata?.videoProvider === "canvas-video" && Boolean(node.metadata.videoTaskId);
+function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry">) {
+    // 视频生成失败只展示原因，不再给「重试原任务 / 按当前画布重新生成」两个按钮：
+    // 前者对已交付的任务必然 409，后者会再扣一次费用，误点代价太大；需要重试时走节点悬停工具栏。
+    const showRetry = node.type !== CanvasNodeType.Video;
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-2 px-4 text-center" style={{ transform: `scale(${imageContentScale(node)})` }}>
             <div className="text-xs leading-5 text-red-300" title={node.metadata?.errorDetails}>{friendlyVideoError(node.metadata?.errorDetails)}</div>
-            <div className="flex flex-wrap items-center justify-center gap-1.5">
-                {canRetryOriginal ? (
-                    <button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition hover:bg-white/5" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onClick={(event) => { event.stopPropagation(); onRetryOriginal?.(node); }} onMouseDown={(event) => event.stopPropagation()}>
-                        <RefreshCw className="size-3.5" />重试原任务
-                    </button>
-                ) : null}
+            {showRetry ? (
                 <button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition hover:bg-white/5" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onClick={(event) => { event.stopPropagation(); onRetry?.(node); }} onMouseDown={(event) => event.stopPropagation()}>
-                    <RefreshCw className="size-3.5" />{canRetryOriginal ? "按当前画布重新生成" : "重试"}
+                    <RefreshCw className="size-3.5" />重试
                 </button>
-            </div>
+            ) : null}
         </div>
     );
 }

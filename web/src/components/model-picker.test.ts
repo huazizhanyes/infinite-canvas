@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildModelGroups, channelAliasForModel, sortVideoModelsByMark, videoBillingBadgeLabel } from "./model-picker";
+import { buildModelGroups, channelAliasForModel, modelPickerSubtitle, sortVideoModelsByMark, videoBillingBadgeLabel } from "./model-picker";
 import { encodeChannelModel, type AiConfig, type VideoModelCapabilities } from "@/stores/use-config-store";
 
 const capabilities = (qualities: VideoModelCapabilities["qualities"]) => ({
@@ -170,5 +170,13 @@ describe("video model provider aliases", () => {
         } as unknown as AiConfig;
 
         expect(channelAliasForModel(config, "sucai-canvas::paipu-one")).toBe("F");
+    });
+
+    it("keeps concrete channel names out of the model detail subtitle", () => {
+        // 线上截图：副标题曾经是「渠道 G · qiling · 器灵 API · 图片 10 / 视频 5 / 音频 5」
+        expect(modelPickerSubtitle("G", "图片 10 / 视频 5 / 音频 5")).toBe("渠道 G · 图片 10 / 视频 5 / 音频 5");
+        expect(modelPickerSubtitle("G", "")).toBe("渠道 G");
+        expect(modelPickerSubtitle("", null)).toBe("视频模型");
+        expect(modelPickerSubtitle("G", "图片 10 / 视频 5 / 音频 5")).not.toMatch(/qiling|器灵/);
     });
 });

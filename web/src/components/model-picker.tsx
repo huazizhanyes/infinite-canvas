@@ -397,12 +397,21 @@ function ModelIcon({ config, model, large = false }: { config: AiConfig; model: 
     return <Icon className={`${sizeClass} shrink-0 opacity-70`} />;
 }
 
+/** 二级详情的副标题：只给分组字母与该档补充说明，不带任何具体渠道名（渠道只在管理端可见）。 */
+export function modelPickerSubtitle(alias?: string | null, suffix?: string | null) {
+    return [alias ? `渠道 ${alias}` : "", String(suffix || "").trim()]
+        .filter((value, index, values) => Boolean(value) && values.indexOf(value) === index)
+        .join(" · ") || "视频模型";
+}
+
 function ModelDetail({ video, config, model }: { video: NonNullable<ReturnType<typeof videoCapabilitiesOf>>; config: AiConfig; model: string }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const name = displayedModelName(config, model);
     const alias = channelAliasForModel(config, model);
     const suffix = video.displaySuffix?.trim();
-    const channelDescription = [alias ? `渠道 ${alias}` : "", video.channel?.trim(), video.routeLabel?.trim(), suffix].filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index).join(" · ") || "视频模型";
+    // 二级详情不再展示具体渠道（例如「qiling · 器灵 API」）：渠道属于运营内部信息，
+    // 用户只需要知道分组字母（渠道 A/B/C…）和这一档的补充说明。
+    const channelDescription = modelPickerSubtitle(alias, suffix);
     const durationLabel = formatVideoDurationRange(video.duration);
     const ratioLabel = video.aspectRatios.length ? video.aspectRatios.join("、") : "不限";
     const modeLabel = video.modes.length ? video.modes.map(videoModeLabel).join("、") : "未提供";
