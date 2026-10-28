@@ -19,6 +19,8 @@ export enum CanvasNodeType {
     ScriptAsset = "script-asset",
     AssetStoryboard = "asset-storyboard",
     ClipStoryboard = "clip-storyboard",
+    NovelScript = "novel-script",
+    ScriptResult = "script-result",
 }
 
 // 节点类型放开为字符串,内置类型用 CanvasNodeType,插件类型为 "<pluginId>:<name>"
@@ -310,6 +312,18 @@ export type CanvasNodeMetadata = {
     clipStoryboardClipCode?: string;
     clipStoryboardClipTitle?: string;
     clipStoryboardClipIndex?: number;
+    /** 小说改剧本节点：小说原文 */
+    novelScriptRawText?: string;
+    /** 小说改剧本节点：idle / generating / error（成功后回到 idle，结果落到独立的剧本节点） */
+    novelScriptStatus?: "idle" | "generating" | "error";
+    /** 小说改剧本节点：节点级文本模型覆盖（ModelPicker 的选项值） */
+    novelScriptModel?: string;
+    /** 小说改剧本节点：最近一次生成失败的错误信息 */
+    novelScriptError?: string;
+    /** 剧本节点：剧本内容（格式：## S01 | 内景 · 地点 | 时间段） */
+    scriptContent?: string;
+    /** 剧本节点：来源的小说改剧本节点 id（手动创建时为空） */
+    scriptSourceNodeId?: string;
     scriptAssetType?: "character" | "scene" | "prop";
     scriptAssetVisualDescription?: string;
     scriptAssetImagePrompt?: string;

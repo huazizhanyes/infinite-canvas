@@ -13,6 +13,7 @@ import {
     Group,
     Hand,
     Image as ImageIcon,
+    BookOpenText,
     Info,
     LoaderCircle,
     Mic2,
@@ -56,6 +57,7 @@ export function CanvasToolbar({
     onAddText,
     onAddGroup,
     onAddAssetExtraction,
+    onAddNovelScript,
     onAddExtensionNode,
     onUndo,
     onRedo,
@@ -80,6 +82,7 @@ export function CanvasToolbar({
     onAddText: () => void;
     onAddGroup: () => void;
     onAddAssetExtraction: () => void;
+    onAddNovelScript: () => void;
     onAddExtensionNode: (type: string) => void;
     onUndo: () => void;
     onRedo: () => void;
@@ -184,6 +187,9 @@ export function CanvasToolbar({
                 </ToolbarButton>
                 <ToolbarButton id="tool-asset-extraction" label="资产提取" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddAssetExtraction}>
                     <ScanText className="size-4.5" />
+                </ToolbarButton>
+                <ToolbarButton id="tool-novel-script" label="小说改剧本" hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onAddNovelScript}>
+                    <BookOpenText className="size-4.5" />
                 </ToolbarButton>
                 {extensionDefs.length ? (
                     <ToolbarButton
@@ -468,6 +474,7 @@ function toolLabel(id: string) {
     if (id === "tool-audio") return "配音";
     if (id === "tool-group") return "组";
     if (id === "tool-asset-extraction") return "资产提取";
+    if (id === "tool-novel-script") return "小说改剧本";
     if (id === "tool-extensions") return "扩展节点";
     if (id === "tool-upload") return "上传资产";
     if (id === "tool-style") return "画布外观";

@@ -14,6 +14,8 @@ export const NODE_DEFAULT_SIZE = {
     [CanvasNodeType.ScriptAsset]: { width: 560, height: 320, title: "资产" },
     [CanvasNodeType.AssetStoryboard]: { width: 300, height: 180, title: "分镜脚本" },
     [CanvasNodeType.ClipStoryboard]: { width: 480, height: 460, title: "分镜拆解" },
+    [CanvasNodeType.NovelScript]: { width: 420, height: 320, title: "小说改剧本" },
+    [CanvasNodeType.ScriptResult]: { width: 420, height: 360, title: "剧本" },
 } satisfies Record<CanvasNodeType, { width: number; height: number; title: string }>;
 
 export const NODE_SPECS = {
@@ -26,6 +28,8 @@ export const NODE_SPECS = {
     [CanvasNodeType.ScriptAsset]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.ScriptAsset], metadata: { status: "idle", scriptAssetImageStatus: "idle" } },
     [CanvasNodeType.AssetStoryboard]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.AssetStoryboard], metadata: { status: "idle" } },
     [CanvasNodeType.ClipStoryboard]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.ClipStoryboard], metadata: { status: "idle", clipStoryboardScript: "" } },
+    [CanvasNodeType.NovelScript]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.NovelScript], metadata: { status: "idle", novelScriptRawText: "", novelScriptStatus: "idle" } },
+    [CanvasNodeType.ScriptResult]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.ScriptResult], metadata: { status: "idle", scriptContent: "" } },
 } satisfies Record<CanvasNodeType, CanvasNodeSpec>;
 
 export function getNodeSpec(type: string) {

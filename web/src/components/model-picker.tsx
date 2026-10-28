@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { Popover, Tooltip } from "antd";
 import { Bot, Boxes, BrainCircuit, CircleHelp, Clapperboard, Code2, Cpu, Image, MessageSquareCode, Mic, Sparkles, Star, WandSparkles } from "lucide-react";
 
@@ -21,9 +21,11 @@ type ModelPickerProps = {
     placeholder?: string;
     onMissingConfig?: () => void;
     compactVideo?: boolean;
+    /** 可选：为下拉里的每个模型渲染右侧徽标（如 免费/¥x.xx/次） */
+    optionBadge?: (model: string) => ReactNode;
 };
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, compactVideo = false }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, compactVideo = false, optionBadge }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const pickerTheme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -53,6 +55,20 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
         window.addEventListener("model-picker-open", closeOtherPicker);
         return () => window.removeEventListener("model-picker-open", closeOtherPicker);
     }, [pickerId]);
+
+    // 画布缩放改变的是 scene 的 CSS transform，Radix 的 autoUpdate 感知不到（只监听 scroll/resize），
+    // 浮层会钉在旧屏幕位置，被放大后的节点盖住甚至移出视口。缩放（下拉外滚轮）时直接收起，
+    // 重新打开时会按当前缩放重新定位。与 Figma 缩放时收起菜单的行为一致。
+    useEffect(() => {
+        if (!open) return;
+        const closeOnViewportChange = (event: WheelEvent) => {
+            const target = event.target instanceof Element ? event.target : null;
+            if (target?.closest('[data-slot="select-content"],[data-slot="select-trigger"]')) return;
+            setOpen(false);
+        };
+        window.addEventListener("wheel", closeOnViewportChange, { capture: true, passive: true });
+        return () => window.removeEventListener("wheel", closeOnViewportChange, { capture: true });
+    }, [open]);
 
     return (
         <Select
@@ -113,14 +129,17 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                                 <SelectItem
                                     key={model}
                                     value={model}
-                                    hideIndicator={capability === "image" || Boolean(videoCapabilitiesOf(config, model))}
+                                    hideIndicator={capability === "image" || Boolean(videoCapabilitiesOf(config, model)) || Boolean(optionBadge)}
                                     textValue={displayedModelName(config, model)}
                                     className={cn(
                                         "relative my-1 w-full rounded-none border-0 border-b border-white/12 !pr-1.5 last:mb-0 data-[state=checked]:border-b-sky-300/35 data-[state=checked]:bg-sky-400/12 data-[state=checked]:shadow-[inset_3px_0_0_rgba(56,189,248,.95)] [&>span:last-child]:min-w-0 [&>span:last-child]:w-full",
                                         capability === "image" ? "py-2.5" : "py-1.5",
                                     )}
                                 >
-                                    <ModelLabel config={config} model={model} />
+                                    <span className="flex min-w-0 w-full items-center justify-between gap-2">
+                                        <ModelLabel config={config} model={model} />
+                                        {optionBadge?.(model)}
+                                    </span>
                                 </SelectItem>
                             ))}
                         </SelectGroup>

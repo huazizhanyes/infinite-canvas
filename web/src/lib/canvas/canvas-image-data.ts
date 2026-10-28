@@ -45,6 +45,18 @@ export async function cropDataUrl(dataUrl: string, crop?: ImageCropRect) {
     return drawCrop(image, sx, sy, size, size);
 }
 
+export async function compositeDoodleDataUrl(dataUrl: string, strokesCanvas: HTMLCanvasElement) {
+    const image = await loadImage(dataUrl);
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext("2d");
+    if (!context) return dataUrl;
+    context.drawImage(image, 0, 0, image.width, image.height);
+    context.drawImage(strokesCanvas, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/png");
+}
+
 export async function splitDataUrl(dataUrl: string, params: ImageSplitParams): Promise<ImageSplitPiece[]> {
     const image = await loadImage(dataUrl);
     const xCuts = buildSplitCuts(params.verticalLines, image.width, Math.max(1, Math.floor(params.columns)));

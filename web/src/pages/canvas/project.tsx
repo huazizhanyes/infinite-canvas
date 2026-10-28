@@ -1,7 +1,7 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowDown, ArrowRight, ArrowUpRight, Bot, ChevronDown, Clapperboard, Group, Home, ImageIcon, Images, LayoutGrid, List, ListTree, Menu, MousePointer2, Move, Music2, Plus, Redo2, ScanText, Sparkles, Trash2, Type, Undo2, Upload, Video, X } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUpRight, BookOpenText, Bot, ChevronDown, Clapperboard, Group, Home, ImageIcon, Images, LayoutGrid, List, ListTree, Menu, MousePointer2, Move, Music2, Plus, Redo2, ScanText, ScrollText, Sparkles, Trash2, Type, Undo2, Upload, Video, X } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { getCanvasImageTask, parseCanvasImageTaskItems, requestEdit, requestGeneration, requestImageQuestion, waitForCanvasImageTask, type CanvasImageTask } from "@/services/api/image";
@@ -36,6 +36,7 @@ import { CanvasNodeAngleDialog, type CanvasImageAngleParams } from "@/components
 import { CanvasNodeAudioExtractDialog } from "@/components/canvas/canvas-node-audio-extract-dialog";
 import { CanvasNodeCropDialog, type CanvasImageCropRect } from "@/components/canvas/canvas-node-crop-dialog";
 import { CanvasNodeMaskEditDialog, type CanvasImageMaskEditPayload } from "@/components/canvas/canvas-node-mask-edit-dialog";
+import { CanvasNodeDoodleDialog, type CanvasImageDoodlePayload } from "@/components/canvas/canvas-node-doodle-dialog";
 import { CanvasNodeSplitDialog, type CanvasImageSplitParams } from "@/components/canvas/canvas-node-split-dialog";
 import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-upscale-dialog";
 import { buildNodeGenerationContext, buildNodeResponseMessages, hydrateNodeGenerationContext, restoreVideoGenerationSnapshot, videoReferenceAudioDurationError, type NodeGenerationContext } from "@/components/canvas/canvas-node-generation";
@@ -116,7 +117,7 @@ type PendingConnectionCreate = {
     menuPosition?: Position;
 };
 
-type ConnectionCreateType = CanvasNodeType.Text | CanvasNodeType.Image | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.AssetStoryboard | CanvasNodeType.ClipStoryboard;
+type ConnectionCreateType = CanvasNodeType.Text | CanvasNodeType.Image | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.AssetStoryboard | CanvasNodeType.ClipStoryboard | CanvasNodeType.ScriptResult;
 
 type ConnectionDropTarget = {
     nodeId: string | null;
@@ -281,9 +282,10 @@ function ConnectionCreateMenu({
     const menuPosition = pending.menuPosition || pending.position;
     const isBatch = pending.connections.length > 1;
     const isAssetStoryboardOnly = availableTypes.size === 1 && availableTypes.has(CanvasNodeType.AssetStoryboard);
+    const isScriptOnly = availableTypes.size === 1 && availableTypes.has(CanvasNodeType.ScriptResult);
     return (
         <div
-            className={`absolute z-[120] origin-top-left rounded-[8px] border p-2 shadow-2xl backdrop-blur ${isBatch || isAssetStoryboardOnly ? "w-[292px]" : "w-[420px]"}`}
+            className={`absolute z-[120] origin-top-left rounded-[8px] border p-2 shadow-2xl backdrop-blur ${isBatch || isAssetStoryboardOnly || isScriptOnly ? "w-[292px]" : "w-[420px]"}`}
             data-connection-create-menu
             data-canvas-no-zoom
             style={{ left: menuPosition.x, top: menuPosition.y, transform: `scale(${1 / Math.max(scale, 0.05)})`, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
@@ -292,14 +294,15 @@ function ConnectionCreateMenu({
         >
             <div className="mb-1.5 flex items-center justify-between px-1">
                 <span className="text-[11px] font-semibold" style={{ color: theme.node.text }}>
-                    {isAssetStoryboardOnly ? "创建资产专属分镜" : isBatch ? `引用选中的 ${pending.connections.length} 个节点` : "选择生成类型"}
+                    {isAssetStoryboardOnly ? "创建资产专属分镜" : isScriptOnly ? "创建剧本" : isBatch ? `引用选中的 ${pending.connections.length} 个节点` : "选择生成类型"}
                 </span>
                 <button type="button" className="grid size-6 place-items-center rounded-md text-sm opacity-55 transition hover:bg-white/10 hover:opacity-100" onClick={onClose} aria-label="关闭">
                     ×
                 </button>
             </div>
-            <div className={`grid gap-1 ${isBatch || isAssetStoryboardOnly ? "grid-cols-1" : "grid-cols-2"}`}>
+            <div className={`grid gap-1 ${isBatch || isAssetStoryboardOnly || isScriptOnly ? "grid-cols-1" : "grid-cols-2"}`}>
                 {availableTypes.has(CanvasNodeType.AssetStoryboard) ? <ConnectionCreateOption theme={theme} icon={<Clapperboard className="size-5" />} title="资产专属分镜" description="从本集资产组装分镜与视频单元" onClick={() => onCreate(CanvasNodeType.AssetStoryboard)} /> : null}
+                {availableTypes.has(CanvasNodeType.ScriptResult) ? <ConnectionCreateOption theme={theme} icon={<ScrollText className="size-5" />} title="剧本" description="把小说原文改写为格式化剧本" onClick={() => onCreate(CanvasNodeType.ScriptResult)} /> : null}
                 {availableTypes.has(CanvasNodeType.ClipStoryboard) ? <ConnectionCreateOption theme={theme} icon={<ListTree className="size-5" />} title="分镜拆解" description="粘贴 Clip 分镜脚本，批量生成视频节点" onClick={() => onCreate(CanvasNodeType.ClipStoryboard)} /> : null}
                 {availableTypes.has(CanvasNodeType.Text) ? <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title="文本生成" description="脚本、广告词、品牌文案" onClick={() => onCreate(CanvasNodeType.Text)} /> : null}
                 {availableTypes.has(CanvasNodeType.Image) ? <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title="图片生成" onClick={() => onCreate(CanvasNodeType.Image)} /> : null}
@@ -379,6 +382,7 @@ function EmptyCanvasGuide({ onCreate }: { onCreate: (type: CanvasNodeType) => vo
         { type: CanvasNodeType.Image, title: "生成图片", description: "从描述开始构图", accent: "#67e8f9", icon: <ImageIcon className="size-5" />, art: <ImageIcon className="size-16" /> },
         { type: CanvasNodeType.Video, title: "生成视频", description: "让画面动起来", accent: "#a78bfa", icon: <Video className="size-5" />, art: <Video className="size-16" /> },
         { type: CanvasNodeType.AssetExtraction, title: "资产提取", description: "从内容中整理资产", accent: "#34d399", icon: <ScanText className="size-5" />, art: <ScanText className="size-16" /> },
+        { type: CanvasNodeType.NovelScript, title: "小说改剧本", description: "小说一键改写剧本", accent: "#f59e0b", icon: <BookOpenText className="size-5" />, art: <BookOpenText className="size-16" /> },
     ];
     return (
         <div data-canvas-no-zoom className="pointer-events-auto w-[min(1160px,calc(100vw-64px))] text-white" onPointerDown={(event) => event.stopPropagation()}>
@@ -386,7 +390,7 @@ function EmptyCanvasGuide({ onCreate }: { onCreate: (type: CanvasNodeType) => vo
                 <div className="flex items-center gap-3 text-[22px] font-semibold tracking-tight"><MousePointer2 className="size-5 text-sky-300" />双击画布，自由生成节点</div>
                 <p className="mt-2 text-sm text-slate-300">从一个节点开始，把文字、图片、视频和资产提取串成创作流程</p>
             </div>
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-5 gap-4">
                 {actions.map((action) => (
                     <button
                         key={action.type}
@@ -512,6 +516,7 @@ function InfiniteCanvasPage() {
     const [audioExtractNodeId, setAudioExtractNodeId] = useState<string | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
+    const [doodleNodeId, setDoodleNodeId] = useState<string | null>(null);
     const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
     const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);
     const [superResolveNodeId, setSuperResolveNodeId] = useState<string | null>(null);
@@ -1724,6 +1729,7 @@ function InfiniteCanvasPage() {
     const audioExtractNode = audioExtractNodeId ? nodeById.get(audioExtractNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
     const maskEditNode = maskEditNodeId ? nodeById.get(maskEditNodeId) || null : null;
+    const doodleNode = doodleNodeId ? nodeById.get(doodleNodeId) || null : null;
     const splitNode = splitNodeId ? nodeById.get(splitNodeId) || null : null;
     const upscaleNode = upscaleNodeId ? nodeById.get(upscaleNodeId) || null : null;
     const superResolveNode = superResolveNodeId ? nodeById.get(superResolveNodeId) || null : null;
@@ -3462,6 +3468,42 @@ function InfiniteCanvasPage() {
         setDialogNodeId(childId);
         setCropNodeId(null);
     }, [appendCanvasConnections]);
+
+    const doodleImageNode = useCallback(
+        async (node: CanvasNodeData, payload: CanvasImageDoodlePayload) => {
+            if (!node.metadata?.content) return;
+            if (debugReadOnly) {
+                message.info("当前是只读调试副本，不能创建涂鸦副本");
+                return;
+            }
+            try {
+                const image = await uploadImage(payload.doodleDataUrl);
+                const childId = nanoid();
+                const child: CanvasNodeData = {
+                    id: childId,
+                    type: CanvasNodeType.Image,
+                    title: `${node.title || "图片"} 涂鸦`,
+                    position: { x: node.position.x + node.width + 96, y: node.position.y },
+                    width: node.width,
+                    height: node.width * (image.height / image.width),
+                    metadata: {
+                        ...imageMetadata(image),
+                        prompt: node.metadata?.prompt,
+                    },
+                };
+                setDoodleNodeId(null);
+                setNodes((prev) => [...prev, child]);
+                appendCanvasConnections([child], [{ id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
+                setSelectedNodeIds(new Set([childId]));
+                setSelectedConnectionId(null);
+                setDialogNodeId(childId);
+                message.success("已生成涂鸦副本");
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "涂鸦副本生成失败");
+            }
+        },
+        [appendCanvasConnections, debugReadOnly, message],
+    );
 
     const splitImageNode = useCallback(
         async (node: CanvasNodeData, params: CanvasImageSplitParams) => {
@@ -5292,6 +5334,7 @@ function InfiniteCanvasPage() {
                     onExtractAudio={debugReadOnly ? undefined : (node) => setAudioExtractNodeId(node.id)}
                     onSaveAsset={(node) => void saveNodeAsset(node)}
                     onMaskEdit={(node) => setMaskEditNodeId(node.id)}
+                    onDoodle={(node) => setDoodleNodeId(node.id)}
                     onCrop={(node) => setCropNodeId(node.id)}
                     onSplit={(node) => setSplitNodeId(node.id)}
                     onUpscale={(node) => setUpscaleNodeId(node.id)}
@@ -5319,6 +5362,7 @@ function InfiniteCanvasPage() {
                     onAddText={() => createNode(CanvasNodeType.Text)}
                     onAddGroup={groupSelectedNodes}
                     onAddAssetExtraction={() => createNode(CanvasNodeType.AssetExtraction)}
+                    onAddNovelScript={() => createNode(CanvasNodeType.NovelScript)}
                     onAddExtensionNode={(type) => createNode(type)}
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
@@ -5368,6 +5412,10 @@ function InfiniteCanvasPage() {
 
                 {maskEditNode?.metadata?.content ? (
                     <CanvasNodeMaskEditDialog dataUrl={maskEditNode.metadata.content} open={Boolean(maskEditNode)} onClose={() => setMaskEditNodeId(null)} onConfirm={(payload) => void maskEditImageNode(maskEditNode!, payload)} />
+                ) : null}
+
+                {doodleNode?.metadata?.content ? (
+                    <CanvasNodeDoodleDialog dataUrl={doodleNode.metadata.content} open={Boolean(doodleNode)} onClose={() => setDoodleNodeId(null)} onConfirm={(payload) => doodleImageNode(doodleNode!, payload)} />
                 ) : null}
 
                 {splitNode?.metadata?.content ? <CanvasNodeSplitDialog dataUrl={splitNode.metadata.content} open={Boolean(splitNode)} onClose={() => setSplitNodeId(null)} onConfirm={(params) => void splitImageNode(splitNode!, params)} /> : null}
@@ -6000,6 +6048,8 @@ function getCompatibleConnectionCreateTypes(pending: PendingConnectionCreate, no
     const candidateTypes = [CanvasNodeType.Text, CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Audio] as const;
     if (connectionStarts.length !== pending.connections.length) return new Set<ConnectionCreateType>();
     if (connectionStarts.length === 1 && connectionStarts[0].type === CanvasNodeType.AssetExtraction && connectionStarts[0].handleType === "source") return new Set<ConnectionCreateType>([CanvasNodeType.AssetStoryboard]);
+    // 「小说改剧本」节点连线创建只允许「剧本」——剧本节点只能由它生成，不开放其他类型。
+    if (connectionStarts.length === 1 && connectionStarts[0].type === CanvasNodeType.NovelScript && connectionStarts[0].handleType === "source") return new Set<ConnectionCreateType>([CanvasNodeType.ScriptResult]);
     const types = new Set<ConnectionCreateType>(candidateTypes.filter((candidateType) => connectionStarts.every((start) => isCompatibleCanvasConnectionFromHandle(start.type, candidateType, start.handleType))));
     // 分镜拆解只在「多选图片」或「图片 + 音频」时出现，且至少要有 1 张图片。
     if (connectionStarts.length >= 2 && connectionStarts.some((start) => start.type === CanvasNodeType.Image) && connectionStarts.every((start) => start.type === CanvasNodeType.Image || start.type === CanvasNodeType.Audio)) {
