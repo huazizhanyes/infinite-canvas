@@ -4,28 +4,35 @@ import type { CanvasAgentOp } from "@/lib/canvas/canvas-agent-ops";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 // 「小说改剧本」节点的纯逻辑：prompt 组装 + 统计 + 结果节点建点 ops。
-// prompt 正文 1:1 搬运自后端 flash_nest/src/drama-studio：
-//   - system 提示词 ← drama-prompt-seed.ts 的 script_rewriter agent
-//   - 改写指南/格式规范 ← skill:script-rewriter 细则 + rewrite_to_screenplay 工具指令
+// prompt 正文 1:1 搬运自后端 flash_nest/src/drama-studio/drama-prompt-seed.ts（与 /drama、素材网快捷助手同源）：
+//   - system = script_rewriter agent 正文 + "---" + 「技能细则：剧本改写细则」(skill:script-rewriter)
+//     + 「本次运行说明」（无工具单轮版的试跑包装，与后端 ai-tools.service 同文案）
+//   - user = rewrite_to_screenplay 工具指令（格式规范 + 【原始内容】原文），与 /drama 注入工具结果的文案逐字一致
 //   - 字数/场景数口径 ← save_script 工具（word_count 去空白、scene_count 匹配 ## S\d+）
-// 原版走 Agent 工具链（read_episode_script → rewrite_to_screenplay → save_script），
-// 画布节点为单次直调：把规范与原文合并为一次请求，去掉工具调用步骤。
+// 注意：后端读 DB 在线版（提示词管理页可改、即时生效）；画布是前端快照，只对应 seed 初始版——
+// 管理员在提示词管理页改过正文时，需要回 here 同步一次（文件头有对照表）。
 
 export const NOVEL_SCRIPT_MAX_SOURCE = 6000;
 export const NOVEL_SCRIPT_MAX_SCRIPT = 10000;
 
-const NOVEL_SCRIPT_SYSTEM_PROMPT = `你是专业编剧，擅长将小说改编为短剧剧本。
+/** drama-prompt-seed.ts → script_rewriter（agent）正文快照 */
+const SCRIPT_REWRITER_SYSTEM = `你是专业编剧，擅长将小说改编为短剧剧本。
 
-要求：你必须自己完成改写工作，读取下方原始内容后直接输出改写后的完整格式化剧本，不要只返回指令，不要输出任何解释或工具调用。
+工作流程：
+1. 调用 read_episode_script 读取原始内容
+2. 根据读取到的内容，自己进行改写（输出格式化剧本格式）
+3. 调用 save_script 保存改写后的完整剧本
 
 格式化剧本格式：
 - 场景头：## S编号 | 内景/外景 · 地点 | 时间段
 - 动作描写：自然段落，不包含镜头语言
 - 对白：角色名：（状态/表情）台词内容
 - 每个场景 30-60 秒内容
-`;
 
-const NOVEL_SCRIPT_GUIDE = `# 剧本改写指南
+注意：你必须自己完成改写工作，不要只返回指令。读取内容后直接输出改写结果并保存。`;
+
+/** drama-prompt-seed.ts → skill:script-rewriter（技能细则）正文快照 */
+const SCRIPT_REWRITER_SKILL = `# 剧本改写指南
 
 ## 改写原则
 
@@ -60,6 +67,14 @@ const NOVEL_SCRIPT_GUIDE = `# 剧本改写指南
 
 格式化剧本相比原始内容增加约 20-30%，主要增量是场景头标记和对白格式化，不是扩写。
 
+## 改写步骤
+
+1. 先调用 \`read_episode_script\` 读取原始内容
+2. 分析内容结构（对话、叙述、心理描写的比例）
+3. 调用 \`rewrite_to_screenplay\` 执行改写
+4. 检查改写结果，确认符合格式化剧本格式
+5. 调用 \`save_script\` 保存最终结果
+
 ## 注意事项
 
 - 心理描写可转化为角色表情/动作或画外音
@@ -67,10 +82,24 @@ const NOVEL_SCRIPT_GUIDE = `# 剧本改写指南
 - 确保每个场景有明确的情绪转折点
 - 保持角色语言风格一致性
 - 场景编号连续递增（S01, S02, S03...）
-- 时间段要具体（黄昏、深夜、清晨），不要笼统写"白天"
-`;
+- 时间段要具体（黄昏、深夜、清晨），不要笼统写"白天"`;
 
-/** 组装 /v1/responses 的 input 消息（与后端 rewrite_to_screenplay 指令逐字一致 + 改写指南）。 */
+/** 与后端 ai-tools.service 的 sharedRule 同文案：无工具单轮版的「试跑包装」 */
+const SHARED_RULE = `# 本次运行说明
+本次是**一次性快捷工具**：没有工具可用，不要输出任何工具调用（read_* / save_* / update_* 等），也不要解释你的思路，**直接输出最终结果正文**。全部使用简体中文。`;
+
+/** 与后端 DramaPromptService.resolve 同结构：agent 正文 + --- + 技能细则，再拼运行说明 */
+const NOVEL_SCRIPT_SYSTEM_PROMPT = `${SCRIPT_REWRITER_SYSTEM}
+
+---
+
+# 技能细则：剧本改写细则
+
+${SCRIPT_REWRITER_SKILL}
+
+${SHARED_RULE}`;
+
+/** 组装 /v1/responses 的 input 消息（user 消息与后端 rewrite_to_screenplay 指令逐字一致）。 */
 export function buildNovelScriptInput(source: string): Array<{ role: "system" | "user"; content: string }> {
     const raw = String(source || "").trim();
     return [
@@ -85,7 +114,6 @@ export function buildNovelScriptInput(source: string): Array<{ role: "system" | 
 - 对白：角色名：（状态/表情）台词内容
 - 每个场景 30-60 秒内容
 
-${NOVEL_SCRIPT_GUIDE}
 
 【原始内容】
 ${raw}`,
