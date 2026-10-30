@@ -19,6 +19,15 @@ type TextBillingModel = {
     is_default?: boolean;
 };
 
+// 免费模型每日额度（全局共享：/drama、画布、快捷助手合计）
+type TextBillingFreeQuota = {
+    enabled: boolean;
+    daily_limit: number;
+    used: number;
+    remaining: number;
+    overage_price_yuan: number;
+};
+
 // 「小说改剧本」节点：粘贴小说原文 → AI 一键改写 → 每次生成新建一个独立的「剧本」节点存结果。
 // 改写指令与后端 drama-studio（script_rewriter agent + rewrite_to_screenplay）1:1 对齐，走画布 /v1/responses 通道（一次性返回）。
 export function CanvasNovelScriptNode({ ctx }: { ctx: CanvasNodeContext }) {
@@ -27,33 +36,59 @@ export function CanvasNovelScriptNode({ ctx }: { ctx: CanvasNodeContext }) {
     const connection = useUserStore((state) => state.connection);
     const controllerRef = useRef<AbortController | null>(null);
     const [billing, setBilling] = useState<Record<string, TextBillingModel>>({});
+    const [freeQuota, setFreeQuota] = useState<TextBillingFreeQuota | null>(null);
 
-    // 拉取文本模型免费/价格标记（静默失败，不影响选择）
+    // 拉取文本模型免费/价格标记 + 今日免费额度余量（静默失败，不影响选择）
     useEffect(() => {
         if (!connection?.apiBaseUrl || !connection.token) return;
         let cancelled = false;
-        axios
-            .get(`${connection.apiBaseUrl.replace(/\/+$/, "")}/text-billing/models`, { headers: { Authorization: `Bearer ${connection.token}` } })
-            .then((response) => {
-                const payload = response?.data?.data ?? response?.data;
-                const items: TextBillingModel[] = payload?.items || [];
-                if (cancelled) return;
-                setBilling(Object.fromEntries(items.map((item) => [String(item.model_key || "").toLowerCase(), item])));
-            })
-            .catch(() => undefined);
+        const load = () => {
+            axios
+                .get(`${connection.apiBaseUrl.replace(/\/+$/, "")}/text-billing/models`, { headers: { Authorization: `Bearer ${connection.token}` } })
+                .then((response) => {
+                    const payload = response?.data?.data ?? response?.data;
+                    const items: TextBillingModel[] = payload?.items || [];
+                    if (cancelled) return;
+                    setBilling(Object.fromEntries(items.map((item) => [String(item.model_key || "").toLowerCase(), item])));
+                    setFreeQuota(payload?.free_quota || null);
+                })
+                .catch(() => undefined);
+        };
+        load();
         return () => {
             cancelled = true;
         };
     }, [connection?.apiBaseUrl, connection?.token]);
 
+    // 生成结束后刷新额度余量（静默；单独请求 free-quota，比整份价目表轻）
+    const refreshQuota = () => {
+        if (!connection?.apiBaseUrl || !connection.token) return;
+        axios
+            .get(`${connection.apiBaseUrl.replace(/\/+$/, "")}/text-billing/free-quota`, { headers: { Authorization: `Bearer ${connection.token}` } })
+            .then((response) => {
+                const payload = response?.data?.data ?? response?.data;
+                if (payload) setFreeQuota(payload);
+            })
+            .catch(() => undefined);
+    };
+
     const billingBadge = (value: string) => {
         const info = billing[modelOptionName(value).trim().toLowerCase()];
         if (!info) return null;
+        // 额度感知：免费模型额度内「免费·剩 N 次」（绿），额度用完显示超额单价（黄）；付费模型照旧
+        const quotaExhausted = Boolean(freeQuota?.enabled && freeQuota.remaining <= 0);
+        const isFree = (info.free || info.pricing_mode === "free") && !quotaExhausted;
         return (
             <span className="flex shrink-0 items-center gap-1">
                 {info.is_default ? <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] leading-none text-sky-300">默认</span> : null}
                 {info.free || info.pricing_mode === "free" ? (
-                    <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] leading-none text-emerald-400">免费</span>
+                    <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] leading-none text-emerald-400">
+                        {isFree
+                            ? freeQuota?.enabled
+                                ? `免费·剩${freeQuota.remaining}次`
+                                : "免费"
+                            : `¥${Number(freeQuota?.overage_price_yuan || 0).toFixed(2)}/次`}
+                    </span>
                 ) : Number(info.price_yuan) > 0 ? (
                     <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] leading-none text-amber-400">¥{Number(info.price_yuan).toFixed(2)}/次</span>
                 ) : null}
@@ -120,6 +155,7 @@ export function CanvasNovelScriptNode({ ctx }: { ctx: CanvasNodeContext }) {
             ctx.updateMetadata({ novelScriptStatus: "error", novelScriptError: errorMessage });
         } finally {
             if (controllerRef.current === controller) controllerRef.current = null;
+            refreshQuota();
         }
     };
 
