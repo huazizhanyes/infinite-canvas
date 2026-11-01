@@ -515,6 +515,8 @@ function InfiniteCanvasPage() {
     const [pluginManagerOpen, setPluginManagerOpen] = useState(false);
     const [audioExtractNodeId, setAudioExtractNodeId] = useState<string | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
+    const [cropSubmitting, setCropSubmitting] = useState(false);
+    const croppingInFlightRef = useRef(false);
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
     const [doodleNodeId, setDoodleNodeId] = useState<string | null>(null);
     const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
@@ -3445,29 +3447,38 @@ function InfiniteCanvasPage() {
     );
 
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
-        if (!node.metadata?.content) return;
-        const cropped = await cropDataUrl(node.metadata.content, crop);
-        const image = await uploadImage(cropped);
-        const width = Math.min(node.width, Math.max(220, image.width));
-        const childId = nanoid();
-        const child: CanvasNodeData = {
-            id: childId,
-            type: CanvasNodeType.Image,
-            title: "Cropped Image",
-            position: { x: node.position.x + node.width + 96, y: node.position.y },
-            width,
-            height: width * (image.height / image.width),
-            metadata: {
-                ...imageMetadata(image),
-                prompt: node.metadata?.prompt,
-            },
-        };
-        setNodes((prev) => [...prev, child]);
-        appendCanvasConnections([child], [{ id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
-        setSelectedNodeIds(new Set([childId]));
-        setDialogNodeId(childId);
-        setCropNodeId(null);
-    }, [appendCanvasConnections]);
+        if (!node.metadata?.content || croppingInFlightRef.current) return;
+        croppingInFlightRef.current = true;
+        setCropSubmitting(true);
+        try {
+            const cropped = await cropDataUrl(node.metadata.content, crop);
+            const image = await uploadImage(cropped);
+            const width = Math.min(node.width, Math.max(220, image.width));
+            const childId = nanoid();
+            const child: CanvasNodeData = {
+                id: childId,
+                type: CanvasNodeType.Image,
+                title: "Cropped Image",
+                position: { x: node.position.x + node.width + 96, y: node.position.y },
+                width,
+                height: width * (image.height / image.width),
+                metadata: {
+                    ...imageMetadata(image),
+                    prompt: node.metadata?.prompt,
+                },
+            };
+            setNodes((prev) => [...prev, child]);
+            appendCanvasConnections([child], [{ id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
+            setSelectedNodeIds(new Set([childId]));
+            setDialogNodeId(childId);
+            setCropNodeId(null);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "裁剪失败，请重试");
+        } finally {
+            croppingInFlightRef.current = false;
+            setCropSubmitting(false);
+        }
+    }, [appendCanvasConnections, message]);
 
     const doodleImageNode = useCallback(
         async (node: CanvasNodeData, payload: CanvasImageDoodlePayload) => {
@@ -5408,7 +5419,7 @@ function InfiniteCanvasPage() {
 
                 {audioExtractNode?.metadata?.content ? <CanvasNodeAudioExtractDialog node={audioExtractNode} open onClose={() => setAudioExtractNodeId(null)} onConfirm={(result) => createAudioNodeFromVideo(audioExtractNode!, result)} /> : null}
 
-                {cropNode?.metadata?.content ? <CanvasNodeCropDialog dataUrl={cropNode.metadata.content} open={Boolean(cropNode)} onClose={() => setCropNodeId(null)} onConfirm={(crop) => void cropImageNode(cropNode!, crop)} /> : null}
+                {cropNode?.metadata?.content ? <CanvasNodeCropDialog dataUrl={cropNode.metadata.content} open={Boolean(cropNode)} loading={cropSubmitting} onClose={() => setCropNodeId(null)} onConfirm={(crop) => void cropImageNode(cropNode!, crop)} /> : null}
 
                 {maskEditNode?.metadata?.content ? (
                     <CanvasNodeMaskEditDialog dataUrl={maskEditNode.metadata.content} open={Boolean(maskEditNode)} onClose={() => setMaskEditNodeId(null)} onConfirm={(payload) => void maskEditImageNode(maskEditNode!, payload)} />

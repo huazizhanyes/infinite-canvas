@@ -18,7 +18,7 @@ const handles: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 const minSize = 0.06;
 const defaultCrop = { x: 0.12, y: 0.12, width: 0.76, height: 0.76 };
 
-export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (crop: CanvasImageCropRect) => void }) {
+export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm, loading = false }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (crop: CanvasImageCropRect) => void; loading?: boolean }) {
     const boxRef = useRef<HTMLDivElement>(null);
     const [crop, setCrop] = useState<CanvasImageCropRect>(defaultCrop);
     const [locked, setLocked] = useState(false);
@@ -54,7 +54,20 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
     };
 
     return (
-        <Modal title="裁剪图片" open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={780} centered destroyOnHidden>
+        <Modal
+            title="裁剪图片"
+            open={open && Boolean(dataUrl)}
+            onCancel={() => {
+                if (!loading) onClose();
+            }}
+            footer={null}
+            width={780}
+            centered
+            destroyOnHidden
+            maskClosable={!loading}
+            keyboard={!loading}
+            closable={!loading}
+        >
             <div className="space-y-4">
                 <div className="flex justify-center">
                     <div ref={boxRef} className="relative inline-block max-w-full overflow-hidden rounded-lg bg-black select-none">
@@ -82,18 +95,18 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
                             </span>
                         ) : null}
                     </div>
-                    <Button icon={locked ? <Lock className="size-4" /> : <LockOpen className="size-4" />} onClick={() => setLocked((value) => !value)}>
+                    <Button icon={locked ? <Lock className="size-4" /> : <LockOpen className="size-4" />} disabled={loading} onClick={() => setLocked((value) => !value)}>
                         {locked ? "锁定比例" : "自由比例"}
                     </Button>
                 </div>
 
                 <div className="flex items-center justify-end gap-2">
-                    <Button onClick={() => setCrop(defaultCrop)}>重置</Button>
-                    <Button icon={<X className="size-4" />} onClick={onClose}>
+                    <Button disabled={loading} onClick={() => setCrop(defaultCrop)}>重置</Button>
+                    <Button icon={<X className="size-4" />} disabled={loading} onClick={onClose}>
                         取消
                     </Button>
-                    <Button type="primary" icon={<Check className="size-4" />} onClick={() => onConfirm(crop)}>
-                        确认裁剪
+                    <Button type="primary" icon={<Check className="size-4" />} loading={loading} onClick={() => onConfirm(crop)}>
+                        {loading ? "裁剪中..." : "确认裁剪"}
                     </Button>
                 </div>
             </div>

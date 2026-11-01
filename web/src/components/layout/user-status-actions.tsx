@@ -11,6 +11,7 @@ import { SUCAI_INTEGRATION } from "@/constant/env";
 import { useUserStore } from "@/stores/use-user-store";
 import { openAiMembershipModal } from "@/components/layout/ai-membership-modal";
 import { VideoSpendingButton } from "@/components/layout/video-spending-drawer";
+import { CanvasTutorialButton } from "@/components/layout/canvas-tutorial-button";
 
 type UserStatusActionsProps = {
     showConfig?: boolean;
@@ -41,6 +42,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                 <span>会员中心</span>
             </button>
             <VideoSpendingButton style={iconStyle} />
+            <CanvasTutorialButton style={iconStyle} />
             {onOpenPlugins ? (
                 <button type="button" className={naturalIconClass} style={iconStyle} onClick={onOpenPlugins} aria-label="节点插件" title="节点插件">
                     <Puzzle className="size-4" />

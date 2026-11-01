@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { ArrowUp, AudioLines, ChevronDown, Clapperboard, Image as ImageIcon, LoaderCircle, RectangleHorizontal, Sparkles, Square } from "lucide-react";
-import { Button, Dropdown, Segmented, Select, Tag, Tooltip } from "antd";
+import { Button, Dropdown, message, Segmented, Select, Tag, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
-import { defaultConfig, imageAspectRatiosOf, imageQualityOptionsOf, imageQualityPricesOf, MIN_VIDEO_DURATION_SECONDS, resolveImageOutputTier, modelMatchesCapability, modelOptionName, normalizeVideoDuration, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, videoCapabilitiesOf, type AiConfig, type ImageOutputTier } from "@/stores/use-config-store";
+import { defaultConfig, imageAspectRatiosOf, imageQualityOptionsOf, imageQualityPricesOf, MIN_VIDEO_DURATION_SECONDS, modelOptionName, resolveImageOutputTier, modelMatchesCapability, normalizeVideoDuration, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, videoCapabilitiesOf, type AiConfig, type ImageOutputTier } from "@/stores/use-config-store";
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { defaultAspectRatio } from "@/lib/aspect-ratio";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -23,6 +23,7 @@ import { videoParametersForModel } from "@/lib/video-parameters";
 import { CanvasConnectionPreviewStrip } from "./canvas-connection-preview-strip";
 import { appendCanvasConnectionMention, removeCanvasConnectionMention, type CanvasConnectionPreview } from "@/lib/canvas/canvas-connection-previews";
 import { canvasPromptCharacterWarning, countCanvasPromptCharacters } from "@/lib/canvas/canvas-prompt-character-count";
+import { optimizeImagePrompt } from "@/lib/canvas/prompt-optimizer";
 import { imageAspectOptionDetails, imageAspectOptionList, imageSizeLabel, normalizeImageCount, resolveImageAspectOption } from "@/lib/image-settings";
 import { defaultVideoSize } from "@/lib/seedance-video";
 import { resolvePersistedImage } from "@/services/image-storage";
@@ -76,6 +77,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const manualVideoModeRef = useRef(false);
     const [textAction, setTextAction] = useState<CanvasTextOperation>("polish");
     const [textScope, setTextScope] = useState<"full" | "selection">(selectedText.trim() ? "selection" : "full");
+    const [promptOptimizing, setPromptOptimizing] = useState(false);
+    const [optimizedPreview, setOptimizedPreview] = useState<string | null>(null);
+    const [undoPrompt, setUndoPrompt] = useState<string | null>(null);
+    const optimizingInFlightRef = useRef(false);
+    const optimizeAbortRef = useRef<AbortController | null>(null);
     const connection = useUserStore((state) => state.connection);
     const resolvedMentionReferences = useResolvedMentionReferences(mentionReferences);
     const resolvedConnectionPreviews = useMemo(
@@ -110,6 +116,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         if (!selectedText.trim()) setTextScope("full");
         else setTextScope((current) => current === "selection" ? current : "full");
     }, [selectedText]);
+
+    useEffect(() => {
+        setOptimizedPreview(null);
+        setUndoPrompt(null);
+        optimizeAbortRef.current?.abort();
+    }, [node.id]);
+
+    useEffect(() => () => optimizeAbortRef.current?.abort(), []);
 
     useEffect(() => {
         if (mode !== "video" || !videoCapabilities?.modes.includes("image2video")) return;
@@ -169,10 +183,54 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
+        setUndoPrompt(null);
+        setOptimizedPreview(null);
         if (mode === "video" && videoCapabilities?.modes.includes("image2video") && !manualVideoModeRef.current && hasMentionedMediaReference(value, resolvedMentionReferences) && config.videoMode !== "image2video") {
             onConfigChange(node.id, { videoMode: "image2video" });
         }
         onPromptChange(node.id, value);
+    };
+
+    const optimizePrompt = async () => {
+        if (mode !== "image" || optimizingInFlightRef.current) return;
+        if (!connection) {
+            message.warning("当前未连接服务，无法优化提示词");
+            return;
+        }
+        const currentPrompt = prompt.trim();
+        if (!currentPrompt) return;
+        optimizingInFlightRef.current = true;
+        setPromptOptimizing(true);
+        const controller = new AbortController();
+        optimizeAbortRef.current = controller;
+        try {
+            const optimized = await optimizeImagePrompt(
+                { connection, prompt: currentPrompt, references: resolvedMentionReferences, model: config.textModel ? modelOptionName(config.textModel) : undefined },
+                controller.signal,
+            );
+            setOptimizedPreview(optimized);
+        } catch (error) {
+            if (!controller.signal.aborted) message.error(error instanceof Error ? error.message : "提示词优化失败，请重试");
+        } finally {
+            optimizingInFlightRef.current = false;
+            setPromptOptimizing(false);
+            optimizeAbortRef.current = null;
+        }
+    };
+
+    const applyOptimizedPrompt = () => {
+        if (optimizedPreview === null) return;
+        const previous = prompt;
+        updatePrompt(optimizedPreview);
+        setUndoPrompt(previous);
+        setOptimizedPreview(null);
+    };
+
+    const undoOptimizedPrompt = () => {
+        if (undoPrompt === null) return;
+        const previous = undoPrompt;
+        setUndoPrompt(null);
+        updatePrompt(previous);
     };
 
     const changeVideoMode = (value: string) => {
@@ -213,6 +271,19 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             onChange={(patch) => onConfigChange(node.id, patch)}
                             onMissingConfig={() => openConfigDialog(true)}
                         />
+                        <Tooltip title={promptOptimizing ? "正在优化提示词" : "AI 优化提示词"}>
+                            <Button
+                                type="text"
+                                size="small"
+                                className="!h-9 !min-w-9 !rounded-lg !bg-transparent !px-2 !text-xs hover:!bg-white/5"
+                                style={{ color: theme.node.text }}
+                                disabled={!prompt.trim() || promptOptimizing}
+                                onClick={() => void optimizePrompt()}
+                                icon={promptOptimizing ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                            >
+                                {promptOptimizing ? "优化中" : "优化"}
+                            </Button>
+                        </Tooltip>
                     </>
                 ) : mode === "video" ? (
                     <>
@@ -361,6 +432,28 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     </>
                 ) : mode === "image" ? renderComposerToolbar(true) : undefined}
             />
+
+            {mode === "image" && optimizedPreview !== null ? (
+                <div className="mt-2 rounded-lg border p-2.5" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                    <div className="mb-1 flex items-center gap-1 text-[11px] font-medium" style={{ color: theme.node.muted }}>
+                        <Sparkles className="size-3" />
+                        AI 优化后的提示词
+                    </div>
+                    <p className="thin-scrollbar max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-[13px] leading-5" style={{ color: theme.node.text }}>{optimizedPreview}</p>
+                    <div className="mt-2 flex items-center justify-end gap-2">
+                        <Button size="small" onClick={() => setOptimizedPreview(null)}>取消</Button>
+                        <Button size="small" disabled={promptOptimizing} onClick={() => void optimizePrompt()}>重试</Button>
+                        <Button size="small" type="primary" onClick={applyOptimizedPrompt}>应用</Button>
+                    </div>
+                </div>
+            ) : null}
+
+            {mode === "image" && optimizedPreview === null && undoPrompt !== null ? (
+                <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-[11px]" style={{ borderColor: theme.toolbar.border, background: theme.node.fill, color: theme.node.muted }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                    <span>已应用 AI 优化后的提示词，不满意可撤销</span>
+                    <Button size="small" type="text" className="!px-1.5" onClick={undoOptimizedPrompt}>撤销</Button>
+                </div>
+            ) : null}
 
             {mode === "video" && mediaHydrationState === "failed" ? (
                 <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-red-400/30 bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-200">
