@@ -1,47 +1,28 @@
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { Check, Download, Image as ImageIcon, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Dropdown, Input, type MenuProps } from "antd";
 
-import { resolvePersistedImage } from "@/services/image-storage";
-import { useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
+import { readCanvasProjectCover } from "@/services/canvas-project-cover";
+import { useCanvasStore, type CanvasProjectEntry } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
-import { CanvasNodeType } from "@/types/canvas";
 
-function useProjectCover(project: CanvasProject) {
-    const coverNode = useMemo(
-        () => project.nodes.find((node) => (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.ScriptAsset) && Boolean(node.metadata?.content || node.metadata?.storageKey || node.metadata?.mediaId)),
-        [project.nodes],
-    );
+function useProjectCover(projectId: string) {
     const [coverUrl, setCoverUrl] = useState("");
-
     useEffect(() => {
-        let cancelled = false;
-        const metadata = coverNode?.metadata;
-        if (!metadata) {
-            setCoverUrl("");
-            return;
-        }
-        const fallback = metadata.content || "";
-        setCoverUrl(fallback);
-        if (!metadata.storageKey && !metadata.mediaId) return;
-        void resolvePersistedImage(metadata.mediaId, metadata.storageKey, fallback)
-            .then((resolved) => {
-                if (!cancelled) setCoverUrl(resolved.url || fallback);
-            })
-            .catch(() => {
-                if (!cancelled) setCoverUrl(fallback);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [coverNode]);
-
+        let cancelled = false, objectUrl = "";
+        setCoverUrl("");
+        void readCanvasProjectCover(projectId).then(blob => {
+            if (cancelled || !blob) return;
+            objectUrl = URL.createObjectURL(blob); setCoverUrl(objectUrl);
+        }).catch(() => undefined);
+        return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    }, [projectId]);
     return [coverUrl, setCoverUrl] as const;
 }
 
-export function CanvasProjectCard({ project, index = 0 }: { project: CanvasProject; index?: number }) {
+export function CanvasProjectCard({ project, index = 0 }: { project: CanvasProjectEntry; index?: number }) {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const renameProject = useCanvasStore((state) => state.renameProject);
@@ -55,7 +36,7 @@ export function CanvasProjectCard({ project, index = 0 }: { project: CanvasProje
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
     const editing = editingId === project.id;
     const selected = selectedIds.includes(project.id);
-    const [coverUrl, setCoverUrl] = useProjectCover(project);
+    const [coverUrl, setCoverUrl] = useProjectCover(project.id);
     const open = () => navigate(`/canvas/${project.id}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`);
     const saveTitle = () => {
         renameProject(project.id, editingTitle);

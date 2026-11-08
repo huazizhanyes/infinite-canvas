@@ -37,14 +37,16 @@ export async function initializeCanvasAssetSync(nextConnection: CanvasAssetConne
     const epoch = getCanvasSessionEpoch();
     const localAssets = useAssetStore.getState().assets;
     let remoteAssets: SyncableMediaAsset[] = [];
+    let remoteLoaded = false;
     try {
         remoteAssets = (await canvasAssetsApi.list(nextConnection)).filter(isSyncableAsset);
+        remoteLoaded = true;
     } catch (error) {
         console.warn("[CanvasAssetSync] load failed; keeping local assets", error);
     }
     if (epoch !== getCanvasSessionEpoch()) return;
 
-    const merged = mergeAssets(localAssets, await hydrateRemoteAssets(remoteAssets));
+    const merged = mergeAssets(localAssets, remoteAssets);
     applyingRemoteState = true;
     useAssetStore.getState().replaceAssets(merged);
     applyingRemoteState = false;
@@ -53,7 +55,7 @@ export async function initializeCanvasAssetSync(nextConnection: CanvasAssetConne
     const remoteById = new Map(remoteAssets.map((asset) => [asset.id, asset]));
     merged.filter(isQueueableAsset).forEach((asset) => {
         const remote = remoteById.get(asset.id);
-        if (!remote || assetTime(asset) > assetTime(remote)) pendingAssets.set(asset.id, asset);
+        if (remoteLoaded && (!remote || assetTime(asset) > assetTime(remote))) pendingAssets.set(asset.id, asset);
     });
 
     unsubscribe = useAssetStore.subscribe((state) => {
@@ -290,37 +292,6 @@ function toRemoteAsset(asset: Asset): Asset {
 
 function isBrowserOnlyUrl(value?: string) {
     return !value || value.startsWith("blob:") || value.startsWith("data:");
-}
-
-async function hydrateRemoteAssets(assets: SyncableMediaAsset[]) {
-    return Promise.all(
-        assets.map(async (asset) => {
-            if (!asset.data.mediaId) return asset;
-            const fallback = asset.kind === "image" ? asset.data.dataUrl : asset.data.url;
-            if (asset.kind === "image") {
-                const resolved = await resolvePersistedImage(asset.data.mediaId, asset.data.storageKey, fallback);
-                return { ...asset, coverUrl: resolved.url, data: { ...asset.data, storageKey: resolved.storageKey, dataUrl: resolved.url, mediaOwner: "asset", mediaStatus: "synced" } } as ImageAsset;
-            }
-            const remoteUrl = await resolveCanvasMediaUrl(asset.data.mediaId, fallback);
-            if (!remoteUrl) return asset;
-            const storageKey = asset.data.storageKey || `${asset.kind}:u${getCanvasStorageScopeId()}:${nanoid()}`;
-            const existing = await getMediaBlob(storageKey);
-            if (!existing) {
-                const response = await fetch(remoteUrl).catch(() => null);
-                if (response?.ok) {
-                    const blob = await response.blob();
-                    if (blob.size) {
-                        await setMediaBlob(storageKey, blob);
-                    }
-                }
-            }
-            const localUrl = await resolveMediaUrl(storageKey, remoteUrl);
-            if (asset.kind === "video") {
-                return { ...asset, coverUrl: localUrl, data: { ...asset.data, storageKey, url: localUrl, mediaOwner: "asset", mediaStatus: "synced" } } as VideoAsset;
-            }
-            return { ...asset, coverUrl: localUrl, data: { ...asset.data, storageKey, url: localUrl, mediaOwner: "asset", mediaStatus: "synced" } } as AudioAsset;
-        }),
-    );
 }
 
 function mergeAssets(local: Asset[], remote: Asset[]) {

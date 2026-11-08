@@ -8,6 +8,11 @@ import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
 
 export type CanvasProject = {
+    detailLoaded?: true;
+    localDirty?: boolean;
+    legacyCached?: boolean;
+    serverVersion?: number;
+    serverUpdatedAt?: string;
     id: string;
     title: string;
     createdAt: string;
@@ -24,27 +29,35 @@ export type CanvasProject = {
     debugSourceUserId?: string;
     debugSourceProjectId?: string;
 };
+export type CanvasProjectSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt" | "serverVersion" | "serverUpdatedAt" | "localDirty" | "legacyCached" | "debugReadOnly"> & { detailLoaded: false };
+export type CanvasProjectEntry = CanvasProject | CanvasProjectSummary;
+export function isCanvasProjectLoaded(project: CanvasProjectEntry): project is CanvasProject { return project.detailLoaded !== false; }
+export function canvasProjectSummary(project: CanvasProjectEntry): CanvasProjectSummary {
+    const { id, title, createdAt, updatedAt, serverVersion, serverUpdatedAt, localDirty, legacyCached, debugReadOnly } = project;
+    return { id, title, createdAt, updatedAt, serverVersion, serverUpdatedAt, localDirty, legacyCached, debugReadOnly, detailLoaded: false };
+}
 
 type CanvasStore = {
     hydrated: boolean;
-    projects: CanvasProject[];
+    projects: CanvasProjectEntry[];
     createProject: (title?: string) => string;
     importProject: (project: Partial<CanvasProject>) => string;
     openProject: (id: string) => CanvasProject | null;
     renameProject: (id: string, title: string) => void;
     deleteProjects: (ids: string[]) => void;
-    replaceProjects: (projects: CanvasProject[]) => void;
+    replaceProjects: (projects: CanvasProjectEntry[]) => void;
     updateProject: (id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport">>) => void;
 };
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
 const CANVAS_STORE_KEY = "infinite-canvas:canvas_store";
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
-type CanvasProjectIndex = { state: { projectIds: string[] }; version?: number };
+type CanvasProjectIndex = { state: { projectIds: string[]; directory?: CanvasProjectSummary[] }; version?: number };
 type PendingCanvasWrite = {
     name: string;
     scopeId: string;
     projectIds: string[];
+    directory: CanvasProjectSummary[];
     projects: Map<string, CanvasProject>;
     deletedIds: Set<string>;
 };
@@ -53,7 +66,7 @@ export type CanvasPersistenceStatus = "idle" | "pending" | "saving" | "saved" | 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingCanvasWrite: PendingCanvasWrite | null = null;
 let canvasWriteChain: Promise<void> = Promise.resolve();
-let queuedProjects = new Map<string, CanvasProject>();
+let queuedProjects = new Map<string, CanvasProjectEntry>();
 
 export const useCanvasPersistenceStatus = create<{ status: CanvasPersistenceStatus; error: string | null }>(() => ({
     status: "idle",
@@ -72,7 +85,7 @@ function queueCanvasWrite(name: string, value: StorageValue<CanvasStore>) {
     const deletedIds = new Set<string>();
 
     nextById.forEach((project, id) => {
-        if (queuedProjects.get(id) !== project) changedProjects.set(id, project);
+        if (isCanvasProjectLoaded(project) && queuedProjects.get(id) !== project) changedProjects.set(id, project);
     });
     queuedProjects.forEach((_project, id) => {
         if (!nextById.has(id)) deletedIds.add(id);
@@ -87,8 +100,9 @@ function queueCanvasWrite(name: string, value: StorageValue<CanvasStore>) {
         });
         nextById.forEach((_project, id) => pendingCanvasWrite!.deletedIds.delete(id));
         pendingCanvasWrite.projectIds = nextProjects.map((project) => project.id);
+        pendingCanvasWrite.directory = nextProjects.map(canvasProjectSummary);
     } else {
-        pendingCanvasWrite = { name, scopeId, projectIds: nextProjects.map((project) => project.id), projects: changedProjects, deletedIds };
+        pendingCanvasWrite = { name, scopeId, projectIds: nextProjects.map((project) => project.id), directory: nextProjects.map(canvasProjectSummary), projects: changedProjects, deletedIds };
     }
     useCanvasPersistenceStatus.setState({ status: "pending", error: null });
     if (saveTimer) clearTimeout(saveTimer);
@@ -130,7 +144,7 @@ export async function flushCanvasPersistence() {
                         localForageStorage.setItem(accountScopedKey(projectStorageKey(write.name, id), write.scopeId), JSON.stringify(project)),
                     ),
                 );
-                const index: CanvasProjectIndex = { state: { projectIds: write.projectIds } };
+                const index: CanvasProjectIndex = { state: { projectIds: write.projectIds, directory: write.directory } };
                 await localForageStorage.setItem(accountScopedKey(write.name, write.scopeId), JSON.stringify(index));
                 await Promise.all(
                     [...write.deletedIds].map((id) =>
@@ -159,7 +173,7 @@ const canvasStorage: PersistStorage<CanvasStore> = {
             return null;
         }
         const parsed = JSON.parse(value) as CanvasProjectIndex | StorageValue<CanvasStore>;
-        const legacyProjects = (parsed.state as Partial<PersistedCanvasState>).projects;
+        const legacyProjects = (parsed.state as { projects?: CanvasProject[] }).projects;
         if (Array.isArray(legacyProjects)) {
             queuedProjects = new Map(legacyProjects.map((project) => [project.id, project]));
             await Promise.all(
@@ -167,9 +181,14 @@ const canvasStorage: PersistStorage<CanvasStore> = {
                     localForageStorage.setItem(accountScopedKey(projectStorageKey(name, project.id), scopeId), JSON.stringify(project)),
                 ),
             );
-            const index: CanvasProjectIndex = { state: { projectIds: legacyProjects.map((project) => project.id) } };
+            const index: CanvasProjectIndex = { state: { projectIds: legacyProjects.map((project) => project.id), directory: legacyProjects.map(project => ({ ...canvasProjectSummary(project), legacyCached: project.serverVersion == null })) } };
             await localForageStorage.setItem(accountScopedKey(name, scopeId), JSON.stringify(index));
-            return { state: { projects: legacyProjects } as CanvasStore };
+            return { state: { projects: index.state.directory } as CanvasStore };
+        }
+        const directory = (parsed as CanvasProjectIndex).state.directory;
+        if (directory) {
+            queuedProjects = new Map(directory.map(project => [project.id, project]));
+            return { state: { projects: directory } as CanvasStore };
         }
 
         const projectIds = (parsed as CanvasProjectIndex).state.projectIds || [];
@@ -182,7 +201,9 @@ const canvasStorage: PersistStorage<CanvasStore> = {
             )
         ).filter((project): project is CanvasProject => Boolean(project));
         queuedProjects = new Map(projects.map((project) => [project.id, project]));
-        return { state: { projects } as CanvasStore };
+        const summaries = projects.map(project => ({ ...canvasProjectSummary(project), legacyCached: project.serverVersion == null }));
+        await localForageStorage.setItem(accountScopedKey(name, scopeId), JSON.stringify({ state: { projectIds, directory: summaries } }));
+        return { state: { projects: summaries } as CanvasStore };
     },
     setItem: queueCanvasWrite,
     removeItem: async (name) => {
@@ -215,6 +236,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     backgroundMode: "lines",
                     showImageInfo: false,
                     viewport: initialViewport,
+                    localDirty: true,
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
                 return id;
@@ -253,16 +275,18 @@ export const useCanvasStore = create<CanvasStore>()(
                     debugSessionId: source.debugSessionId,
                     debugSourceUserId: source.debugSourceUserId,
                     debugSourceProjectId: source.debugSourceProjectId,
+                    localDirty: true,
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
                 return project.id;
             },
             openProject: (id) => {
-                return get().projects.find((item) => item.id === id) || null;
+                const project = get().projects.find((item) => item.id === id);
+                return project && isCanvasProjectLoaded(project) ? project : null;
             },
             renameProject: (id, title) =>
                 set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id ? { ...project, title: title.trim() || project.title, updatedAt: new Date().toISOString() } : project)),
+                    projects: state.projects.map((project) => (project.id === id ? { ...project, title: title.trim() || project.title, localDirty: true, updatedAt: new Date().toISOString() } : project)),
                 })),
             deleteProjects: (ids) =>
                 set((state) => {
@@ -272,7 +296,7 @@ export const useCanvasStore = create<CanvasStore>()(
             replaceProjects: (projects) => set({ projects }),
             updateProject: (id, patch) =>
                 set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)),
+                    projects: state.projects.map((project) => (project.id === id && isCanvasProjectLoaded(project) ? { ...project, ...patch, localDirty: true, updatedAt: new Date().toISOString() } : project)),
                 })),
         }),
         {
@@ -290,6 +314,9 @@ export const useCanvasStore = create<CanvasStore>()(
 );
 
 export async function rehydrateCanvasStoreForAccount() {
+    await flushCanvasPersistence();
+    queuedProjects = new Map();
+    pendingCanvasWrite = null;
     useCanvasStore.setState({ hydrated: false, projects: [] });
     queuedProjects = new Map();
     pendingCanvasWrite = null;

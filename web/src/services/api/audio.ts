@@ -14,6 +14,8 @@ import type { ReferenceAudio } from "@/types/media";
 type RequestOptions = {
     signal?: AbortSignal;
     referenceAudio?: ReferenceAudio;
+    projectId?: string;
+    nodeId?: string;
     onTaskCreated?: (task: { taskId: string; engine: "speech" | "voxcpm2"; voiceId?: number; characterCount: number }) => void;
 };
 
@@ -198,12 +200,15 @@ async function requestCanvasAudioGeneration(config: AiConfig, prompt: string, fo
             controlInstruction: config.audioInstructions.trim(),
             requestId,
             quoteToken: quote.quoteToken,
+            projectId: options?.projectId,
+            nodeId: options?.nodeId,
         },
         { headers: aiHeaders(config), signal: options?.signal },
     );
     const taskId = response.data?.task_id;
     if (!taskId) throw new Error("画布配音接口未返回任务 ID");
     options?.onTaskCreated?.({ taskId, engine, ...(referenceAudioMediaId ? {} : { voiceId }), characterCount: prompt.length });
+    window.dispatchEvent(new CustomEvent("canvas-task-queue-refresh"));
     return pollCanvasAudioTask(config, taskId, options?.signal);
 }
 

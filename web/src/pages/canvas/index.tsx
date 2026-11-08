@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { App, Button, Dropdown, Input, type MenuProps } from "antd";
 import { Download, FileUp, MoreHorizontal, Plus, Search, Trash2 } from "lucide-react";
 
+import { useCanvasDirectoryStatus } from "@/services/sucai-canvas-sync";
 import { readZip } from "@/lib/zip";
 import { setMediaBlob } from "@/services/file-storage";
 import { setImageBlob } from "@/services/image-storage";
@@ -27,6 +28,7 @@ export default function CanvasPage() {
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
     const removeSelectedProjectIds = useCanvasUiStore((state) => state.removeSelectedProjectIds);
 
+    const directoryStatus = useCanvasDirectoryStatus();
     const [query, setQuery] = useState("");
     const filteredProjects = useMemo(() => {
         const keyword = query.trim().toLocaleLowerCase();
@@ -109,6 +111,9 @@ export default function CanvasPage() {
                     </div>
                 </header>
 
+                {directoryStatus.error ? <p role="status" className="text-sm">云目录暂未同步：{directoryStatus.error}。本地项目仍可使用，系统会自动重连。</p> : null}
+                {directoryStatus.conflict ? <p role="alert" className="text-sm">{directoryStatus.conflict}</p> : null}
+                {directoryStatus.loading && !projects.length ? <p role="status" className="text-sm">正在读取项目目录，可先创建画布…</p> : null}
                 {selectedIds.length ? (
                     <div className="canvas-library-selection">
                         <span>已选择 {selectedIds.length} 个画布</span>

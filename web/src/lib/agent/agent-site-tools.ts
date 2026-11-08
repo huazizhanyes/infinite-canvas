@@ -5,7 +5,7 @@ import { uploadImage } from "@/services/image-storage";
 import { imageAspectOptions, imageQualityOptions, resolveImageAspectOption } from "@/lib/image-settings";
 import { videoResolutionOptions, videoSecondOptions, videoSizeOptions } from "@/components/video-settings-panel";
 import { defaultVideoSize } from "@/lib/seedance-video";
-import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { useCanvasStore, isCanvasProjectLoaded } from "@/stores/canvas/use-canvas-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { imageAspectRatiosOf, modelOptionLabel, modelOptionName, normalizeModelOptionValue, normalizeVideoDuration, selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
@@ -70,8 +70,8 @@ function listCanvasProjects(input: SiteToolInput) {
         title: project.title,
         createdAt: project.createdAt,
         updatedAt: project.updatedAt,
-        nodeCount: project.nodes.length,
-        connectionCount: project.connections.length,
+        nodeCount: isCanvasProjectLoaded(project) ? project.nodes.length : null,
+        connectionCount: isCanvasProjectLoaded(project) ? project.connections.length : null,
     }));
     return { total: filtered.length, page, pageSize, items, hint: "用 site_navigate 跳转 /canvas/{id} 打开对应画布" };
 }

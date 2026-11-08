@@ -103,6 +103,8 @@ export const useAssetStore = create<AssetStore>()(
             cleanupImages: (extra) => {
                 window.setTimeout(async () => {
                     const { useCanvasStore } = await import("@/stores/canvas/use-canvas-store");
+                    // 未加载的项目仍可能引用本地媒体，不能根据目录摘要清理文件。
+                    if (useCanvasStore.getState().projects.some(project => project.detailLoaded === false)) return;
                     await cleanupUnusedImages({ assets: get().assets, projects: useCanvasStore.getState().projects, extra });
                     await cleanupUnusedMedia({ assets: get().assets, projects: useCanvasStore.getState().projects, extra });
                 }, 0);

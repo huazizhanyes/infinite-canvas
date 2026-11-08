@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { App, Button, Result, Spin } from "antd";
+import { App } from "antd";
 
 import { adaptVideoCapabilitiesForModel, createModelChannel, encodeChannelModel, modelOptionsFromChannels, normalizeVideoDuration, useConfigStore, rehydrateConfigForAccount, visibleCanvasVideoModes } from "@/stores/use-config-store";
 import { defaultAspectRatio } from "@/lib/aspect-ratio";
@@ -21,7 +21,6 @@ const SUCAI_TOKEN_KEY = "sucai_token";
 const SUCAI_CHANNEL_ID = "sucai-canvas";
 const SUCAI_API_BASE = import.meta.env.VITE_SUCAI_CANVAS_API_BASE || "";
 const SUCAI_BACKEND_BASE = import.meta.env.VITE_SUCAI_API_BASE || SUCAI_API_BASE.replace(/\/canvas\/?$/, "");
-const SUCAI_HOME_URL = import.meta.env.VITE_SUCAI_HOME_URL || "/";
 const SUCAI_DEV_PORT = import.meta.env.VITE_SUCAI_DEV_PORT || "";
 
 type SucaiInitState = "idle" | "loading" | "ready" | "error";
@@ -38,7 +37,6 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const handledSucaiInit = useRef(false);
     const sucaiStateRef = useRef<SucaiInitState>(isSucaiModeRequested() ? "loading" : "idle");
     const [sucaiState, setSucaiState] = useState<SucaiInitState>(() => (isSucaiModeRequested() ? "loading" : "idle"));
-    const [sucaiError, setSucaiError] = useState("");
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const config = useConfigStore((state) => state.config);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -72,7 +70,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
 
         const requestModels = async (path: string, optional = false) => {
             const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-            const response = await fetch(`${SUCAI_API_BASE}${path}`, { headers });
+            const response = await fetch(`${SUCAI_API_BASE}${path}`, { headers, signal: AbortSignal.timeout(15000) });
             const payload = await response.json().catch(() => ({}));
             if (!response.ok) {
                 if (optional) return [];
@@ -189,9 +187,14 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         }
 
         const initialVideoModels = requestModels("/v1/video/models", true).catch(() => []);
-        void requestModels("/v1/models")
+        void transitionCanvasAccount(token)
+            .then(async () => {
+                const scope = setCanvasAccountScope(useUserStore.getState().user?.id || null);
+                await initializeSucaiCanvasSync({ baseUrl: SUCAI_API_BASE, token, userId: scope?.userId, sessionEpoch: scope?.sessionEpoch });
+                setSucaiState("ready");
+                return requestModels("/v1/models").catch(error => { message.warning(error instanceof Error ? error.message : "模型配置暂不可用，请稍后刷新"); return []; });
+            })
             .then(async (models) => {
-                await transitionCanvasAccount(token);
                 const imageModel = models.find((item: { capability?: string }) => item.capability === "image");
                 const textModels = models.filter((item: { capability?: string }) => item.capability === "text");
                 const audioModels = models.filter((item: { capability?: string }) => item.capability === "audio");
@@ -258,8 +261,12 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 void initialVideoModels.then((videoModels) => applyVideoModels(videoModels, true));
             })
             .catch((error) => {
-                setSucaiError(error instanceof Error ? error.message : "画布初始化失败");
-                setSucaiState("error");
+                if (useUserStore.getState().connection?.token !== token) {
+                    setSucaiState("ready");
+                    return;
+                }
+                message.warning(error instanceof Error ? error.message : "画布初始化失败，正在使用本地项目");
+                setSucaiState("ready");
             });
         return cleanup;
     }, [setConfigDialogOpen, updateConfig]);
@@ -309,13 +316,19 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             useUserStore.getState().clearSession();
         }
         useUserStore.getState().configure({ canvasBaseUrl: SUCAI_API_BASE, apiBaseUrl: SUCAI_BACKEND_BASE, token: nextToken });
-        await useUserStore.getState().loadAssets();
-        const userId = useUserStore.getState().user?.id;
+        const identityResponse = await fetch(`${SUCAI_API_BASE}/v1/me/identity`, { headers: { Authorization: `Bearer ${nextToken}` }, signal: AbortSignal.timeout(10000) });
+        const identityPayload = await identityResponse.json().catch(() => ({}));
+        if (useUserStore.getState().connection?.token !== nextToken) throw new Error("账号已切换");
+        if (!identityResponse.ok || !identityPayload?.data?.id) throw new Error(identityPayload?.message || "无法确认当前账号");
+        const identity = identityPayload.data as { id: string; username: string; displayName: string; avatarUrl: string };
+        useUserStore.getState().setIdentity(identity);
+        const userId = identity.id;
         if (!userId) throw new Error("无法确认当前账号");
         setCanvasAccountScope(userId);
         const migratedLegacyData = await migrateLegacyCanvasData(userId);
         if (migratedLegacyData) message.warning("检测到旧版未分账号的画布数据，已归属到本次首次登录账号");
         await Promise.all([rehydrateCanvasStoreForAccount(), rehydrateAssetStoreForAccount(), rehydrateCanvasHostTaskStoreForAccount(), rehydrateConfigForAccount()]);
+        void useUserStore.getState().loadAssets();
         void initializeCanvasAssetSync({ baseUrl: SUCAI_API_BASE, token: nextToken }).catch((error) => {
             console.warn("[CanvasAssetSync] initialization failed", error);
         });
@@ -363,28 +376,5 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         message.success("已导入本地直连配置");
     }, [config.channels, message, openConfigDialog, updateConfig]);
 
-    if (sucaiState === "loading") {
-        return (
-            <div className="flex min-h-screen items-center justify-center">
-                <Spin size="large" />
-            </div>
-        );
-    }
-    if (sucaiState === "error") {
-        return (
-            <div className="flex min-h-screen items-center justify-center bg-white dark:bg-neutral-950">
-                <Result
-                    status="403"
-                    title="暂时无法进入 AI 画布"
-                    subTitle={sucaiError}
-                    extra={
-                        <Button type="primary" onClick={() => window.location.assign(SUCAI_HOME_URL)}>
-                            返回素材网
-                        </Button>
-                    }
-                />
-            </div>
-        );
-    }
     return <>{children}</>;
 }

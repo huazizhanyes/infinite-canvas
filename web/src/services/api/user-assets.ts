@@ -63,7 +63,7 @@ const trimBase = (value: string) => value.replace(/\/+$/, '')
 
 export const userAssetsApi = {
     async getAssets(connection: UserAssetConnection) {
-        const { data } = await axios.get<UserAssetSummary>(`${trimBase(connection.canvasBaseUrl)}/v1/me/assets`, { headers: authHeaders(connection.token) })
+        const { data } = await axios.get<UserAssetSummary>(`${trimBase(connection.canvasBaseUrl)}/v1/me/assets`, { headers: authHeaders(connection.token), timeout: 15000 })
         return data
     },
 

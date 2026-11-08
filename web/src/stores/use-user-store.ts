@@ -15,6 +15,7 @@ type UserStore = {
     loading: boolean;
     error: string;
     configure: (connection: UserAssetConnection) => void;
+    setIdentity: (user: LocalUser) => void;
     loadAssets: () => Promise<void>;
     clearSession: () => void;
 };
@@ -27,13 +28,15 @@ export const useUserStore = create<UserStore>()((set) => ({
     error: '',
     configure: (connection) => set((state) => state.connection?.token === connection.token
         ? { connection }
-        : { connection, user: null, assets: null, error: '' }),
+        : { connection, user: null, assets: null, loading: false, error: '' }),
+    setIdentity: (user) => set({ user }),
     loadAssets: async () => {
         const connection = useUserStore.getState().connection
         if (!connection?.token) return
         set({ loading: true, error: '' })
         try {
             const assets = await userAssetsApi.getAssets(connection)
+            if (useUserStore.getState().connection?.token !== connection.token) return
             set({
                 assets,
                 user: {
@@ -45,6 +48,7 @@ export const useUserStore = create<UserStore>()((set) => ({
                 loading: false,
             })
         } catch (error) {
+            if (useUserStore.getState().connection?.token !== connection.token) return
             const status = (error as { response?: { status?: number } })?.response?.status
             set({
                 loading: false,

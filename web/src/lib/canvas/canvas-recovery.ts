@@ -54,8 +54,8 @@ export function mergeHydratedCanvasNode(current: CanvasNodeData, base: CanvasNod
     };
 }
 
-export function chooseRecoverableCanvasVideoTask(tasks: CanvasVideoTask[], taskId?: string | null) {
-    const candidates = taskId ? tasks.filter((task) => task.id === taskId) : tasks;
+export function chooseRecoverableCanvasVideoTask(tasks: CanvasVideoTask[], taskId?: string | null, requestId?: string | null) {
+    const candidates = requestId ? tasks.filter(task => task.clientRequestId === requestId) : taskId ? tasks.filter((task) => task.id === taskId) : tasks;
     return [...candidates].sort((left, right) => taskRank(left) - taskRank(right) || taskCreatedAt(right) - taskCreatedAt(left))[0] || null;
 }
 

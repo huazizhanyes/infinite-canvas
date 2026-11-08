@@ -101,6 +101,8 @@ type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseTool
 type RequestOptions = {
     signal?: AbortSignal;
     clientRequestId?: string;
+    projectId?: string;
+    nodeId?: string;
     onTaskCreated?: (taskId: string, task: CanvasImageTask) => void;
     onTaskProgress?: (task: CanvasImageTask) => void;
 };
@@ -319,6 +321,7 @@ export function parseCanvasImageTaskItems(payload: CanvasImageTask): CanvasImage
 async function resolveAsyncImagePayload(config: AiConfig, payload: CanvasImageTask, options?: RequestOptions) {
     if (!payload.task_id) return payload;
     options?.onTaskCreated?.(payload.task_id, payload);
+    window.dispatchEvent(new CustomEvent("canvas-task-queue-refresh"));
     options?.onTaskProgress?.(payload);
     if (payload.data?.length && (!payload.status || IMAGE_TASK_SUCCESS_STATUSES.has(payload.status))) return payload;
     if (IMAGE_TASK_SUCCESS_STATUSES.has(payload.status || "")) return payload;
@@ -842,6 +845,8 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 autoEnhanceTo4k,
                 response_format: "b64_json",
                 output_format: IMAGE_OUTPUT_FORMAT,
+                ...(options?.projectId ? { projectId: options.projectId } : {}),
+                ...(options?.nodeId ? { nodeId: options.nodeId } : {}),
                 ...(quote ? { requestId, quoteToken: quote.quoteToken } : {}),
             },
             {
@@ -910,6 +915,8 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     formData.set("outputFormat", IMAGE_OUTPUT_FORMAT);
     formData.set("outputTier", requestOutputTier);
     formData.set("autoEnhanceTo4k", String(autoEnhanceTo4k));
+    if (options?.projectId) formData.set("projectId", options.projectId);
+    if (options?.nodeId) formData.set("nodeId", options.nodeId);
     if (quality) {
         formData.set("quality", quality);
     }

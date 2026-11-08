@@ -12,7 +12,7 @@ import type { CanvasMediaReferenceSlot } from "@/types/canvas";
 export type CanvasVideoTask = {
     id: string;
     clientRequestId?: string;
-    status: "queued" | "in_progress" | "submission_unknown" | "completed" | "failed";
+    status: "queued" | "submitting" | "in_progress" | "submission_unknown" | "archiving" | "completed" | "failed";
     progress: number;
     projectId: string;
     nodeId: string;
@@ -121,7 +121,9 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
     const connection = useUserStore.getState().connection;
     if (!connection) throw new Error("请先登录后生成视频");
 
+    let submissionAttempted = false;
     const attempt = async (forceLegacyUpload: boolean) => {
+        submissionAttempted = false;
         const referenceImages = forceLegacyUpload ? (input.referenceImages || []).map(stripReferenceMediaId) : (input.referenceImages || []);
         const referenceVideos = forceLegacyUpload ? (input.referenceVideos || []).map(stripReferenceMediaId) : (input.referenceVideos || []);
         const referenceAudios = forceLegacyUpload ? (input.referenceAudios || []).map(stripReferenceMediaId) : (input.referenceAudios || []);
@@ -171,6 +173,7 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
             parameters: requestParameters,
         };
         const quote = await canvasBillingApi.quote(connection, quotePayload, signal);
+        submissionAttempted = true;
         const response = await axios.post<CanvasVideoTask>(canvasVideoUrl(requestConfig, "/tasks"), {
             clientRequestId: input.clientRequestId,
             projectId: input.projectId,
@@ -188,13 +191,14 @@ export async function createCanvasVideoTask(config: AiConfig, input: CreateInput
             parameters: requestParameters,
             pricingVersion,
             quoteToken: quote.quoteToken,
-        }, { headers: canvasVideoHeaders(requestConfig) });
+        }, { headers: canvasVideoHeaders(requestConfig), signal, timeout: 45000 });
         window.dispatchEvent(new CustomEvent("canvas-video-balance-changed"));
         return response.data;
     };
 
     const handleCreateError = async (error: unknown, allowLegacyRetry: boolean): Promise<CanvasVideoTask> => {
-        if (isRequestTimeout(error)) {
+        if (axios.isAxiosError(error) && error.response?.status === 409 && error.response.data?.code === "VIDEO_NODE_ACTIVE") return error.response.data.task;
+        if (submissionAttempted && isRequestTimeout(error)) {
             const recovered = await listCanvasVideoTasks(config, { clientRequestId: input.clientRequestId }, signal).catch(() => null);
             const task = recovered?.find((item) => item.clientRequestId === input.clientRequestId);
             if (task) return task;
@@ -232,10 +236,17 @@ export async function retryCanvasVideoTask(config: AiConfig, taskId: string, cli
     try {
         const response = await axios.post<CanvasVideoTask>(canvasVideoUrl(requestConfig, `/tasks/${encodeURIComponent(taskId)}/retry`), {
             clientRequestId,
-        }, { headers: canvasVideoHeaders(requestConfig), signal });
+        }, { headers: canvasVideoHeaders(requestConfig), signal, timeout: 45000 });
         window.dispatchEvent(new CustomEvent("canvas-video-balance-changed"));
         return response.data;
     } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 409 && error.response.data?.code === "VIDEO_NODE_ACTIVE") return error.response.data.task;
+        if (isRequestTimeout(error)) {
+            const tasks = await listCanvasVideoTasks(config, { clientRequestId }, signal).catch(() => []);
+            const recovered = tasks.find((task) => task.clientRequestId === clientRequestId);
+            if (recovered) return recovered;
+            throw new CanvasVideoApiError("submission_unknown", "视频提交结果尚未确认，请勿重复提交，系统将继续恢复", { clientRequestId });
+        }
         if (axios.isAxiosError(error) && ["VIDEO_CREDIT_INSUFFICIENT", "WALLET_INSUFFICIENT"].includes((error.response?.data as any)?.code)) {
             const payload = error.response?.data as any;
             window.dispatchEvent(new CustomEvent("canvas-video-recharge-required", { detail: payload }));
@@ -474,7 +485,7 @@ function stripReferenceMediaId<T extends { mediaId?: string }>(reference: T): T 
 }
 
 function isRequestTimeout(error: unknown) {
-    return axios.isAxiosError(error) && ([502, 503, 504].includes(Number(error.response?.status)) || error.code === "ECONNABORTED" || error.code === "ETIMEDOUT" || String(error.message || "").toLowerCase().includes("timeout"));
+    return axios.isAxiosError(error) && (!error.response || error.response.status === 408 || error.response.status >= 500);
 }
 
 function classifyTaskQueryError(error: unknown) {

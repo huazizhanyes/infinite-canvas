@@ -4,12 +4,15 @@ import { createZip } from "@/lib/zip";
 import { getMediaBlob } from "@/services/file-storage";
 import { getImageBlob } from "@/services/image-storage";
 import type { CanvasExportAsset, CanvasExportFile } from "@/types/canvas-export";
-import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
+import type { CanvasProjectEntry } from "@/stores/canvas/use-canvas-store";
 
-export async function exportCanvasProjects(projects: CanvasProject[], fileName = "无限画布") {
+export async function exportCanvasProjects(projects: CanvasProjectEntry[], fileName = "无限画布") {
+    const { loadSucaiCanvasProject } = await import("@/services/sucai-canvas-sync");
+    const detailedProjects = [];
+    for (const project of projects) detailedProjects.push(await loadSucaiCanvasProject(project.id));
     const zipFiles: { name: string; data: BlobPart }[] = [];
     const exportedProjects = await Promise.all(
-        projects.map(async (project) => {
+        detailedProjects.map(async (project) => {
             const files: CanvasExportAsset[] = [];
             await Promise.all(
                 collectStorageKeys(project).map(async (storageKey) => {

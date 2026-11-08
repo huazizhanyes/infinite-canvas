@@ -23,6 +23,7 @@ export async function resolveCanvasMediaUrl(mediaId: string, fallback = "") {
     try {
         const response = await fetch(`${API_BASE}/v1/media/${encodeURIComponent(mediaId)}/url`, {
             headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(15000),
         });
         if (!response.ok) return fallback;
         const payload = await response.json();
