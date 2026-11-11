@@ -5,6 +5,13 @@ import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { CanvasNodeType } from "@/types/canvas";
 
 describe("canvas cloud serialization", () => {
+    it("never uploads a local conflict pointer", () => {
+        const project = { ...createProject({}), localConflictCopyId: "local-copy", localConflictSourceProjectId: "original" };
+        expect(serializeCanvasProjectForCloud(project)).not.toHaveProperty("localConflictCopyId");
+        expect(serializeCanvasProjectForCloud(project)).not.toHaveProperty("localConflictSourceProjectId");
+        expect(project.localConflictCopyId).toBe("local-copy");
+    });
+
     it("keeps stable media identities and removes device-only image locations", () => {
         const project = createProject({ content: "blob:local", storageKey: "image:u1:one", mediaId: "media-1" });
         const serialized = serializeCanvasProjectForCloud(project);

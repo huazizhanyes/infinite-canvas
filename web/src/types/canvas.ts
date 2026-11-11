@@ -192,6 +192,7 @@ export type CanvasNodeMetadata = {
     videoParameters?: Record<string, unknown>;
     videoTaskId?: string;
     videoProvider?: "canvas-video";
+    videoSubmissionRejected?: boolean;
     videoResultUrl?: string;
     videoServerStorageKey?: string;
     videoCompletedAt?: string;

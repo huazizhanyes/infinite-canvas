@@ -78,6 +78,7 @@ export type CanvasVideoTaskEvent = {
 
 export type CanvasVideoStoredResult = {
     taskId: string;
+    clientRequestId?: string;
     url: string;
     storageKey: string;
     bytes: number;
@@ -372,6 +373,7 @@ export function canvasVideoResult(task: CanvasVideoTask): CanvasVideoStoredResul
     if (!task.resultUrl) throw new Error("视频任务已完成但没有可播放地址");
     return {
         taskId: task.id,
+        clientRequestId: task.clientRequestId,
         url: task.resultUrl,
         storageKey: task.serverStorageKey || "",
         bytes: 0,

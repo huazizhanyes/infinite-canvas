@@ -1,11 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { chooseRecoverableCanvasVideoTask, mergeHydratedCanvasNode, shouldHealDeliveredCanvasVideoNode, shouldRecoverCanvasVideoTask } from "./canvas-recovery";
+import { chooseCanvasVideoNodeRecoveryTask, chooseRecoverableCanvasVideoTask, mergeHydratedCanvasNode, shouldHealDeliveredCanvasVideoNode, shouldRecoverCanvasVideoTask } from "./canvas-recovery";
+import type { CanvasVideoTask } from "@/services/api/canvas-video";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const node = (metadata: CanvasNodeData["metadata"]): CanvasNodeData => ({ id: "image-1", type: CanvasNodeType.Image, title: "参考图", position: { x: 0, y: 0 }, width: 100, height: 100, metadata });
 const videoNode = (metadata: CanvasNodeData["metadata"]): CanvasNodeData => ({ id: "video-1", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 100, height: 100, metadata });
 
 describe("canvas recovery invariants", () => {
+    const task = (id: string, status: CanvasVideoTask["status"], time: number): CanvasVideoTask => ({ id, clientRequestId: id, projectId: "p", nodeId: "video-1", status, progress: 0, modelId: "m", mode: "text2video", aspectRatio: "16:9", quality: "720p", duration: 5, createdAt: new Date(time).toISOString(), resultUrl: status === "completed" ? "https://test/video.mp4" : null });
+
+    it("recovers a newer result when the persisted request refers to a failed attempt", () => {
+        const node = videoNode({ generationRequestId: "failed", videoTaskId: "failed" });
+        expect(chooseCanvasVideoNodeRecoveryTask([task("failed", "failed", 1000), task("done", "completed", 2000)], node, "p")?.id).toBe("done");
+    });
+
+    it.each(["queued", "submitting", "in_progress", "failed"] as const)("selects the newest %s attempt rather than resurrecting an older result", status => {
+        const node = videoNode({ generationRequestId: "failed" });
+        expect(chooseCanvasVideoNodeRecoveryTask([task("failed", "failed", 1000), task("done", "completed", 2000), task("new", status, 3000)], node, "p")?.id).toBe("new");
+    });
+
+    it("does not replace an unconfirmed request or a current active attempt", () => {
+        expect(chooseCanvasVideoNodeRecoveryTask([task("old", "completed", 1000)], videoNode({ generationRequestId: "unknown" }), "p")).toBeNull();
+        expect(chooseCanvasVideoNodeRecoveryTask([task("active", "queued", 1000), task("done", "completed", 2000)], videoNode({ generationRequestId: "active" }), "p")?.id).toBe("active");
+    });
+
+    it("requires the same project and node and a known failed-task creation time", () => {
+        const failed = task("failed", "failed", 1000);
+        const newer = task("new", "completed", 2000);
+        const node = videoNode({ generationRequestId: "failed" });
+        expect(chooseCanvasVideoNodeRecoveryTask([failed, { ...newer, projectId: "other" }, { ...newer, nodeId: "other" }], node, "p")?.id).toBe("failed");
+        expect(chooseCanvasVideoNodeRecoveryTask([{ ...failed, createdAt: undefined }, newer], node, "p")?.id).toBe("failed");
+    });
+
     it("merges mediaId-only hydration while retaining task state", () => {
         const base = node({ mediaId: "media-1", content: "", status: "error", errorDetails: "old", videoTaskId: "task-1" });
         const current = node({ ...base.metadata, status: "loading", generationRequestId: "request-1" });
@@ -38,6 +64,8 @@ describe("canvas recovery invariants", () => {
     });
 
     it("skips task recovery for storyboard preview nodes", () => {
+        expect(shouldRecoverCanvasVideoTask(videoNode({ status: "error", generationRequestId: "never-submitted", videoSubmissionRejected: true }))).toBe(false);
+        expect(shouldRecoverCanvasVideoTask(videoNode({ status: "loading", generationRequestId: "unknown", videoSubmissionRejected: false }))).toBe(true);
         expect(shouldRecoverCanvasVideoTask(videoNode({ status: "idle", assetStoryboardPreviewNode: true }))).toBe(false);
         expect(shouldRecoverCanvasVideoTask(videoNode({ status: "idle", assetStoryboardSourceId: "story-1" }))).toBe(false);
     });

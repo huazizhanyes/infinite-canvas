@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CanvasProject } from "./use-canvas-store";
 
 const storage = vi.hoisted(() => new Map<string, string>());
 
@@ -27,12 +28,13 @@ describe("canvas project persistence", () => {
         const project = createProject("legacy");
         storage.set(storeKey, JSON.stringify({ state: { projects: [project] }, version: 0 }));
 
-        const { useCanvasStore } = await import("@/stores/canvas/use-canvas-store");
+        const { canvasProjectSummary, useCanvasStore } = await import("@/stores/canvas/use-canvas-store");
         await useCanvasStore.persist.rehydrate();
 
-        expect(useCanvasStore.getState().projects).toEqual([project]);
+        const summary = { ...canvasProjectSummary(project), legacyCached: true };
+        expect(useCanvasStore.getState().projects).toEqual([summary]);
         expect(JSON.parse(storage.get(projectKey(project.id)) || "null")).toEqual(project);
-        expect(JSON.parse(storage.get(storeKey) || "null")).toEqual({ state: { projectIds: [project.id] } });
+        expect(JSON.parse(storage.get(storeKey) || "null")).toEqual({ state: { projectIds: [project.id], directory: [summary] } });
     });
 
     it("writes only changed projects and removes deleted project records", async () => {
@@ -44,13 +46,14 @@ describe("canvas project persistence", () => {
 
         const { flushCanvasPersistence, useCanvasStore } = await import("@/stores/canvas/use-canvas-store");
         await useCanvasStore.persist.rehydrate();
+        useCanvasStore.getState().replaceProjects([first, second]);
         useCanvasStore.getState().renameProject(first.id, "updated");
         useCanvasStore.getState().deleteProjects([second.id]);
         await flushCanvasPersistence();
 
         expect(JSON.parse(storage.get(projectKey(first.id)) || "null").title).toBe("updated");
         expect(storage.has(projectKey(second.id))).toBe(false);
-        expect(JSON.parse(storage.get(storeKey) || "null")).toEqual({ state: { projectIds: [first.id] } });
+        expect(JSON.parse(storage.get(storeKey) || "null").state.projectIds).toEqual([first.id]);
     });
 
     it("detaches server-owned script sets when importing a project", async () => {
@@ -63,14 +66,14 @@ describe("canvas project persistence", () => {
                 { id: "asset", type: "script-asset", title: "资产", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { scriptSetId: "old-set", scriptAssetId: "old-asset" } },
             ],
         });
-        const nodes = useCanvasStore.getState().projects.find((project) => project.id === id)?.nodes || [];
+        const nodes = useCanvasStore.getState().openProject(id)?.nodes || [];
         expect(nodes[0].metadata).toMatchObject({ scriptSetRecoveryPending: true });
         expect(nodes[0].metadata?.scriptSetId).toBeUndefined();
         expect(nodes[1].metadata?.scriptAssetId).toBeUndefined();
     });
 });
 
-function createProject(id: string) {
+function createProject(id: string): CanvasProject {
     return {
         id,
         title: id,

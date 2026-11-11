@@ -1,11 +1,12 @@
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import type { CanvasVideoTask } from "@/services/api/canvas-video";
 
-const ACTIVE_TASK_STATUSES = new Set(["queued", "in_progress", "submission_unknown", "archiving"]);
+const ACTIVE_TASK_STATUSES = new Set(["queued", "submitting", "in_progress", "submission_unknown", "archiving"]);
 
 /** Draft video nodes created by storyboard assembly must never trigger task recovery queries. */
 export function shouldRecoverCanvasVideoTask(node: CanvasNodeData) {
     if (node.type !== CanvasNodeType.Video || node.metadata?.content) return false;
+    if (node.metadata?.videoSubmissionRejected && !node.metadata.videoTaskId) return false;
     if (node.metadata?.videoTaskId || node.metadata?.generationRequestId || node.metadata?.videoProvider) return true;
     if (node.metadata?.assetStoryboardPreviewNode) return false;
     // Compatibility for storyboard nodes created before the explicit preview marker existed.
@@ -57,6 +58,20 @@ export function mergeHydratedCanvasNode(current: CanvasNodeData, base: CanvasNod
 export function chooseRecoverableCanvasVideoTask(tasks: CanvasVideoTask[], taskId?: string | null, requestId?: string | null) {
     const candidates = requestId ? tasks.filter(task => task.clientRequestId === requestId) : taskId ? tasks.filter((task) => task.id === taskId) : tasks;
     return [...candidates].sort((left, right) => taskRank(left) - taskRank(right) || taskCreatedAt(right) - taskCreatedAt(left))[0] || null;
+}
+
+/** 仅旧任务已经失败时接续同一节点的较新任务，不回退到旧成片。 */
+export function chooseCanvasVideoNodeRecoveryTask(tasks: CanvasVideoTask[], node: CanvasNodeData, projectId: string) {
+    const scoped = tasks.filter(task => task.projectId === projectId && task.nodeId === node.id);
+    const requestId = node.metadata?.generationRequestId;
+    const taskId = node.metadata?.videoTaskId;
+    if (!requestId && !taskId) return [...scoped].sort((a, b) => taskCreatedAt(b) - taskCreatedAt(a))[0] || null;
+    const current = chooseRecoverableCanvasVideoTask(scoped, taskId, requestId);
+    if (!current || current.status !== "failed") return current;
+    const baseline = taskCreatedAt(current);
+    if (!baseline) return current;
+    return scoped.filter(task => taskCreatedAt(task) > baseline)
+        .sort((a, b) => taskCreatedAt(b) - taskCreatedAt(a))[0] || current;
 }
 
 function taskRank(task: CanvasVideoTask) {

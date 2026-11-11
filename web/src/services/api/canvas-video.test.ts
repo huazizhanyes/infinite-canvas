@@ -34,6 +34,7 @@ describe("canvas video task results", () => {
     it("keeps the server URL and storage key without creating a browser media key", () => {
         const result = canvasVideoResult({
             id: "task-1",
+            clientRequestId: "request-1",
             status: "completed",
             progress: 100,
             projectId: "project-1",
@@ -55,5 +56,6 @@ describe("canvas video task results", () => {
         expect(result.storageKey).toBe("generated/2026/07/u1/random-video.mp4");
         expect(result.storageKey).not.toMatch(/^video:/);
         expect(result.durationMs).toBe(5000);
+        expect(result.clientRequestId).toBe("request-1");
     });
 });

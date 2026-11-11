@@ -11,6 +11,9 @@ export type CanvasProject = {
     detailLoaded?: true;
     localDirty?: boolean;
     legacyCached?: boolean;
+    /** 原项目冲突时保留完整正文，并持续更新这个本地副本。 */
+    localConflictCopyId?: string;
+    localConflictSourceProjectId?: string;
     serverVersion?: number;
     serverUpdatedAt?: string;
     id: string;
@@ -162,6 +165,8 @@ export async function flushCanvasPersistence() {
             throw error;
         }
     }
+    // 另一个调用可能已取走 pending，但其持久化仍在执行，提交任务前也必须等待。
+    await canvasWriteChain;
 }
 
 const canvasStorage: PersistStorage<CanvasStore> = {
