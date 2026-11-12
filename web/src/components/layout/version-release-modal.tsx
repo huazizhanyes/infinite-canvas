@@ -1,11 +1,10 @@
 import type { CSSProperties } from "react";
 import { useState } from "react";
-import { Button, Modal, Space, Tag, Timeline } from "antd";
+import { App, Button, Modal, Space, Tag, Timeline } from "antd";
 import { useVersionCheck } from "@/hooks/use-version-check";
 import { APP_VERSION } from "@/constant/env";
-import { flushCanvasPersistence } from "@/stores/canvas/use-canvas-store";
 import { flushCanvasAssetSync } from "@/services/canvas-asset-sync";
-import { flushSucaiCanvasSync } from "@/services/sucai-canvas-sync";
+import { flushActiveCanvasPersistence } from "@/services/canvas-persistence";
 
 function getTagColor(type: string) {
     if (type === "新增") return "green";
@@ -27,13 +26,20 @@ type VersionReleaseModalProps = {
 };
 
 export function VersionReleaseModal({ className, style, autoOpen = false, showTrigger = true }: VersionReleaseModalProps) {
+    const { message } = App.useApp();
     const { open, setOpen, openReleaseModal, latestVersion, releases, checking, hasNewVersion, checkLatestRelease } = useVersionCheck({ autoOpen });
     const [reloading, setReloading] = useState(false);
 
     const reloadApplication = async () => {
         setReloading(true);
-        await Promise.race([Promise.allSettled([flushCanvasPersistence(), flushSucaiCanvasSync(), flushCanvasAssetSync()]), new Promise<void>((resolve) => window.setTimeout(resolve, 2000))]);
-        window.location.reload();
+        try {
+            await flushActiveCanvasPersistence();
+            await Promise.race([flushCanvasAssetSync(), new Promise<void>((resolve) => window.setTimeout(resolve, 2000))]);
+            window.location.reload();
+        } catch (error) {
+            setReloading(false);
+            message.error(error instanceof Error ? error.message : "本地保存失败，请重试后更新");
+        }
     };
 
     return (

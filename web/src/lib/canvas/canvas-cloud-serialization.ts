@@ -3,7 +3,8 @@ import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 const MEDIA_URL_FIELDS = ["content", "dataUrl", "url", "coverUrl"] as const;
 
 export function serializeCanvasProjectForCloud(project: CanvasProject): CanvasProject {
-    return sanitizeValue(project) as CanvasProject;
+    const { serverVersion: _version, serverUpdatedAt: _updated, localDirty: _dirty, localRevision: _revision, detailLoaded: _loaded, ...document } = project;
+    return sanitizeValue(document) as CanvasProject;
 }
 
 function sanitizeValue(value: unknown): unknown {

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 
 import { nanoid } from "nanoid";
+import equal from "fast-deep-equal";
 import { localForageStorage } from "@/lib/localforage-storage";
 import { accountScopedKey, getCanvasStorageScopeId } from "@/lib/canvas-account-scope";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
@@ -10,6 +11,7 @@ import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, Viewport
 export type CanvasProject = {
     detailLoaded?: true;
     localDirty?: boolean;
+    localRevision?: number;
     legacyCached?: boolean;
     /** 原项目冲突时保留完整正文，并持续更新这个本地副本。 */
     localConflictCopyId?: string;
@@ -32,12 +34,12 @@ export type CanvasProject = {
     debugSourceUserId?: string;
     debugSourceProjectId?: string;
 };
-export type CanvasProjectSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt" | "serverVersion" | "serverUpdatedAt" | "localDirty" | "legacyCached" | "debugReadOnly"> & { detailLoaded: false };
+export type CanvasProjectSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt" | "serverVersion" | "serverUpdatedAt" | "localDirty" | "localRevision" | "legacyCached" | "debugReadOnly"> & { detailLoaded: false };
 export type CanvasProjectEntry = CanvasProject | CanvasProjectSummary;
 export function isCanvasProjectLoaded(project: CanvasProjectEntry): project is CanvasProject { return project.detailLoaded !== false; }
 export function canvasProjectSummary(project: CanvasProjectEntry): CanvasProjectSummary {
-    const { id, title, createdAt, updatedAt, serverVersion, serverUpdatedAt, localDirty, legacyCached, debugReadOnly } = project;
-    return { id, title, createdAt, updatedAt, serverVersion, serverUpdatedAt, localDirty, legacyCached, debugReadOnly, detailLoaded: false };
+    const { id, title, createdAt, updatedAt, serverVersion, serverUpdatedAt, localDirty, localRevision, legacyCached, debugReadOnly } = project;
+    return { id, title, createdAt, updatedAt, serverVersion, serverUpdatedAt, localDirty, localRevision, legacyCached, debugReadOnly, detailLoaded: false };
 }
 
 type CanvasStore = {
@@ -242,6 +244,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     showImageInfo: false,
                     viewport: initialViewport,
                     localDirty: true,
+                    localRevision: 1,
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
                 return id;
@@ -291,7 +294,7 @@ export const useCanvasStore = create<CanvasStore>()(
             },
             renameProject: (id, title) =>
                 set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id ? { ...project, title: title.trim() || project.title, localDirty: true, updatedAt: new Date().toISOString() } : project)),
+                    projects: state.projects.map((project) => (project.id === id && title.trim() && title.trim() !== project.title ? { ...project, title: title.trim(), localDirty: true, localRevision: (project.localRevision || 0) + 1, updatedAt: new Date().toISOString() } : project)),
                 })),
             deleteProjects: (ids) =>
                 set((state) => {
@@ -301,7 +304,7 @@ export const useCanvasStore = create<CanvasStore>()(
             replaceProjects: (projects) => set({ projects }),
             updateProject: (id, patch) =>
                 set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id && isCanvasProjectLoaded(project) ? { ...project, ...patch, localDirty: true, updatedAt: new Date().toISOString() } : project)),
+                    projects: state.projects.map((project) => (project.id === id && isCanvasProjectLoaded(project) && Object.entries(patch).some(([key, value]) => !equal(project[key as keyof typeof patch], value)) ? { ...project, ...patch, localDirty: true, localRevision: (project.localRevision || 0) + 1, updatedAt: new Date().toISOString() } : project)),
                 })),
         }),
         {

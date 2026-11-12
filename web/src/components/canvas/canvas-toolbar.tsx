@@ -1,6 +1,6 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
-import { Button, Dropdown, Segmented, Switch } from "antd";
+import { App, Button, Dropdown, Segmented, Switch } from "antd";
 import {
     ArrowDown,
     ArrowRight,
@@ -40,6 +40,11 @@ import { getNodePluginId, listNodeDefinitions, useNodeRegistryVersion } from "@/
 import { useThemeStore } from "@/stores/use-theme-store";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { useCanvasPersistenceStatus } from "@/stores/canvas/use-canvas-store";
+import { isCanvasProjectLoaded, useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { useCanvasDirectoryStatus } from "@/services/sucai-canvas-sync";
+import { useParams } from "react-router-dom";
+import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
+import { flushActiveCanvasPersistence } from "@/services/canvas-persistence";
 import type { CanvasArrangeMode } from "@/lib/canvas/canvas-layout";
 
 const SHOW_PLUGIN_UI = import.meta.env.VITE_SHOW_CANVAS_PLUGIN_UI !== "false";
@@ -110,6 +115,25 @@ export function CanvasToolbar({
     const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
     const saveStatus = useCanvasPersistenceStatus((state) => state.status);
     const saveError = useCanvasPersistenceStatus((state) => state.error);
+    const { message } = App.useApp();
+    const [retrying, setRetrying] = useState(false);
+    const { id: projectId } = useParams<{ id: string }>();
+    const project = useCanvasStore(state => state.projects.find(project => project.id === projectId));
+    const cloud = useCanvasDirectoryStatus();
+    const cloudError = !cloud.errorProjectId || cloud.errorProjectId === projectId ? cloud.error : "";
+    const conflict = project && isCanvasProjectLoaded(project) && project.localConflictCopyId ? "本地存在未处理的同步冲突，点击加载云端版本；本地内容会保留在冲突副本中" : cloud.conflictProjectId === projectId ? cloud.conflict : "";
+    const saving = retrying || saveStatus === "saving" || cloud.savingProjectId === projectId;
+    const failed = saveStatus === "error" || !!conflict || !!cloudError;
+    const saveLabel = failed ? conflict ? "同步冲突" : "同步异常" : saving ? "保存中" : saveStatus === "pending" ? "待保存" : cloud.connected ? project?.localDirty || !project?.serverVersion ? "待同步" : "已同步云端" : "已保存本地";
+    const saveHint = saveError || conflict || cloudError || (saving ? "正在保存画布" : cloud.connected && (project?.localDirty || !project?.serverVersion) ? "本地修改会继续自动同步；请勿清理浏览器数据" : saveLabel);
+    const retrySave = async () => {
+        if (conflict && projectId) { useCanvasUiStore.getState().setExternalUpdate(projectId); return; }
+        setRetrying(true);
+        try {
+            if (!await flushActiveCanvasPersistence()) message.warning("云端尚未同步，本地修改已保留，请检查网络或同步冲突提示");
+        } catch (error) { message.error(error instanceof Error ? error.message : "本地保存失败，请重试"); }
+        finally { setRetrying(false); }
+    };
     // 扩展(插件)节点,随注册表变化实时更新
     useNodeRegistryVersion();
     const extensionDefs = SHOW_PLUGIN_UI ? listNodeDefinitions().filter((def) => def.showInCreateMenu !== false && getNodePluginId(def.type) !== "builtin") : [];
@@ -148,17 +172,21 @@ export function CanvasToolbar({
     }, [uploadMenuOpen]);
 
     return (
-        <div ref={rootRef} className="pointer-events-none absolute bottom-4 z-50 flex justify-center" style={{ left: 280, right: 16 }}>
+        <div ref={rootRef} className="pointer-events-none absolute bottom-20 left-4 right-4 z-50 flex min-w-0 justify-center xl:bottom-4 xl:left-[520px]">
             {tip ? <DockTip label={tip} x={tipX} theme={theme} /> : null}
             <div ref={wrapRef} data-canvas-toolbar-dock className="thin-scrollbar pointer-events-auto flex h-14 max-w-full items-center gap-1 overflow-x-auto rounded-2xl border px-2 shadow-lg backdrop-blur [&>*]:shrink-0" style={dockStyle}>
-                <span
-                    className="inline-flex h-10 w-[84px] items-center justify-center gap-1.5 rounded-lg border text-xs font-medium transition-colors"
+                <button
+                    type="button"
+                    aria-label={conflict ? "处理同步冲突" : "立即保存并重试同步"}
+                    disabled={retrying}
+                    onClick={() => void retrySave()}
+                    className="inline-flex h-10 min-w-[84px] cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition-colors disabled:cursor-wait"
                     style={{ color: "#cbd5e1", background: "rgba(255,255,255,.05)", borderColor: "rgba(255,255,255,.12)" }}
-                    title={saveStatus === "error" ? saveError || "画布保存失败" : saveStatus === "saving" ? "正在写入本地画布" : saveStatus === "pending" ? "改动将在停止操作后自动保存" : "画布已保存到本地"}
+                    title={saveHint}
                 >
-                    {saveStatus === "saving" ? <LoaderCircle className="size-3 animate-spin" /> : saveStatus === "pending" ? <Clock3 className="size-3" /> : saveStatus === "error" ? <TriangleAlert className="size-3 text-red-400" /> : <Check className="size-3" />}
-                    {saveStatus === "saving" ? "保存中" : saveStatus === "pending" ? "待保存" : saveStatus === "error" ? "保存失败" : "已保存"}
-                </span>
+                    {saving ? <LoaderCircle className="size-3 animate-spin" /> : failed ? <TriangleAlert className="size-3 text-red-400" /> : saveStatus === "pending" || project?.localDirty ? <Clock3 className="size-3" /> : <Check className="size-3" />}
+                    {saveLabel}
+                </button>
                 <Divider theme={theme} />
                 <ToolbarButton id="tool-hand" label={panMode ? "移动工具（点击切换选择）" : "选择工具（点击切换移动）"} active={panMode} hovered={hovered} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={() => onPanModeChange(!panMode)}>
                     {panMode ? <Hand className="size-4.5" /> : <MousePointer2 className="size-4.5" />}

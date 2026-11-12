@@ -1,6 +1,6 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowDown, ArrowRight, ArrowUpRight, BookOpenText, Bot, ChevronDown, Clapperboard, Group, Home, ImageIcon, Images, LayoutGrid, List, ListTree, Menu, MousePointer2, Move, Music2, Plus, Redo2, ScanText, ScrollText, Sparkles, Trash2, Type, Undo2, Upload, Video, X } from "lucide-react";
 import { saveAs } from "file-saver";
 
@@ -54,6 +54,7 @@ import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { captureCanvasProjectCover, canvasCoverIdentity, firstCanvasCoverNode } from "@/services/canvas-project-cover";
 import { flushCanvasPersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { flushActiveCanvasPersistence, registerActiveCanvasPersistence } from "@/services/canvas-persistence";
 import { getCanvasClipboard, useCanvasClipboardStore, type CanvasClipboardPayload } from "@/stores/canvas/use-canvas-clipboard-store";
 import { useCanvasHostTaskStore } from "@/stores/canvas/use-canvas-host-task-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
@@ -221,6 +222,7 @@ function createCanvasNode(type: CanvasNodeTypeId, position: Position, metadata?:
 
 export default function CanvasPage() {
     const [mounted, setMounted] = useState(false);
+    const { id } = useParams<{ id: string }>();
 
     useEffect(() => {
         setMounted(true);
@@ -228,7 +230,8 @@ export default function CanvasPage() {
 
     if (!mounted) return <CanvasRefreshShell />;
 
-    return <InfiniteCanvasPage />;
+    // 路由参数变化时必须隔离节点、快照和退出回写，不能把上一张画布保存到新 ID。
+    return <InfiniteCanvasPage key={id} />;
 }
 
 function CanvasRefreshShell() {
@@ -603,8 +606,8 @@ function InfiniteCanvasPage() {
         void flushSucaiCanvasSync().catch(console.warn);
     }, [debugReadOnly, message, projectId, updateProject]);
 
-    const syncError = useCanvasDirectoryStatus(state => state.error);
-    const syncConflict = useCanvasDirectoryStatus(state => state.conflict);
+    const syncError = useCanvasDirectoryStatus(state => !state.errorProjectId || state.errorProjectId === projectId ? state.error : "");
+    const syncConflict = useCanvasDirectoryStatus(state => state.conflictProjectId === projectId ? state.conflict : "");
     useEffect(() => {
         if (projectLoaded && (syncConflict || syncError)) message.warning(syncConflict || syncError);
     }, [message, projectLoaded, syncConflict, syncError]);
@@ -856,16 +859,23 @@ function InfiniteCanvasPage() {
     const externalUpdateProjectId = useCanvasUiStore((state) => state.externalUpdateProjectId);
     const setExternalUpdate = useCanvasUiStore((state) => state.setExternalUpdate);
     const handledExternalUpdateRef = useRef(0);
+    const externalUpdateModalRef = useRef<ReturnType<typeof modal.confirm> | null>(null);
+    useEffect(() => () => { externalUpdateModalRef.current?.destroy(); }, []);
+    useEffect(() => {
+        if (projectLoaded && useCanvasStore.getState().openProject(projectId)?.localConflictCopyId) setExternalUpdate(projectId);
+    }, [projectLoaded, projectId, setExternalUpdate]);
     useEffect(() => {
         if (!projectLoaded || !externalUpdateAt || externalUpdateProjectId !== projectId) return;
         if (handledExternalUpdateRef.current >= externalUpdateAt) return;
         handledExternalUpdateRef.current = externalUpdateAt;
         setExternalUpdate(null);
-        modal.confirm({
+        if (externalUpdateModalRef.current) return;
+        externalUpdateModalRef.current = modal.confirm({
             title: "云端画布有更新",
             content: "这张画布已被其他页面或设备更新。加载云端版本前，会把本地未同步修改保存为本地冲突副本；正在生成的结果也可凭任务记录恢复。",
             okText: "加载云端版本",
             cancelText: "稍后",
+            afterClose: () => { externalUpdateModalRef.current = null; },
             onOk: async () => {
                 // 加载期间停止旧页面的异步回写，避免拿新版本号保存旧节点。
                 historyPausedRef.current = true;
@@ -923,8 +933,42 @@ function InfiniteCanvasPage() {
 
     const commitProjectSnapshot = useCallback(() => {
         if (!projectLoaded || historyPausedRef.current || debugReadOnly) return;
-        updateProject(projectId, projectSnapshotRef.current);
+        updateProject(projectId, { ...projectSnapshotRef.current, viewport: viewportRef.current });
     }, [debugReadOnly, projectId, projectLoaded, updateProject]);
+
+    useEffect(() => registerActiveCanvasPersistence(projectId, commitProjectSnapshot), [projectId, commitProjectSnapshot]);
+    const blocker = useBlocker(({ currentLocation, nextLocation }) => projectLoaded && !debugReadOnly && currentLocation.pathname !== nextLocation.pathname);
+    const leavingRef = useRef(false);
+    useEffect(() => {
+        if (blocker.state !== "blocked" || leavingRef.current) return;
+        leavingRef.current = true;
+        void flushActiveCanvasPersistence().then(synced => {
+            if (!synced) message.warning("已保存到本机，云端暂未同步，联网后会继续同步");
+            blocker.proceed();
+        }).catch(error => {
+            message.error(error instanceof Error ? error.message : "本地保存失败，请重试后离开");
+            blocker.reset();
+        }).finally(() => { leavingRef.current = false; });
+    }, [blocker, message]);
+
+    useEffect(() => {
+        const save = () => {
+            if (document.visibilityState === "hidden") void flushActiveCanvasPersistence().catch(console.warn);
+        };
+        const beforeUnload = (event: BeforeUnloadEvent) => {
+            commitProjectSnapshot();
+            void flushCanvasPersistence().catch(console.warn);
+            if (useCanvasStore.getState().projects.find(project => project.id === projectId)?.localDirty) {
+                event.preventDefault();
+                event.returnValue = "";
+            }
+        };
+        const pageHide = () => { void flushActiveCanvasPersistence().catch(console.warn); };
+        document.addEventListener("visibilitychange", save);
+        window.addEventListener("beforeunload", beforeUnload);
+        window.addEventListener("pagehide", pageHide);
+        return () => { document.removeEventListener("visibilitychange", save); window.removeEventListener("beforeunload", beforeUnload); window.removeEventListener("pagehide", pageHide); };
+    }, [commitProjectSnapshot, projectId]);
 
     const syncProjectSnapshot = useCallback(
         async (patch?: Partial<typeof projectSnapshotRef.current>) => {
@@ -5129,7 +5173,7 @@ function InfiniteCanvasPage() {
     if (!projectLoaded) return <CanvasRefreshShell />;
 
     return (
-        <main className="flex h-full min-h-0 overflow-hidden" style={{ background: theme.canvas.background, color: theme.node.text }}>
+        <main data-canvas-project-id={projectId} className="flex h-full min-h-0 overflow-hidden" style={{ background: theme.canvas.background, color: theme.node.text }}>
             {debugReadOnly ? (
                 <div className="pointer-events-none absolute left-1/2 top-3 z-[200] -translate-x-1/2 rounded-full border border-amber-300/60 bg-amber-50/95 px-4 py-1.5 text-xs font-medium text-amber-800 shadow-lg dark:border-amber-500/40 dark:bg-amber-950/90 dark:text-amber-200">
                     只读调试副本 · 不会写回用户项目，也不会提交生成任务

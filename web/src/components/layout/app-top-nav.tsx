@@ -11,8 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useCanvasHostTaskStore } from "@/stores/canvas/use-canvas-host-task-store";
-import { flushCanvasPersistence } from "@/stores/canvas/use-canvas-store";
-import { flushSucaiCanvasSync } from "@/services/sucai-canvas-sync";
+import { flushActiveCanvasPersistence } from "@/services/canvas-persistence";
 import { postCanvasHostMessage, readCanvasHostMessage } from "@/lib/canvas-host-bridge";
 import { lazy, Suspense } from "react";
 
@@ -61,8 +60,7 @@ export function AppTopNav() {
 
     useEffect(() => {
         const handlePageHide = () => {
-            void flushCanvasPersistence();
-            void flushSucaiCanvasSync();
+            void flushActiveCanvasPersistence().catch(console.warn);
         };
         window.addEventListener("pagehide", handlePageHide);
         return () => window.removeEventListener("pagehide", handlePageHide);
@@ -85,7 +83,7 @@ export function AppTopNav() {
             }
             if (data.type === "navigate" && data.pathname === "/canvas") navigate("/canvas");
             if (data.type === "flush-persistence" && typeof data.requestId === "string") {
-                const results = await Promise.allSettled([flushCanvasPersistence(), flushSucaiCanvasSync()]);
+                const results = await Promise.allSettled([flushActiveCanvasPersistence()]);
                 const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
                 postCanvasHostMessage({
                     type: "flush-complete",

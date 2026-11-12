@@ -108,7 +108,9 @@ describe("canvas cloud synchronization races", () => {
         expect((await sync.loadSucaiCanvasProject(copyId!)).nodes[0].metadata?.content).toBe("https://test/completed.mp4");
         expect(writes).toHaveLength(1);
         expect(store.useCanvasStore.getState().openProject("p")?.localConflictCopyId).toBe(copyId);
-        await expect(sync.syncSucaiCanvasProject("p")).rejects.toThrow("暂未同步");
+        await expect(sync.syncSucaiCanvasProject("p")).rejects.toThrow("处理同步冲突");
+        const ui = await import("@/stores/canvas/use-canvas-ui-store");
+        expect(ui.useCanvasUiStore.getState().externalUpdateProjectId).toBe("p");
         expect(writes).toHaveLength(1);
     });
 
@@ -189,5 +191,102 @@ describe("canvas cloud synchronization races", () => {
         store.useCanvasStore.setState({ projects: [], hydrated: true });
         listing.resolve(response({ projects: [{ ...project(), serverVersion: 99, detailLoaded: false }], deleted: [], nextCursor: null }));
         await settle(); expect(store.useCanvasStore.getState().projects).toEqual([]);
+    });
+
+    it("retries the original mutation after a lost acknowledgement before sending newer edits", async () => {
+        let receipt: any; let loseAck = true;
+        fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+            if (init?.method !== "PUT") return response({ project: remote });
+            const body = JSON.parse(String(init.body)); writes.push(body);
+            if (body.expectedVersion !== remote.serverVersion) {
+                return body.mutationId === receipt?.mutationId && JSON.stringify(body) === JSON.stringify(receipt)
+                    ? response({ metadata: { id: "p", serverVersion: remote.serverVersion }, duplicate: true })
+                    : response({ conflict: true });
+            }
+            remote = { ...body.project, serverVersion: remote.serverVersion! + 1 }; receipt = body;
+            if (loseAck) { loseAck = false; throw new Error("ack lost"); }
+            return response({ metadata: { id: "p", serverVersion: remote.serverVersion } });
+        });
+        store.useCanvasStore.getState().updateProject("p", { nodes: video("https://test/first.mp4") });
+        expect(await sync.flushSucaiCanvasSync()).toBe(false);
+        store.useCanvasStore.getState().updateProject("p", { nodes: video("https://test/newer.mp4") });
+        expect(await sync.drainSucaiCanvasSync("p")).toBe(true);
+        expect(writes[0]).toEqual(writes[1]);
+        expect(remote.nodes[0].metadata?.content).toBe("https://test/newer.mp4");
+        expect(remote.serverVersion).toBe(7);
+        expect(store.useCanvasStore.getState().projects).toHaveLength(1);
+    });
+
+    it("persists retry identity across stopping and reinitializing", async () => {
+        store.useCanvasStore.getState().updateProject("p", { nodes: video("https://test/pending.mp4") });
+        failSave = true; await sync.flushSucaiCanvasSync();
+        const first = writes[0];
+        await sync.stopSucaiCanvasSync();
+        await store.rehydrateCanvasStoreForAccount();
+        await sync.initializeSucaiCanvasSync({ baseUrl: "http://test/canvas", token: "test", userId: "test-user" });
+        await settle(); failSave = false;
+        expect(await sync.drainSucaiCanvasSync("p")).toBe(true);
+        expect(writes.at(-1)).toEqual(first);
+    });
+
+    it("drains edits made while an earlier snapshot is being saved", async () => {
+        saving = deferred();
+        store.useCanvasStore.getState().updateProject("p", { nodes: video("https://test/one.mp4") });
+        const first = sync.flushSucaiCanvasSync(); await settle();
+        store.useCanvasStore.getState().updateProject("p", { nodes: video("https://test/two.mp4") });
+        const drain = sync.drainSucaiCanvasSync("p");
+        saving.resolve(response({ metadata: { id: "p", serverVersion: 6 } }));
+        saving = null; remote.serverVersion = 6;
+        await first; expect(await drain).toBe(true);
+        expect(remote.nodes[0].metadata?.content).toBe("https://test/two.mp4");
+    });
+
+    it("skips semantic no-op saves including restore and unmount snapshots", async () => {
+        store.useCanvasStore.getState().updateProject("p", { nodes: video("https://test/stable.mp4") });
+        await sync.flushSucaiCanvasSync(); const count = writes.length;
+        const p = store.useCanvasStore.getState().openProject("p")!;
+        store.useCanvasStore.getState().updateProject("p", { nodes: structuredClone(p.nodes), viewport: { ...p.viewport } });
+        await sync.flushSucaiCanvasSync();
+        expect(writes).toHaveLength(count);
+        expect(store.useCanvasStore.getState().openProject("p")?.localDirty).toBe(false);
+    });
+
+    it("reconciles a pre-upgrade lost receipt only when cloud content matches", async () => {
+        store.useCanvasStore.getState().updateProject("p", { nodes: video("https://test/already-saved.mp4") });
+        remote = { ...store.useCanvasStore.getState().openProject("p")!, serverVersion: 6, updatedAt: "2026-11-02T00:00:00Z" };
+        expect(await sync.drainSucaiCanvasSync("p")).toBe(true);
+        expect(store.useCanvasStore.getState().projects).toHaveLength(1);
+        expect(store.useCanvasStore.getState().openProject("p")).toMatchObject({ serverVersion: 6, localDirty: false });
+        expect(writes).toHaveLength(1);
+    });
+
+    it("does not schedule saves for an unchanged project name", async () => {
+        const before = store.useCanvasStore.getState().openProject("p")!;
+        store.useCanvasStore.getState().renameProject("p", before.title);
+        expect(store.useCanvasStore.getState().openProject("p")).toBe(before);
+        expect(await sync.drainSucaiCanvasSync("p")).toBe(true);
+        expect(writes).toHaveLength(0);
+    });
+
+    it("reports the real save error and permits generation only after successful retry", async () => {
+        store.useCanvasStore.getState().updateProject("p", { nodes: video("https://test/retry-generation.mp4") });
+        failSave = true;
+        await expect(sync.syncSucaiCanvasProject("p")).rejects.toThrow("offline");
+        expect(store.useCanvasStore.getState().openProject("p")?.localDirty).toBe(true);
+        failSave = false;
+        await expect(sync.syncSucaiCanvasProject("p")).resolves.toBeUndefined();
+        expect(remote.nodes[0].metadata?.content).toBe("https://test/retry-generation.mp4");
+    });
+
+    it("unblocks a persisted conflict only after explicit cloud loading while retaining local content", async () => {
+        remote = { ...project(), serverVersion: 6, nodes: video("https://test/remote.mp4") };
+        store.useCanvasStore.getState().updateProject("p", { nodes: video("https://test/local.mp4") });
+        await sync.flushSucaiCanvasSync();
+        const copyId = store.useCanvasStore.getState().openProject("p")!.localConflictCopyId!;
+        await expect(sync.syncSucaiCanvasProject("p")).rejects.toThrow("处理同步冲突");
+        await sync.reloadSucaiCanvasProject("p");
+        await expect(sync.syncSucaiCanvasProject("p")).resolves.toBeUndefined();
+        expect(store.useCanvasStore.getState().openProject(copyId)?.nodes[0].metadata?.content).toBe("https://test/local.mp4");
+        expect(store.useCanvasStore.getState().openProject("p")?.nodes[0].metadata?.content).toBe("https://test/remote.mp4");
     });
 });
