@@ -7,7 +7,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { canvasTextApi } from "@/services/api/canvas-text";
 import { useUserStore } from "@/stores/use-user-store";
 import { useEffectiveConfig, modelOptionName } from "@/stores/use-config-store";
-import { buildNovelScriptInput, buildNovelScriptResultOps, NOVEL_SCRIPT_MAX_SOURCE, novelEstimateSeconds, novelWordCount } from "@/lib/canvas/novel-script";
+import { buildNovelScriptResultOps, NOVEL_SCRIPT_MAX_SOURCE, novelEstimateSeconds, novelWordCount } from "@/lib/canvas/novel-script";
 import type { CanvasNodeContext } from "@/types/canvas-plugin";
 
 // 文本模型计费信息（与 /drama 的 TextModelPicker 同源：GET /text-billing/models）
@@ -20,7 +20,7 @@ type TextBillingModel = {
 };
 
 // 「小说改剧本」节点：粘贴小说原文 → AI 一键改写 → 每次生成新建一个独立的「剧本」节点存结果。
-// 改写指令与后端 drama-studio（script_rewriter agent + rewrite_to_screenplay）1:1 对齐，走画布 /v1/responses 通道（一次性返回）。
+// 三个界面共用后端改写服务；此处只提交原文，不维护提示词快照。
 export function CanvasNovelScriptNode({ ctx }: { ctx: CanvasNodeContext }) {
     const { message } = App.useApp();
     const config = useEffectiveConfig();
@@ -99,14 +99,12 @@ export function CanvasNovelScriptNode({ ctx }: { ctx: CanvasNodeContext }) {
         ctx.updateMetadata({ novelScriptStatus: "generating", novelScriptError: undefined });
         try {
             const model = ctx.node.metadata?.novelScriptModel || config.textModel;
-            const completion = await canvasTextApi.complete(
+            const completion = await canvasTextApi.rewriteNovel(
                 connection,
                 {
                     requestId: `${ctx.node.id}-${Date.now()}`,
-                    input: buildNovelScriptInput(source),
+                    text: source,
                     model: modelOptionName(model),
-                    operation: "custom",
-                    sourceNodeId: ctx.node.id,
                 },
                 controller.signal,
             );
@@ -135,7 +133,7 @@ export function CanvasNovelScriptNode({ ctx }: { ctx: CanvasNodeContext }) {
             ? "生成失败"
             : wordCount
                 ? `约 ${estimateSeconds} 秒成片 · 每次生成新建「剧本」节点`
-                : "粘贴小说原文（最多 6000 字）";
+                : "粘贴小说原文（最多 7000 字）";
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden" data-canvas-no-zoom style={{ color: ctx.theme.node.text, background: ctx.theme.node.panel } as CSSProperties}>
@@ -156,7 +154,7 @@ export function CanvasNovelScriptNode({ ctx }: { ctx: CanvasNodeContext }) {
                 </div>
                 <textarea
                     value={rawText}
-                    placeholder="粘贴小说原文（最多 6000 字），点击下方「生成剧本」改写为格式化剧本"
+                    placeholder="粘贴小说原文（最多 7000 字），点击下方「生成剧本」改写为格式化剧本"
                     maxLength={NOVEL_SCRIPT_MAX_SOURCE}
                     disabled={generating}
                     className="thin-scrollbar min-h-0 w-full flex-1 resize-none rounded-md border bg-transparent px-3 py-2 text-[12px] leading-5 outline-none transition-colors focus:border-sky-500/60 disabled:opacity-60"

@@ -40,6 +40,50 @@ function number(value: unknown) {
 }
 
 export const canvasTextApi = {
+    /** Shared rewrite endpoint; prompts and generation rules live on the server. */
+    async rewriteNovel(connection: UserAssetConnection, payload: { requestId: string; text: string; model?: string }, signal?: AbortSignal) {
+        const response = await fetch(`${connection.apiBaseUrl.replace(/\/+$/, '')}/ai-tools/v1/run`, {
+            method: 'POST',
+            headers: { ...headers(connection), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ feature: 'tool.script.rewrite', text: payload.text, model: payload.model, request_id: payload.requestId, entry: 'canvas' }),
+            signal,
+        });
+        if (!response.ok || !response.body) throw new Error(`剧本改写请求失败（${response.status}）`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        try {
+            for (;;) {
+                const chunk = await reader.read();
+                buffer = (buffer + decoder.decode(chunk.value, { stream: !chunk.done })).replace(/\r\n/g, '\n');
+                let boundary = buffer.indexOf('\n\n');
+                while (boundary >= 0) {
+                    const block = buffer.slice(0, boundary);
+                    buffer = buffer.slice(boundary + 2);
+                    let event = '';
+                    const data: string[] = [];
+                    for (const line of block.split('\n')) {
+                        if (line.startsWith('event:')) event = line.slice(6).trim();
+                        else if (line.startsWith('data:')) data.push(line.slice(5).trim());
+                    }
+                    if (data.length && (event === 'error' || event === 'done')) {
+                        const value = JSON.parse(data.join('\n'));
+                        if (event === 'error') throw new Error(String(value.message || '剧本改写失败'));
+                        if (!String(value.text || '').trim()) throw new Error('服务未返回完整剧本');
+                        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ds-text-billing-changed'));
+                        return { id: payload.requestId, model: String(value.model || ''), outputText: String(value.text) };
+                    }
+                    boundary = buffer.indexOf('\n\n');
+                }
+                if (chunk.done) break;
+            }
+            throw new Error('改写连接中断，未收到完成确认，请查看调用历史后重试');
+        } finally {
+            await reader.cancel().catch(() => undefined);
+            reader.releaseLock();
+        }
+    },
+
     async estimate(connection: UserAssetConnection, input: unknown[], model?: string, maxOutputTokens?: number) {
         const response = await axios.post<Envelope<Record<string, unknown>>>(
             `${base(connection)}/responses/estimate`,
